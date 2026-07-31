@@ -15,6 +15,11 @@ E_FLASH = "5823347218056221496"
 E_STAR  = "5463297803235113601"
 E_GEM   = "5427168083074628963"
 E_QMARK = "5436113877181941026"
+E_ROBOT = "5287684458881756303"
+E_GREEN = "5188234920639632382"
+E_DOWN  = "5447183459602669338"
+E_SHAKE = "5357122032674818130"
+E_GEAR  = "5341715473882955310"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -24,6 +29,10 @@ T_POINT = pe(E_POINT, "\U0001F449")
 T_MONEY = pe(E_MONEY, "\U0001F4B0")
 T_STAR  = pe(E_STAR, "\u2728")
 T_GEM   = pe(E_GEM, "\U0001F48E")
+T_ROBOT = pe(E_ROBOT, "\U0001F916")
+T_GREEN = pe(E_GREEN, "\U0001F7E2")
+T_DOWN  = pe(E_DOWN, "\U0001F53D")
+T_SHAKE = pe(E_SHAKE, "\U0001F91D")
 
 SCREENS = {
     "gate": {
@@ -45,8 +54,8 @@ SCREENS = {
     },
     "tech": {
         "photo": "tech",
-        "text": "<b>The technology</b>\n\n\U0001F50D Smart analysis across multiple assets\n\U0001F4CA Real-time market data\n\U0001F512 Secure and reliable\n\u26A1 Available 24/7 on any device",
-        "kb": [[("See the results", "cb:gallery:0", "primary")],
+        "text": T_ROBOT + " <b>It is simple:</b>\n\n1 Select an asset\n2 Choose the expiration time\n3 Get a signal: BUY " + T_GREEN + " / SELL " + T_DOWN + "\n4 Open a trade\n5 Track the result\n\n" + T_SHAKE + " I take care of the market analysis for you - all you have to do is act.",
+        "kb": [[("See the results", "cb:gallery:0", "primary", E_GEAR)],
                [("Back", "cb:go:how", None, E_BACK)]],
     },
     "final": {
