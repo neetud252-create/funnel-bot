@@ -54,6 +54,24 @@ async def is_subscribed(bot, tg_id):
         logging.warning("sub check failed: %s", e)
         return False
 
+async def wipe(bot, tg_id):
+    user = await db.get_user(tg_id)
+    if not user:
+        return
+    if user["ui_msg_id"]:
+        try:
+            await bot.delete_message(chat_id=tg_id, message_id=user["ui_msg_id"])
+        except Exception:
+            pass
+    ids = user["album_ids"]
+    if ids:
+        for mid in str(ids).split(","):
+            try:
+                await bot.delete_message(chat_id=tg_id, message_id=int(mid))
+            except Exception:
+                pass
+        await db.set_album(tg_id, None)
+
 async def render(bot, tg_id, photo_key, text, kb_rows):
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
