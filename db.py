@@ -37,4 +37,4 @@ async def get_user(tg_id: int):
 
 async def set_ui_msg(tg_id: int, msg_id: int):
     async with pool.acquire() as c:
-        await c.execute("UPDATE users SET ui_msg_id=$1 WHERE tg_id=$2", msg_id, tg_id))
+        await c.execute("UPDATE users SET ui_msg_id=$1 WHERE tg_id=$2", msg_id, tg_id)
