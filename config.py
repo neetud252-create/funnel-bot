@@ -84,36 +84,11 @@ SCREENS = {
                [("Back", "cb:go:tech", None, E_BACK)]],
     },
     "results": {
-        "photo": "final",
+        "photo": "welcome",
         "text": "\U0001F465 <b>Real feedback from active Go+ traders.</b>"
                 "\n\n\U0001F446 The screenshots above are a small sample."
                 "\n\n\U0001F49D More feedback on our channel:\n" + CHANNEL_URL,
-        "kb": [[("Get access to Go+", "cb:go:final", "success", E_POINT)],
-               [("Open Telegram channel", "url:" + CHANNEL_URL, "primary")]],
-    },
-    "final": {
-        "photo": "final",
-        "text": "<b>Ready to start?</b>\n\nRegister below, then send me your account ID to unlock access.",
-        "kb": [[("Register & Get Access", "cb:register", "success", E_POINT)],
-               [("How to register", "cb:go:howto", "primary", E_INFO)],
-               [("Support", "cb:go:support")]],
-    },
-    "howto": {
-        "photo": "register",
-        "text": T_INFO + " <b>How to register</b>\n\n1. Open the registration link\n2. Create a <b>new</b> account\n3. Copy your account ID\n4. Send it to me here\n\n\u26A0\uFE0F Numbers only - no extra symbols.",
-        "kb": [[("Open registration", "url:" + REF_LINK, "success", E_POINT)],
-               [("Back", "cb:go:final", None, E_BACK)]],
-    },
-    "support": {
-        "photo": "support",
-        "text": "\U0001F3A7 <b>Support</b>\n\nNeed help? Message " + SUPPORT,
-        "kb": [[("Back", "cb:go:final", None, E_BACK)]],
-    },
-    "register": {
-        "photo": "register",
-        "text": "\U0001F510 Register through the link below, then <b>send me your account ID</b>.\n\n\u26A0\uFE0F Your ID must contain numbers only.\nExample: <code>123456789</code>",
-        "kb": [[("Register & Get Access", "url:" + REF_LINK, "success", E_POINT)],
-               [("Back", "cb:go:final", None, E_BACK)]],
+        "kb": [[("Open Telegram channel", "url:" + CHANNEL_URL, "primary")]],
     },
 }
 
