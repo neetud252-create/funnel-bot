@@ -20,6 +20,12 @@ E_GREEN = "5188234920639632382"
 E_DOWN  = "5447183459602669338"
 E_SHAKE = "5357122032674818130"
 E_GEAR  = "5341715473882955310"
+E_N1    = "5778373820930858379"
+E_N2    = "5778382698628256004"
+E_N3    = "5778338052443213984"
+E_N4    = "5778346006722646362"
+E_N5    = "5778205144680239810"
+E_CLOCK = "5258095024725321202"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -33,6 +39,12 @@ T_ROBOT = pe(E_ROBOT, "\U0001F916")
 T_GREEN = pe(E_GREEN, "\U0001F7E2")
 T_DOWN  = pe(E_DOWN, "\U0001F53D")
 T_SHAKE = pe(E_SHAKE, "\U0001F91D")
+T_N1    = pe(E_N1, "1\uFE0F\u20E3")
+T_N2    = pe(E_N2, "2\uFE0F\u20E3")
+T_N3    = pe(E_N3, "3\uFE0F\u20E3")
+T_N4    = pe(E_N4, "4\uFE0F\u20E3")
+T_N5    = pe(E_N5, "5\uFE0F\u20E3")
+T_CLOCK = pe(E_CLOCK, "\u23F0")
 
 SCREENS = {
     "gate": {
@@ -54,8 +66,8 @@ SCREENS = {
     },
     "tech": {
         "photo": "tech",
-        "text": T_ROBOT + " <b>It is simple:</b>\n\n1 Select an asset\n2 Choose the expiration time\n3 Get a signal: BUY " + T_GREEN + " / SELL " + T_DOWN + "\n4 Open a trade\n5 Track the result\n\n" + T_SHAKE + " I take care of the market analysis for you - all you have to do is act.",
-        "kb": [[("See the results", "cb:gallery:0", "primary", E_GEAR)],
+        "text": T_ROBOT + " <b>It is simple:</b>\n\n" + T_N1 + " Select an asset\n" + T_N2 + " Choose the expiration time\n" + T_N3 + " Get a signal: BUY " + T_GREEN + " / SELL " + T_DOWN + "\n" + T_N4 + " " + T_CLOCK + " Open a trade\n" + T_N5 + " Track the result\n\n" + T_SHAKE + " I take care of the market analysis for you - all you have to do is act.",
+        "kb": [[("See the technology", "cb:gallery:0", "primary", E_GEAR)],
                [("Back", "cb:go:how", None, E_BACK)]],
     },
     "final": {
