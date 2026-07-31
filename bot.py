@@ -85,6 +85,21 @@ async def check_sub(cb: CallbackQuery, bot: Bot):
     else:
         await cb.answer("You have not joined the channel yet. Subscribe first.", show_alert=True)
 
+@dp.callback_query(F.data == "results")
+async def results(cb: CallbackQuery, bot: Bot):
+    await cb.answer()
+    tg_id = cb.from_user.id
+    await wipe(bot, tg_id)
+    media = [InputMediaPhoto(media=photo_for(k)) for k in config.REVIEWS]
+    msgs = await bot.send_media_group(tg_id, media)
+    for k, msg in zip(config.REVIEWS, msgs):
+        remember(k, msg)
+    await db.set_album(tg_id, ",".join(str(x.message_id) for x in msgs))
+    s = config.SCREENS["results"]
+    m = await bot.send_message(tg_id, s["text"], parse_mode="HTML",
+                               reply_markup=build_kb(s["kb"]))
+    await db.set_ui_msg(tg_id, m.message_id)
+
 @dp.callback_query(F.data.startswith("go:"))
 async def nav(cb: CallbackQuery, bot: Bot):
     await cb.answer()
