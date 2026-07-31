@@ -11,6 +11,7 @@ E_INFO  = "5334544901428229844"
 E_POINT = "5415758949129404605"
 E_BACK  = "5305522282695768654"
 E_MONEY = "5224257782013769471"
+E_FLASH = "5823347218056221496"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -29,7 +30,7 @@ SCREENS = {
     "welcome": {
         "photo": "welcome",
         "text": "\U0001F590\uFE0F <b>Hello! I am Go+, your personal trading bot.</b>\n\n" + T_MONEY + " I help you approach trading with clear, data-driven insights - without stress and without complex analysis.",
-        "kb": [[("Start", "cb:go:how", "success", E_MONEY)]],
+        "kb": [[("Start", "cb:go:how", "success", E_FLASH)]],
     },
     "how": {
         "photo": "how",
