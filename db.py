@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_checked TIMESTAMPTZ,
     created_at   TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
 """
 
 async def connect():
@@ -38,3 +39,6 @@ async def get_user(tg_id: int):
 async def set_ui_msg(tg_id: int, msg_id: int):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET ui_msg_id=$1 WHERE tg_id=$2", msg_id, tg_id)
+async def set_album(tg_id, ids):
+    async with pool.acquire() as c:
+        await c.execute("UPDATE users SET album_ids=$1 WHERE tg_id=$2", ids, tg_id)
