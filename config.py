@@ -80,7 +80,7 @@ SCREENS = {
     "ai": {
         "photo": "ai",
         "text": T_GEAR + "<b>I am powered by advanced AI,</b>\nwhich processes huge amounts of data in seconds.\n\n" + T_CHART + " <b>I analyze charts using hundreds of indicators, price patterns, and technical analysis tools.</b>\n\n" + T_LENS + " <b>I detect patterns that humans often miss.</b>\n\n" + T_BOLT + " <b>Every signal I generate is based on precise calculations - not guesswork.</b>",
-        "kb": [[("See real results", "cb:gallery:0", "primary")],
+        "kb": [[("See real results", "cb:results", "primary")],
                [("Back", "cb:go:tech", None, E_BACK)]],
     },
     "final": {
