@@ -22,7 +22,7 @@ T_MONEY = pe(E_MONEY, "\U0001F4B0")
 
 SCREENS = {
     "gate": {
-        "photo": "welcome",
+        "photo": "gate",
         "text": "To continue, subscribe to the best Telegram channel about trading:\n\n" + T_POINT + " " + CHANNEL_URL + "\n\n\U0001F464 Once subscribed, click the \u201cCheck Subscription\u201d button below \U0001F447",
         "kb": [[("Subscribe to Channel", "url:" + CHANNEL_URL, "primary", E_POINT)],
                [("Check Subscription", "cb:check_sub", "success", E_INFO)]],
@@ -45,7 +45,7 @@ SCREENS = {
                [("Back", "cb:go:how", None, E_BACK)]],
     },
     "final": {
-        "photo": "welcome",
+        "photo": "final",
         "text": "<b>Ready to start?</b>\n\nRegister below, then send me your account ID to unlock access.",
         "kb": [[("Register & Get Access", "cb:register", "success", E_POINT)],
                [("How to register", "cb:go:howto", "primary", E_INFO)],
@@ -58,7 +58,7 @@ SCREENS = {
                [("Back", "cb:go:final", None, E_BACK)]],
     },
     "support": {
-        "photo": "welcome",
+        "photo": "support",
         "text": "\U0001F3A7 <b>Support</b>\n\nNeed help? Message " + SUPPORT,
         "kb": [[("Back", "cb:go:final", None, E_BACK)]],
     },
