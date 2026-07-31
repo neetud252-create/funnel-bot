@@ -94,7 +94,6 @@ async def results(cb: CallbackQuery, bot: Bot):
     msgs = await bot.send_media_group(tg_id, media)
     for k, msg in zip(config.REVIEWS, msgs):
         remember(k, msg)
-    await db.set_album(tg_id, ",".join(str(x.message_id) for x in msgs))
     s = config.SCREENS["results"]
     m = await bot.send_message(tg_id, s["text"], parse_mode="HTML",
                                reply_markup=build_kb(s["kb"]))
