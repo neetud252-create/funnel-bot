@@ -82,11 +82,9 @@ SCREENS = {
     },
     "results": {
         "photo": "welcome",
-        "text": "\U0001F465 <b>Real feedback from active Go+ traders.</b>"
-                "\n\n\U0001F446 The screenshots above are a small sample."
-                "\n\n\U0001F49D More feedback on our channel:\n" + CHANNEL_URL,
+        "text": "<b>Real feedback from active Go+ traders.</b>\n\n" + pe("5370740716840425754", "\u261d\ufe0f") + " The screenshots above are just a tiny fraction of the results.\n\n\U0001F49F More feedback is published on our trading channel:\n\n\U0001F449 " + CHANNEL_URL,
         "kb": [[("Open Telegram channel", "url:" + CHANNEL_URL, "primary")]],
     },
 }
 
-REVIEWS = ["reviews1", "reviews2", "reviews3"]
+REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
