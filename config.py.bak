@@ -68,17 +68,20 @@ SCREENS = {
     "how": {
         "photo": "how",
         "text": T_STAR + "<b>Why traders choose Go+:</b>\n\n100+ trading assets\nOTC and exchange trading\n2 trading modes for every style\nInstant chart analysis\nAvailable 24/7 and compatible with any device\n\n" + T_GEM + " <b>You get a tool that is always one step ahead of the market.</b>",
-        "kb": [[("How Does It Work", "cb:go:tech", "primary", E_QMARK)]],
+        "kb": [[("How Does It Work", "cb:go:tech", "primary", E_QMARK)],
+               [("Back", "cb:go:welcome", None, E_BACK)]],
     },
     "tech": {
         "photo": "tech",
         "text": T_ROBOT + " <b>It is simple:</b>\n\n" + T_N1 + " Select an asset\n" + T_N2 + " Choose the expiration time\n" + T_N3 + " Get a signal: BUY " + T_GREEN + " / SELL " + T_DOWN + "\n" + T_N4 + " " + T_CLOCK + " Open a trade\n" + T_N5 + " Track the result\n\n" + T_SHAKE + " I take care of the market analysis for you - all you have to do is act.",
-        "kb": [[("See the technology", "cb:go:ai", "primary", E_GEAR)]],
+        "kb": [[("See the technology", "cb:go:ai", "primary", E_GEAR)],
+               [("Back", "cb:go:how", None, E_BACK)]],
     },
     "ai": {
         "photo": "ai",
         "text": T_GEAR + "<b>I am powered by advanced AI,</b>\nwhich processes huge amounts of data in seconds.\n\n" + T_CHART + " <b>I analyze charts using hundreds of indicators, price patterns, and technical analysis tools.</b>\n\n" + T_LENS + " <b>I detect patterns that humans often miss.</b>\n\n" + T_BOLT + " <b>Every signal I generate is based on precise calculations - not guesswork.</b>",
-        "kb": [[("See real results", "cb:results", "primary")]],
+        "kb": [[("See real results", "cb:results", "primary")],
+               [("Back", "cb:go:tech", None, E_BACK)]],
     },
     "results": {
         "photo": "welcome",
