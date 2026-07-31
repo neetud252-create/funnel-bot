@@ -2,8 +2,7 @@ import asyncio, os, logging
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
-                           InlineKeyboardButton, InputMediaPhoto, FSInputFile)
-from aiogram.exceptions import TelegramBadRequest
+                           InlineKeyboardButton, FSInputFile)
 import db, config
 
 logging.basicConfig(level=logging.INFO)
@@ -49,16 +48,9 @@ async def render(bot, tg_id, photo_key, text, kb_rows):
     msg_id = user["ui_msg_id"] if user else None
     if msg_id:
         try:
-            res = await bot.edit_message_media(
-                chat_id=tg_id, message_id=msg_id,
-                media=InputMediaPhoto(media=photo_for(photo_key),
-                                      caption=text, parse_mode="HTML"),
-                reply_markup=kb)
-            remember(photo_key, res)
-            return
-        except TelegramBadRequest as e:
-            if "message is not modified" in str(e):
-                return
+            await bot.delete_message(chat_id=tg_id, message_id=msg_id)
+        except Exception:
+            pass
     m = await bot.send_photo(tg_id, photo_for(photo_key), caption=text,
                              parse_mode="HTML", reply_markup=kb)
     remember(photo_key, m)
@@ -71,6 +63,10 @@ async def show(bot, tg_id, key):
 @dp.message(CommandStart())
 async def start(m: Message, bot: Bot):
     await db.touch_user(m.from_user.id, m.from_user.username)
+    try:
+        await m.delete()
+    except Exception:
+        pass
     await show(bot, m.from_user.id, "welcome")
 
 @dp.callback_query(F.data.startswith("go:"))
