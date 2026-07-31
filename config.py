@@ -26,6 +26,9 @@ E_N3    = "5778338052443213984"
 E_N4    = "5778346006722646362"
 E_N5    = "5778205144680239810"
 E_CLOCK = "5258095024725321202"
+E_CHART = "5231200819986047254"
+E_LENS  = "5348544647977254780"
+E_BOLT  = "5895638385300606573"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -39,12 +42,16 @@ T_ROBOT = pe(E_ROBOT, "\U0001F916")
 T_GREEN = pe(E_GREEN, "\U0001F7E2")
 T_DOWN  = pe(E_DOWN, "\U0001F53D")
 T_SHAKE = pe(E_SHAKE, "\U0001F91D")
+T_GEAR  = pe(E_GEAR, "\u2699\uFE0F")
 T_N1    = pe(E_N1, "1\uFE0F\u20E3")
 T_N2    = pe(E_N2, "2\uFE0F\u20E3")
 T_N3    = pe(E_N3, "3\uFE0F\u20E3")
 T_N4    = pe(E_N4, "4\uFE0F\u20E3")
 T_N5    = pe(E_N5, "5\uFE0F\u20E3")
 T_CLOCK = pe(E_CLOCK, "\u23F0")
+T_CHART = pe(E_CHART, "\U0001F4CA")
+T_LENS  = pe(E_LENS, "\U0001F50D")
+T_BOLT  = pe(E_BOLT, "\u26A1")
 
 SCREENS = {
     "gate": {
@@ -67,8 +74,14 @@ SCREENS = {
     "tech": {
         "photo": "tech",
         "text": T_ROBOT + " <b>It is simple:</b>\n\n" + T_N1 + " Select an asset\n" + T_N2 + " Choose the expiration time\n" + T_N3 + " Get a signal: BUY " + T_GREEN + " / SELL " + T_DOWN + "\n" + T_N4 + " " + T_CLOCK + " Open a trade\n" + T_N5 + " Track the result\n\n" + T_SHAKE + " I take care of the market analysis for you - all you have to do is act.",
-        "kb": [[("See the technology", "cb:gallery:0", "primary", E_GEAR)],
+        "kb": [[("See the technology", "cb:go:ai", "primary", E_GEAR)],
                [("Back", "cb:go:how", None, E_BACK)]],
+    },
+    "ai": {
+        "photo": "ai",
+        "text": T_GEAR + "<b>I am powered by advanced AI,</b>\nwhich processes huge amounts of data in seconds.\n\n" + T_CHART + " <b>I analyze charts using hundreds of indicators, price patterns, and technical analysis tools.</b>\n\n" + T_LENS + " <b>I detect patterns that humans often miss.</b>\n\n" + T_BOLT + " <b>Every signal I generate is based on precise calculations - not guesswork.</b>",
+        "kb": [[("See real results", "cb:gallery:0", "primary")],
+               [("Back", "cb:go:tech", None, E_BACK)]],
     },
     "final": {
         "photo": "final",
