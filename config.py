@@ -83,9 +83,14 @@ SCREENS = {
     "results": {
         "photo": "welcome",
         "text": "<b>Real feedback from active Go+ traders.</b>\n\n" + pe("5370740716840425754", "\u261d\ufe0f") + " The screenshots above are just a tiny fraction of the results.\n\n\U0001F49F More feedback is published on our trading channel:\n\n\U0001F449 " + CHANNEL_URL,
-        # TODO: change "cb:noop" back to "url:" + REF_LINK once the real referral link is set
-        "kb": [[("Get access to Go+", "cb:noop", "success", "5307843983102204243")],
+        "kb": [[("Get access to Go+", "cb:go:access", "success", "5307843983102204243")],
                [("Open Telegram channel", "url:" + CHANNEL_URL, "primary", "5220069871072583573")]],
+    },
+    "access": {
+        "video": "access",
+        "text": pe("5276032951342088188", "\U0001F4A5") + " <b>This is where it starts.</b>\n\nNo courses, no complicated strategies. Go Plus watches the market and sends you clear signals.\n\n" + pe("5287684458881756303", "\U0001F916") + " <b>Go Plus tells you what it sees \U00002014 you decide what to do.</b>\n\n" + pe("5244837092042750681", "\U0001F4C8") + " <b>Simple as that.</b>\n\n" + pe("5352825278672412291", "\U00002705") + " <b>Activate the bot now and see the signals for yourself</b> \U0001F447",
+        # TODO: "Activate Bot" is inert (cb:noop) for now; wire to the register flow later
+        "kb": [[("Activate Bot", "cb:noop", "success", "6280525956771745921")]],
     },
 }
 

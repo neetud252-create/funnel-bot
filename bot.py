@@ -11,14 +11,25 @@ dp = Dispatcher()
 
 OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
+_video_cache = {}
 
 def photo_for(key):
     return _photo_cache.get(key) or FSInputFile("assets/" + key + ".jpg")
+
+def video_for(key):
+    return _video_cache.get(key) or FSInputFile("assets/" + key + ".mp4")
 
 def remember(key, msg):
     try:
         if msg and getattr(msg, "photo", None):
             _photo_cache[key] = msg.photo[-1].file_id
+    except Exception:
+        pass
+
+def remember_video(key, msg):
+    try:
+        if msg and getattr(msg, "video", None):
+            _video_cache[key] = msg.video.file_id
     except Exception:
         pass
 
@@ -72,7 +83,7 @@ async def wipe(bot, tg_id):
                 pass
         await db.set_album(tg_id, None)
 
-async def render(bot, tg_id, photo_key, text, kb_rows):
+async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
     msg_id = user["ui_msg_id"] if user else None
@@ -81,14 +92,22 @@ async def render(bot, tg_id, photo_key, text, kb_rows):
             await bot.delete_message(chat_id=tg_id, message_id=msg_id)
         except Exception as e:
             logging.warning("delete screen failed: %s", e)
-    m = await bot.send_photo(tg_id, photo_for(photo_key), caption=text,
-                             parse_mode="HTML", reply_markup=kb)
-    remember(photo_key, m)
+    if is_video:
+        m = await bot.send_video(tg_id, video_for(media_key), caption=text,
+                                 parse_mode="HTML", reply_markup=kb)
+        remember_video(media_key, m)
+    else:
+        m = await bot.send_photo(tg_id, photo_for(media_key), caption=text,
+                                 parse_mode="HTML", reply_markup=kb)
+        remember(media_key, m)
     await db.set_ui_msg(tg_id, m.message_id)
 
 async def show(bot, tg_id, key):
     s = config.SCREENS[key]
-    await render(bot, tg_id, s["photo"], s["text"], s["kb"])
+    if "video" in s:
+        await render(bot, tg_id, s["video"], s["text"], s["kb"], is_video=True)
+    else:
+        await render(bot, tg_id, s["photo"], s["text"], s["kb"])
 
 @dp.message(CommandStart())
 async def start(m: Message, bot: Bot):
