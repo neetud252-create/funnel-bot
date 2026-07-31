@@ -3,11 +3,13 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, FSInputFile)
+from aiogram.exceptions import TelegramBadRequest
 import db, config
 
 logging.basicConfig(level=logging.INFO)
 dp = Dispatcher()
 
+OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
 
 def photo_for(key):
@@ -42,6 +44,16 @@ def build_kb(rows):
         kb.append(line)
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
+async def is_subscribed(bot, tg_id):
+    try:
+        m = await bot.get_chat_member(config.CHANNEL_ID, tg_id)
+        if m.status == "restricted":
+            return bool(getattr(m, "is_member", False))
+        return m.status in OK_STATUS
+    except TelegramBadRequest as e:
+        logging.warning("sub check failed: %s", e)
+        return False
+
 async def render(bot, tg_id, photo_key, text, kb_rows):
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
@@ -63,7 +75,15 @@ async def show(bot, tg_id, key):
 @dp.message(CommandStart())
 async def start(m: Message, bot: Bot):
     await db.touch_user(m.from_user.id, m.from_user.username)
-    await show(bot, m.from_user.id, "welcome")
+    await show(bot, m.from_user.id, "gate")
+
+@dp.callback_query(F.data == "check_sub")
+async def check_sub(cb: CallbackQuery, bot: Bot):
+    if await is_subscribed(bot, cb.from_user.id):
+        await cb.answer("Verified")
+        await show(bot, cb.from_user.id, "welcome")
+    else:
+        await cb.answer("You have not joined the channel yet. Subscribe first.", show_alert=True)
 
 @dp.callback_query(F.data.startswith("go:"))
 async def nav(cb: CallbackQuery, bot: Bot):
