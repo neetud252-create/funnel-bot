@@ -25,11 +25,21 @@ def build_kb(rows):
     kb = []
     for row in rows:
         line = []
-        for label, action in row:
+        for item in row:
+            label = item[0]
+            action = item[1]
+            style = item[2] if len(item) > 2 else None
+            icon = item[3] if len(item) > 3 else None
+            kw = {"text": label}
+            if style:
+                kw["style"] = style
+            if icon:
+                kw["icon_custom_emoji_id"] = icon
             if action.startswith("url:"):
-                line.append(InlineKeyboardButton(text=label, url=action[4:]))
+                kw["url"] = action[4:]
             else:
-                line.append(InlineKeyboardButton(text=label, callback_data=action[3:]))
+                kw["callback_data"] = action[3:]
+            line.append(InlineKeyboardButton(**kw))
         kb.append(line)
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -75,7 +85,7 @@ async def gallery(cb: CallbackQuery, bot: Bot):
     kb = [[("\u25C0\uFE0F", "cb:gallery:" + str(i-1)),
            (str(i+1) + "/" + str(len(config.REVIEWS)), "cb:noop"),
            ("\u25B6\uFE0F", "cb:gallery:" + str(i+1))],
-          [("\u2705 Continue", "cb:go:final")]]
+          [("Continue", "cb:go:final", "success")]]
     await render(bot, cb.from_user.id, config.REVIEWS[i], "<b>Real results</b>", kb)
 
 @dp.callback_query(F.data == "noop")
