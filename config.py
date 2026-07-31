@@ -83,7 +83,8 @@ SCREENS = {
     "results": {
         "photo": "welcome",
         "text": "<b>Real feedback from active Go+ traders.</b>\n\n" + pe("5370740716840425754", "\u261d\ufe0f") + " The screenshots above are just a tiny fraction of the results.\n\n\U0001F49F More feedback is published on our trading channel:\n\n\U0001F449 " + CHANNEL_URL,
-        "kb": [[("Get access to Go+", "url:" + REF_LINK, "success", "5307843983102204243")],
+        # TODO: change "cb:noop" back to "url:" + REF_LINK once the real referral link is set
+        "kb": [[("Get access to Go+", "cb:noop", "success", "5307843983102204243")],
                [("Open Telegram channel", "url:" + CHANNEL_URL, "primary", "5220069871072583573")]],
     },
 }
