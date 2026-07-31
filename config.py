@@ -12,6 +12,9 @@ E_POINT = "5415758949129404605"
 E_BACK  = "5305522282695768654"
 E_MONEY = "5224257782013769471"
 E_FLASH = "5823347218056221496"
+E_STAR  = "5463297803235113601"
+E_GEM   = "5427168083074628963"
+E_QMARK = "5436113877181941026"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -19,6 +22,8 @@ def pe(emoji_id, fallback):
 T_INFO  = pe(E_INFO, "\u2139\uFE0F")
 T_POINT = pe(E_POINT, "\U0001F449")
 T_MONEY = pe(E_MONEY, "\U0001F4B0")
+T_STAR  = pe(E_STAR, "\u2728")
+T_GEM   = pe(E_GEM, "\U0001F48E")
 
 SCREENS = {
     "gate": {
@@ -34,8 +39,8 @@ SCREENS = {
     },
     "how": {
         "photo": "how",
-        "text": T_INFO + " <b>How does it work?</b>\n\n1. Connect your account\n2. Get real-time market insights\n3. Act with clear, data-driven signals",
-        "kb": [[("See the technology", "cb:go:tech", "primary")],
+        "text": T_STAR + "<b>Why traders choose Go+:</b>\n\n100+ trading assets\nOTC and exchange trading\n2 trading modes for every style\nInstant chart analysis\nAvailable 24/7 and compatible with any device\n\n" + T_GEM + " <b>You get a tool that is always one step ahead of the market.</b>",
+        "kb": [[("How Does It Work", "cb:go:tech", "primary", E_QMARK)],
                [("Back", "cb:go:welcome", None, E_BACK)]],
     },
     "tech": {
