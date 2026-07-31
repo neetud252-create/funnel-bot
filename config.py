@@ -10,24 +10,26 @@ ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip(
 E_INFO  = "5334544901428229844"
 E_POINT = "5415758949129404605"
 E_BACK  = "5305522282695768654"
+E_MONEY = "5224257782013769471"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
 
 T_INFO  = pe(E_INFO, "\u2139\uFE0F")
 T_POINT = pe(E_POINT, "\U0001F449")
+T_MONEY = pe(E_MONEY, "\U0001F4B0")
 
 SCREENS = {
     "gate": {
         "photo": "welcome",
-        "text": T_INFO + " To continue, subscribe to the best Telegram channel about trading:\n\n" + T_POINT + " " + CHANNEL_URL + "\n\nOnce subscribed, tap Check Subscription below.",
+        "text": "To continue, subscribe to the best Telegram channel about trading:\n\n" + T_POINT + " " + CHANNEL_URL + "\n\n\U0001F464 Once subscribed, click the \u201cCheck Subscription\u201d button below \U0001F447",
         "kb": [[("Subscribe to Channel", "url:" + CHANNEL_URL, "primary", E_POINT)],
-               [("Check Subscription", "cb:check_sub", "success")]],
+               [("Check Subscription", "cb:check_sub", "success", E_INFO)]],
     },
     "welcome": {
         "photo": "welcome",
-        "text": "\U0001F44B <b>Welcome!</b>\n\nI am your personal trading assistant.\nI help you make smarter decisions with clear, simple insights.",
-        "kb": [[("Start", "cb:go:how", "success", E_POINT)]],
+        "text": "\U0001F590\uFE0F <b>Hello! I am Go+, your personal trading bot.</b>\n\n" + T_MONEY + " I help you approach trading with clear, data-driven insights - without stress and without complex analysis.",
+        "kb": [[("Start", "cb:go:how", "success", E_MONEY)]],
     },
     "how": {
         "photo": "how",
