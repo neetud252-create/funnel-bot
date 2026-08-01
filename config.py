@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 
 _ch = os.getenv("CHANNEL_ID", "@apextraderrr")
 CHANNEL_ID  = int(_ch) if _ch.lstrip("-").isdigit() else _ch
@@ -6,6 +7,10 @@ CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/apextraderrr")
 REF_LINK    = os.getenv("REF_LINK", "https://your-referral-link-here")
 SUPPORT     = os.getenv("SUPPORT", "@go_plus_supportbot")
 ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
+
+# Group F verification thresholds.
+MIN_DEPOSIT = Decimal(os.getenv("MIN_DEPOSIT", "50"))
+CAMPAIGN_ID = os.getenv("CAMPAIGN_ID", "969716")
 
 E_INFO  = "5334544901428229844"
 E_POINT = "5415758949129404605"
@@ -111,3 +116,19 @@ REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 
 # Delayed follow-up sent a few seconds after the register screen opens (bot.py).
 REGISTER_NUDGE = pe("5420323339723881652", "\U000026A0\U0000FE0F") + " <b>Don't leave your account half-done.</b>\n\nRegistering takes one minute. Your ID unlocks everything.\n\n" + pe("5188481279963715781", "\U0001F680") + " <b>Finish now \U00002014 send your account ID below.</b>"
+
+# --- Group F verification verdict messages (pe() style, factual, no scarcity) ---
+_MINDEP = str(int(MIN_DEPOSIT)) if MIN_DEPOSIT == MIN_DEPOSIT.to_integral_value() else str(MIN_DEPOSIT)
+
+# Access granted: campaign matches and deposits meet the minimum.
+# TODO(Group F): replace with the final access screen (media + full CTA).
+MSG_VERIFIED = pe("5352825278672412291", "\U00002705") + " <b>Access confirmed.</b>\n\nYour account is verified and linked. You're all set." + " \U0001F680"
+
+# Campaign matches but deposits are below the minimum.
+MSG_NEED_DEPOSIT = T_MONEY + " <b>Almost there.</b>\n\nYour account is registered through our link. To unlock access, top up your balance with <b>$" + _MINDEP + "</b> or more \U00002014 verification then completes automatically."
+
+# Account not found, or registered under a different campaign.
+MSG_WRONG_LINK = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Account not linked to us.</b>\n\nTo get access, your Pocket Option account must be created through our official link. Please register with the button below, then send your new account ID."
+
+# Panel bot didn't answer in time; the retry worker will keep checking.
+MSG_DELAYED = T_CLOCK + " <b>Verification in progress.</b>\n\nWe're checking your account now \U00002014 this can take a little while. You'll be notified here automatically as soon as it's confirmed."

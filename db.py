@@ -89,3 +89,28 @@ async def upsert_trader(trader_id: str, event, amount):
 async def get_trader(trader_id: str):
     async with pool.acquire() as c:
         return await c.fetchrow("SELECT * FROM traders WHERE trader_id=$1", trader_id)
+
+# --- Group F: panel-bot verification ---
+async def cache_trader(trader_id: str, deposit, last_event="panel"):
+    # Snapshot from a panel lookup: set deposit ABSOLUTELY (not additive like
+    # the postback path), since the panel reports the running Sum of deposits.
+    async with pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO traders (trader_id, deposit, last_event, updated_at)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (trader_id) DO UPDATE SET
+                deposit    = EXCLUDED.deposit,
+                last_event = EXCLUDED.last_event,
+                updated_at = now()
+        """, trader_id, deposit, last_event)
+
+async def set_verified(tg_id: int, deposit):
+    async with pool.acquire() as c:
+        await c.execute(
+            "UPDATE users SET verified=TRUE, deposit=$2, last_checked=now() WHERE tg_id=$1",
+            tg_id, deposit)
+
+async def unverified_with_uid():
+    async with pool.acquire() as c:
+        return await c.fetch(
+            "SELECT tg_id, uid FROM users WHERE uid IS NOT NULL AND verified=FALSE")

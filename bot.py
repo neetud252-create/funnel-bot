@@ -1,4 +1,5 @@
 import asyncio, os, logging, re
+from decimal import Decimal
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -7,7 +8,7 @@ from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, FSInputFile, InputMediaPhoto)
 from aiogram.exceptions import TelegramBadRequest
 import uvicorn
-import db, config
+import db, config, panelbot
 from server import app
 
 logging.basicConfig(level=logging.INFO)
@@ -195,6 +196,42 @@ async def gallery(cb: CallbackQuery, bot: Bot):
 async def noop(cb: CallbackQuery):
     await cb.answer()
 
+def _register_btn():
+    return [[("\U0001F511 Register & Get Access", "url:" + config.REF_LINK, "success",
+              "5307843983102204243")]]
+
+async def _replace(bot, tg_id, old_msg_id, text, kb_rows=None):
+    # Swap the transient "checking" message for the verdict; track as ui_msg.
+    try:
+        await bot.delete_message(chat_id=tg_id, message_id=old_msg_id)
+    except Exception:
+        pass
+    markup = build_kb(kb_rows) if kb_rows else None
+    m = await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=markup)
+    await db.set_ui_msg(tg_id, m.message_id)
+
+async def _run_verification(bot, tg_id, uid):
+    # Immediate ack while we query the panel (can take up to ~20s), then verdict.
+    ack = await bot.send_message(
+        tg_id, "\U000023F3 <b>Checking account</b> <code>" + uid + "</code>\U00002026",
+        parse_mode="HTML")
+    try:
+        info = await panelbot.lookup_trader(uid)
+    except panelbot.PanelUnavailable:
+        # Panel silent/disabled: defer to the retry worker, tell the user.
+        await _replace(bot, tg_id, ack.message_id, config.MSG_DELAYED)
+        return
+    if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
+        dep = info.get("sum_deposits") or Decimal(0)
+        if dep >= config.MIN_DEPOSIT:
+            await db.set_verified(tg_id, dep)
+            await _replace(bot, tg_id, ack.message_id, config.MSG_VERIFIED)
+        else:
+            await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT, _register_btn())
+    else:
+        # Not found, or a different campaign.
+        await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK, _register_btn())
+
 @dp.message(Reg.waiting_uid)
 async def capture_uid(m: Message, bot: Bot, state: FSMContext):
     tg_id = m.from_user.id
@@ -212,28 +249,48 @@ async def capture_uid(m: Message, bot: Bot, state: FSMContext):
         await bot.send_message(tg_id, "\U000026A0\U0000FE0F That account ID is already registered to another "
                                "user. Please double-check and send your own ID.", parse_mode="HTML")
         return
-    # TODO(Group C): create/link the traders row and start postback verification here.
     await db.save_uid_only(tg_id, uid)
     await state.clear()
     await wipe(bot, tg_id)
-    support_url = "https://t.me/" + config.SUPPORT.lstrip("@")
-    m2 = await bot.send_message(
-        tg_id,
-        "\U00002705 Got it \U00002014 your account ID <code>" + uid + "</code> is being verified. "
-        "You'll be notified here once it's confirmed.",
-        parse_mode="HTML",
-        reply_markup=build_kb([[("\U0001F64B Support", "url:" + support_url)]]))
-    await db.set_ui_msg(tg_id, m2.message_id)
+    await _run_verification(bot, tg_id, uid)
+
+async def retry_worker(bot):
+    # Every 30 min, re-check users who have a uid but aren't verified yet.
+    # On success, proactively send the confirmation. If the panel is down this
+    # cycle, stop early and try again next cycle.
+    while True:
+        try:
+            await asyncio.sleep(1800)
+            rows = await db.unverified_with_uid()
+            for r in rows:
+                try:
+                    info = await panelbot.lookup_trader(r["uid"])
+                except panelbot.PanelUnavailable:
+                    break
+                if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
+                    dep = info.get("sum_deposits") or Decimal(0)
+                    if dep >= config.MIN_DEPOSIT:
+                        await db.set_verified(r["tg_id"], dep)
+                        try:
+                            await bot.send_message(r["tg_id"], config.MSG_VERIFIED, parse_mode="HTML")
+                        except Exception:
+                            logging.exception("retry_worker: notify failed for %s", r["tg_id"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("retry_worker cycle failed")
 
 async def main():
     await db.connect()
     bot = Bot(os.environ["BOT_TOKEN"])
     await bot.delete_webhook(drop_pending_updates=True)
+    # Connect the panel-bot verification session (degrades gracefully if unset).
+    await panelbot.start()
     # Railway routes the custom domain to $PORT (8080). Run the postback API
-    # (uvicorn) and long polling side by side.
+    # (uvicorn), long polling, and the retry worker side by side.
     port = int(os.environ.get("PORT", 8000))
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
-    await asyncio.gather(server.serve(), dp.start_polling(bot))
+    await asyncio.gather(server.serve(), dp.start_polling(bot), retry_worker(bot))
 
 asyncio.run(main())
