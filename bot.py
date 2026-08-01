@@ -19,6 +19,7 @@ UID_RE = re.compile(r"\d{5,15}")
 OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
 _video_cache = {}
+_nudge_tasks = {}
 
 def photo_for(key):
     return _photo_cache.get(key) or FSInputFile("assets/" + key + ".jpg")
@@ -144,14 +145,37 @@ async def results(cb: CallbackQuery, bot: Bot):
                                reply_markup=build_kb(s["kb"]))
     await db.set_ui_msg(tg_id, m.message_id)
 
+async def _register_nudge(bot, tg_id, state):
+    # Fire-and-forget follow-up ~4s after the register screen opens. Only nudges
+    # if the user is still parked on it (skips if they sent an ID or navigated
+    # away). Not recorded as ui_msg_id, so it doesn't interfere with wipe().
+    try:
+        await asyncio.sleep(4)
+        if await state.get_state() != Reg.waiting_uid.state:
+            return
+        await bot.send_message(tg_id, config.REGISTER_NUDGE, parse_mode="HTML")
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logging.warning("register nudge failed", exc_info=True)
+    finally:
+        if _nudge_tasks.get(tg_id) is asyncio.current_task():
+            _nudge_tasks.pop(tg_id, None)
+
 @dp.callback_query(F.data.startswith("go:"))
 async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
     await cb.answer()
     key = cb.data.split(":", 1)[1]
     await show(bot, cb.from_user.id, key)
+    tg_id = cb.from_user.id
     # Arm UID capture only while the register screen is on-screen.
     if key == "register":
         await state.set_state(Reg.waiting_uid)
+        # Cancel any pending nudge first so re-opening quickly doesn't stack them.
+        old = _nudge_tasks.pop(tg_id, None)
+        if old:
+            old.cancel()
+        _nudge_tasks[tg_id] = asyncio.create_task(_register_nudge(bot, tg_id, state))
     else:
         await state.clear()
 

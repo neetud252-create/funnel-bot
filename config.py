@@ -108,3 +108,6 @@ SCREENS = {
 }
 
 REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
+
+# Delayed follow-up sent a few seconds after the register screen opens (bot.py).
+REGISTER_NUDGE = pe("5420323339723881652", "\U000026A0\U0000FE0F") + " <b>Don't leave your account half-done.</b>\n\nRegistering takes one minute. Your ID unlocks everything.\n\n" + pe("5188481279963715781", "\U0001F680") + " <b>Finish now \U00002014 send your account ID below.</b>"
