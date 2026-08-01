@@ -42,3 +42,14 @@ async def set_ui_msg(tg_id: int, msg_id: int):
 async def set_album(tg_id, ids):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET album_ids=$1 WHERE tg_id=$2", ids, tg_id)
+
+# Interim UID capture. TODO(Group C): move to a dedicated traders table with
+# verification state + postback linkage; users.uid is a stopgap store for now.
+async def uid_owner(uid: str):
+    async with pool.acquire() as c:
+        row = await c.fetchrow("SELECT tg_id FROM users WHERE uid=$1", uid)
+        return row["tg_id"] if row else None
+
+async def save_uid_only(tg_id: int, uid: str):
+    async with pool.acquire() as c:
+        await c.execute("UPDATE users SET uid=$1 WHERE tg_id=$2", uid, tg_id)

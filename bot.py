@@ -1,6 +1,8 @@
-import asyncio, os, logging
+import asyncio, os, logging, re
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, FSInputFile, InputMediaPhoto)
 from aiogram.exceptions import TelegramBadRequest
@@ -8,6 +10,11 @@ import db, config
 
 logging.basicConfig(level=logging.INFO)
 dp = Dispatcher()
+
+class Reg(StatesGroup):
+    waiting_uid = State()
+
+UID_RE = re.compile(r"\d{5,15}")
 
 OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
@@ -110,7 +117,8 @@ async def show(bot, tg_id, key):
         await render(bot, tg_id, s["photo"], s["text"], s["kb"])
 
 @dp.message(CommandStart())
-async def start(m: Message, bot: Bot):
+async def start(m: Message, bot: Bot, state: FSMContext):
+    await state.clear()
     await db.touch_user(m.from_user.id, m.from_user.username)
     await show(bot, m.from_user.id, "gate")
 
@@ -137,9 +145,15 @@ async def results(cb: CallbackQuery, bot: Bot):
     await db.set_ui_msg(tg_id, m.message_id)
 
 @dp.callback_query(F.data.startswith("go:"))
-async def nav(cb: CallbackQuery, bot: Bot):
+async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
     await cb.answer()
-    await show(bot, cb.from_user.id, cb.data.split(":", 1)[1])
+    key = cb.data.split(":", 1)[1]
+    await show(bot, cb.from_user.id, key)
+    # Arm UID capture only while the register screen is on-screen.
+    if key == "register":
+        await state.set_state(Reg.waiting_uid)
+    else:
+        await state.clear()
 
 @dp.callback_query(F.data.startswith("gallery:"))
 async def gallery(cb: CallbackQuery, bot: Bot):
@@ -154,6 +168,36 @@ async def gallery(cb: CallbackQuery, bot: Bot):
 @dp.callback_query(F.data == "noop")
 async def noop(cb: CallbackQuery):
     await cb.answer()
+
+@dp.message(Reg.waiting_uid)
+async def capture_uid(m: Message, bot: Bot, state: FSMContext):
+    tg_id = m.from_user.id
+    uid = (m.text or "").strip()
+    try:
+        await bot.delete_message(chat_id=tg_id, message_id=m.message_id)
+    except Exception:
+        pass
+    if not UID_RE.fullmatch(uid):
+        await bot.send_message(tg_id, "\U00002757 Your account ID must be <b>numbers only</b> "
+                               "(5\U0000201315 digits). Example: <b>123456789</b>", parse_mode="HTML")
+        return
+    owner = await db.uid_owner(uid)
+    if owner is not None and owner != tg_id:
+        await bot.send_message(tg_id, "\U000026A0\U0000FE0F That account ID is already registered to another "
+                               "user. Please double-check and send your own ID.", parse_mode="HTML")
+        return
+    # TODO(Group C): create/link the traders row and start postback verification here.
+    await db.save_uid_only(tg_id, uid)
+    await state.clear()
+    await wipe(bot, tg_id)
+    support_url = "https://t.me/" + config.SUPPORT.lstrip("@")
+    m2 = await bot.send_message(
+        tg_id,
+        "\U00002705 Got it \U00002014 your account ID <code>" + uid + "</code> is being verified. "
+        "You'll be notified here once it's confirmed.",
+        parse_mode="HTML",
+        reply_markup=build_kb([[("\U0001F64B Support", "url:" + support_url)]]))
+    await db.set_ui_msg(tg_id, m2.message_id)
 
 async def main():
     await db.connect()

