@@ -6,7 +6,9 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, FSInputFile, InputMediaPhoto)
 from aiogram.exceptions import TelegramBadRequest
+import uvicorn
 import db, config
+from server import app
 
 logging.basicConfig(level=logging.INFO)
 dp = Dispatcher()
@@ -227,6 +229,11 @@ async def main():
     await db.connect()
     bot = Bot(os.environ["BOT_TOKEN"])
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    # Railway routes the custom domain to $PORT (8080). Run the postback API
+    # (uvicorn) and long polling side by side.
+    port = int(os.environ.get("PORT", 8000))
+    uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(uv_config)
+    await asyncio.gather(server.serve(), dp.start_polling(bot))
 
 asyncio.run(main())

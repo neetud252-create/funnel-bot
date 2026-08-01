@@ -1,4 +1,5 @@
 import os
+import json
 import asyncpg
 
 DB_URL = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
@@ -17,6 +18,19 @@ CREATE TABLE IF NOT EXISTS users (
     created_at   TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
+
+CREATE TABLE IF NOT EXISTS traders (
+    trader_id  TEXT PRIMARY KEY,
+    registered BOOLEAN DEFAULT TRUE,
+    deposit    NUMERIC(12,2) DEFAULT 0,
+    last_event TEXT,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS postbacks (
+    id         BIGSERIAL PRIMARY KEY,
+    raw        JSONB,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
 """
 
 async def connect():
@@ -53,3 +67,25 @@ async def uid_owner(uid: str):
 async def save_uid_only(tg_id: int, uid: str):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET uid=$1 WHERE tg_id=$2", uid, tg_id)
+
+# --- Group C: affiliate postbacks ---
+async def log_postback(raw: dict):
+    async with pool.acquire() as c:
+        await c.execute("INSERT INTO postbacks (raw) VALUES ($1::jsonb)", json.dumps(raw))
+
+async def upsert_trader(trader_id: str, event, amount):
+    # Insert, or add the amount to the existing deposit (registration events
+    # pass amount 0), and refresh last_event/updated_at.
+    async with pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO traders (trader_id, last_event, deposit, updated_at)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (trader_id) DO UPDATE SET
+                deposit    = traders.deposit + EXCLUDED.deposit,
+                last_event = EXCLUDED.last_event,
+                updated_at = now()
+        """, trader_id, event, amount)
+
+async def get_trader(trader_id: str):
+    async with pool.acquire() as c:
+        return await c.fetchrow("SELECT * FROM traders WHERE trader_id=$1", trader_id)
