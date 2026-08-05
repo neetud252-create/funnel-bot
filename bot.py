@@ -194,9 +194,22 @@ async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
     else:
         await state.clear()
 
+# Must stay above menu_action: aiogram matches handlers in definition order and
+# that one swallows every "menu:" callback.
+@dp.callback_query(F.data == "menu:signal")
+async def menu_signal(cb: CallbackQuery, bot: Bot):
+    await cb.answer()
+    await show(bot, cb.from_user.id, "mode")
+
+@dp.callback_query(F.data.startswith("mode:"))
+async def mode_action(cb: CallbackQuery):
+    # TODO: real signal logic for both modes, pending the signal source decision.
+    await cb.answer("Coming soon \U0001F680", show_alert=True)
+
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_action(cb: CallbackQuery):
-    # TODO: real signal delivery + level logic; placeholder popup for now.
+    # TODO: real level logic; placeholder popup for now ("menu:signal" is handled
+    # above and opens the mode screen).
     await cb.answer("Coming soon \U0001F680", show_alert=True)
 
 @dp.callback_query(F.data.startswith("gallery:"))

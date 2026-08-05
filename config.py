@@ -134,6 +134,18 @@ SCREENS = {
                [("\U00002708\U0000FE0F Telegram channel", "url:" + CHANNEL_URL)],
                [("\U000025B6\U0000FE0F YouTube channel", "url:" + YOUTUBE_URL)]],
     },
+    # Trading-mode picker, opened from "Get a signal" on the menu. Both modes are
+    # still placeholders - see mode_action in bot.py.
+    # NOTE: the speech emoji is plain unicode, not pe() - we have no verified
+    # custom emoji ID for it, and an invalid ID makes Telegram reject the whole
+    # message. Swap in pe(E_SPEECH, ...) once a real ID is on hand.
+    "mode": {
+        "photo": "mode",
+        "text": "\U0001F4AC <b>Select trading mode:</b>\n\n" + T_N1 + " <b>Manual</b> \U00002014 you choose asset &amp; time\n" + T_N2 + " <b>Automatic</b> \U00002014 bot chooses everything\n\n" + T_DOWN + " <b>Choose below</b>",
+        "kb": [[("\U0000270B Manual", "cb:mode:manual", "success")],
+               [("\U0001F513 Automatic", "cb:mode:auto", "primary")],
+               [("\U000000AB Back", "cb:go:menu")]],
+    },
     # TODO(Group C): replace stub with the real step-by-step registration guide
     "howto": {
         "photo": "howto",
