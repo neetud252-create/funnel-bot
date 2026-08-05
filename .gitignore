@@ -4,3 +4,8 @@ __pycache__/
 .env
 assets/*.tmp
 *.bak
+# local secrets from gen_session.py - never commit
+session.txt
+s.txt
+*.session
+session_out.txt

@@ -25,6 +25,11 @@ PANEL_BOT = os.getenv("PANEL_BOT", "@affiliatepocketbot")
 
 REPLY_TIMEOUT = 20   # seconds to wait for the panel bot's reply
 SPACING = 2.0        # minimum seconds between consecutive lookups
+# Ceiling on a whole lookup. The conversation timeout above only covers waiting
+# for the reply - resolving the panel entity and acquiring the lock can hang on
+# their own, and a hung holder would block every later lookup forever. wait_for
+# cancels the coroutine, which releases the lock on the way out.
+HARD_TIMEOUT = REPLY_TIMEOUT + 10
 
 _client = None
 _enabled = False
@@ -84,15 +89,22 @@ def _num(s):
         return None
 
 
+def _clean(v):
+    # The panel wraps values in `backticks` / **bold**; strip that off.
+    if v is None:
+        return None
+    return v.strip().strip("`* ").strip()
+
+
 def _field(text, label):
-    # "Label: value" tolerating markdown/bold, colon or dash, to end of line.
+    # Capture the value after "Label:" to end of line, minus markdown wrappers.
     m = re.search(re.escape(label) + r"\s*[:\-]?\s*(.+)", text, re.I)
-    return m.group(1).strip() if m else None
+    return _clean(m.group(1)) if m else None
 
 
 def _amount(text, label):
-    m = re.search(re.escape(label) + r"\s*[:\-]?\s*\$?\s*([0-9][0-9.,]*)", text, re.I)
-    return _num(m.group(1)) if m else None
+    # _num keeps only digits/.,, so $ signs and backticks are tolerated.
+    return _num(_field(text, label))
 
 
 def _parse(text, uid):
@@ -100,8 +112,9 @@ def _parse(text, uid):
         return None
     if re.search(r"not\s*found|no\s*such|no\s*user|no\s*data|unknown\s*(?:user|uid)", text, re.I):
         return None
-    m = re.search(r"Campaign\s*ID\s*[:\-]?\s*(\d+)", text, re.I)
-    campaign_id = m.group(1) if m else None
+    cf = _field(text, "Campaign ID")
+    m = re.search(r"\d+", cf) if cf else None
+    campaign_id = m.group(0) if m else None
     sum_dep = _amount(text, "Sum of deposits")
     # Nothing that identifies a trader record -> treat as not found.
     if campaign_id is None and sum_dep is None and not re.search(r"\bUID\b", text, re.I):
@@ -120,17 +133,10 @@ def _parse(text, uid):
     }
 
 
-async def lookup_trader(uid):
-    """Query the panel bot for `uid`.
-
-    Returns a parsed dict on a found record, or None if the panel says
-    not-found. Raises PanelUnavailable if the panel can't be reached (disabled,
-    timeout, or error) so callers can defer to the retry worker. Serialized with
-    a lock + spacing; caches the snapshot into the traders table.
-    """
+async def _query(uid):
+    """Send "/user {uid}" and return the panel bot's raw reply text. Serialized
+    with a lock + spacing. Always call through lookup_trader's timeout."""
     global _last
-    if not available():
-        raise PanelUnavailable("disabled")
     async with _lock:
         wait = SPACING - (time.monotonic() - _last)
         if wait > 0:
@@ -139,15 +145,35 @@ async def lookup_trader(uid):
             async with _client.conversation(PANEL_BOT, timeout=REPLY_TIMEOUT) as conv:
                 await conv.send_message("/user " + str(uid))
                 resp = await conv.get_response()
-                text = resp.text or ""
+                return resp.text or ""
         except asyncio.TimeoutError:
             log.warning("no reply from panel bot for uid %s within %ss", uid, REPLY_TIMEOUT)
             raise PanelUnavailable("timeout")
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.exception("panel lookup failed for uid %s", uid)
             raise PanelUnavailable("error")
         finally:
             _last = time.monotonic()
+
+
+async def lookup_trader(uid):
+    """Query the panel bot for `uid`.
+
+    Returns a parsed dict on a found record, or None if the panel says
+    not-found. Raises PanelUnavailable if the panel can't be reached (disabled,
+    timeout, or error) so callers can defer to the retry worker. Serialized with
+    a lock + spacing; caches the snapshot into the traders table.
+    """
+    if not available():
+        raise PanelUnavailable("disabled")
+    try:
+        text = await asyncio.wait_for(_query(uid), timeout=HARD_TIMEOUT)
+    except asyncio.TimeoutError:
+        log.warning("panel lookup for uid %s exceeded the %ss ceiling - giving up",
+                    uid, HARD_TIMEOUT)
+        raise PanelUnavailable("timeout")
 
     info = _parse(text, str(uid))
     if info is None:

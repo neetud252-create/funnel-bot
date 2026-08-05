@@ -44,6 +44,12 @@ def remember_video(key, msg):
     except Exception:
         pass
 
+# Telegram rejects the entire message if any inline button URL is malformed, so
+# one unset link env var can blank out a whole screen. Require a scheme and a
+# dotted host ("https://your-vip-link-here" fails this) and drop bad buttons
+# instead of losing the screen.
+_URL_OK = re.compile(r"^(?:https?://[^\s/?#]+\.[^\s/?#]+(?:[/?#]\S*)?|tg://\S+)$", re.I)
+
 def build_kb(rows):
     kb = []
     for row in rows:
@@ -59,11 +65,17 @@ def build_kb(rows):
             if icon:
                 kw["icon_custom_emoji_id"] = icon
             if action.startswith("url:"):
-                kw["url"] = action[4:]
+                url = action[4:]
+                if not _URL_OK.match(url):
+                    logging.warning("dropping button %r: invalid URL %r "
+                                    "(set the matching link env var)", label, url)
+                    continue
+                kw["url"] = url
             else:
                 kw["callback_data"] = action[3:]
             line.append(InlineKeyboardButton(**kw))
-        kb.append(line)
+        if line:
+            kb.append(line)
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 async def is_subscribed(bot, tg_id):
@@ -251,6 +263,24 @@ async def _run_verification(bot, tg_id, uid):
 
 @dp.message(Reg.waiting_uid)
 async def capture_uid(m: Message, bot: Bot, state: FSMContext):
+    # The user's message is deleted the moment it arrives, so anything that
+    # throws below would leave them staring at a vanished ID and no reply.
+    # Every path out of here must put something back on screen.
+    tg_id = m.from_user.id
+    try:
+        await _capture_uid(m, bot, state)
+    except Exception:
+        logging.exception("capture_uid failed for tg_id=%s", tg_id)
+        try:
+            # Re-arm capture so simply resending the ID is a working retry, and
+            # send plain text with no keyboard - a bad button URL is exactly the
+            # kind of failure that lands us here.
+            await state.set_state(Reg.waiting_uid)
+            await bot.send_message(tg_id, config.MSG_UID_ERROR, parse_mode="HTML")
+        except Exception:
+            logging.exception("capture_uid fallback reply failed for tg_id=%s", tg_id)
+
+async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
     tg_id = m.from_user.id
     uid = (m.text or "").strip()
     try:

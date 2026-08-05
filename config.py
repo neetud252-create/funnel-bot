@@ -4,11 +4,16 @@ from decimal import Decimal
 _ch = os.getenv("CHANNEL_ID", "@apextraderrr")
 CHANNEL_ID  = int(_ch) if _ch.lstrip("-").isdigit() else _ch
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/apextraderrr")
-REF_LINK    = os.getenv("REF_LINK", "https://your-referral-link-here")
-SUPPORT     = os.getenv("SUPPORT", "@go_plus_supportbot")
+# Link defaults MUST stay valid http(s) URLs even when unset: Telegram rejects
+# the whole message if any inline button URL is malformed, which takes down the
+# entire screen (this is what broke the menu after verification).
+# TODO: swap the three PLACEHOLDER links below for the real ones (set REF_LINK,
+# SUPPORT, VIP_LINK, YOUTUBE_URL in the Railway service variables).
+REF_LINK    = os.getenv("REF_LINK", "https://example.com/PLACEHOLDER_REF")
+SUPPORT     = os.getenv("SUPPORT", "@PLACEHOLDER_SUPPORT")   # TODO: real support handle (was @go_plus_supportbot)
 SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
-VIP_LINK    = os.getenv("VIP_LINK", "https://your-vip-link-here")
-YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://your-youtube-link-here")
+VIP_LINK    = os.getenv("VIP_LINK", "https://t.me/PLACEHOLDER_VIP")          # TODO: real VIP team invite
+YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/PLACEHOLDER_YT")  # TODO: real YouTube channel
 ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 
 # Group F verification thresholds.
@@ -159,4 +164,8 @@ MSG_WRONG_LINK = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Accoun
 MSG_TEST_MODE = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>TEST MODE \U00002014 verification bypassed, real check is OFF</b>"
 
 # Panel bot didn't answer in time; the retry worker will keep checking.
-MSG_DELAYED = T_CLOCK + " <b>Verification in progress.</b>\n\nWe're checking your account now \U00002014 this can take a little while. You'll be notified here automatically as soon as it's confirmed."
+MSG_DELAYED = T_CLOCK + " <b>Verification is taking a moment.</b>\n\nWe're still checking your account. You'll be notified here automatically as soon as it's confirmed \U00002014 or you can send your account ID again shortly."
+
+# Last-resort reply when the UID handler itself fails (see capture_uid). Plain
+# text, no buttons, so it can't fail for the same reason the handler did.
+MSG_UID_ERROR = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Something went wrong on our side.</b>\n\nYour account ID wasn't processed. Please send it again in a moment \U00002014 if it keeps failing, contact support: " + SUPPORT
