@@ -6,6 +6,9 @@ CHANNEL_ID  = int(_ch) if _ch.lstrip("-").isdigit() else _ch
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/apextraderrr")
 REF_LINK    = os.getenv("REF_LINK", "https://your-referral-link-here")
 SUPPORT     = os.getenv("SUPPORT", "@go_plus_supportbot")
+SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
+VIP_LINK    = os.getenv("VIP_LINK", "https://your-vip-link-here")
+YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://your-youtube-link-here")
 ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 
 # Group F verification thresholds.
@@ -102,7 +105,21 @@ SCREENS = {
         "text": pe("5465198403573012261", "\U0001F510") + " <b>To access Go+, register for a new Pocket Option account using my link:</b>\n\n\U0001F449 " + REF_LINK + "\n\U00002E3B\n\n" + pe("5352825278672412291", "\U00002705") + " <b>Once you register, send your new account ID in the text box below</b> \U0001F447\n\n" + pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Please note:</b> Your ID must contain <b>numbers only</b> \U00002014 no extra symbols \U00002757\n\nExample: <b>123456789</b>",
         "kb": [[("\U0001F511 Register & Get Access", "url:" + REF_LINK, "success", "5307843983102204243")],
                [("\U0001F465 How to register", "cb:go:howto", "primary")],
-               [("\U0001F64B Support", "url:https://t.me/" + SUPPORT.lstrip("@"))]],
+               [("\U0001F64B Support", "url:" + SUPPORT_URL)]],
+    },
+    # Post-verification home screen (shown once a UID passes the campaign +
+    # deposit check). TODO: the signal counters and level are static until the
+    # signal engine lands - wire them to per-user state then.
+    "menu": {
+        "photo": "menu",
+        "text": T_ROBOT + " <b>Go+ main menu</b>\n\n" + T_BOLT + " <b>Signals</b>\nAvailable: 3\nUsed: 0\nLeft: 3\n\n" + T_STAR + " <b>Your level:</b> Start",
+        "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "success")],
+               [("\U0001F332 My level", "cb:menu:level", "primary")],
+               [("\U0001F9D1 Support", "url:" + SUPPORT_URL)],
+               [("VIP team", "url:" + VIP_LINK)],
+               [("Pocket Option", "url:" + REF_LINK)],
+               [("\U00002708\U0000FE0F Telegram channel", "url:" + CHANNEL_URL)],
+               [("\U000025B6\U0000FE0F YouTube channel", "url:" + YOUTUBE_URL)]],
     },
     # TODO(Group C): replace stub with the real step-by-step registration guide
     "howto": {
@@ -120,9 +137,8 @@ REGISTER_NUDGE = pe("5420323339723881652", "\U000026A0\U0000FE0F") + " <b>Don't 
 # --- Group F verification verdict messages (pe() style, factual, no scarcity) ---
 _MINDEP = str(int(MIN_DEPOSIT)) if MIN_DEPOSIT == MIN_DEPOSIT.to_integral_value() else str(MIN_DEPOSIT)
 
-# Access granted: campaign matches and deposits meet the minimum.
-# TODO(Group F): replace with the final access screen (media + full CTA).
-MSG_VERIFIED = pe("5352825278672412291", "\U00002705") + " <b>Access confirmed.</b>\n\nYour account is verified and linked. You're all set." + " \U0001F680"
+# Access granted: campaign matches and deposits meet the minimum -> the "menu"
+# screen above is shown instead of a text verdict.
 
 # Campaign matches but deposits are below the minimum.
 MSG_NEED_DEPOSIT = T_MONEY + " <b>Almost there.</b>\n\nYour account is registered through our link. To unlock access, top up your balance with <b>$" + _MINDEP + "</b> or more \U00002014 verification then completes automatically."

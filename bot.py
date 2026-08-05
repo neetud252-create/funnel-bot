@@ -182,6 +182,11 @@ async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
     else:
         await state.clear()
 
+@dp.callback_query(F.data.startswith("menu:"))
+async def menu_action(cb: CallbackQuery):
+    # TODO: real signal delivery + level logic; placeholder popup for now.
+    await cb.answer("Coming soon", show_alert=True)
+
 @dp.callback_query(F.data.startswith("gallery:"))
 async def gallery(cb: CallbackQuery, bot: Bot):
     await cb.answer()
@@ -225,7 +230,12 @@ async def _run_verification(bot, tg_id, uid):
         dep = info.get("sum_deposits") or Decimal(0)
         if dep >= config.MIN_DEPOSIT:
             await db.set_verified(tg_id, dep)
-            await _replace(bot, tg_id, ack.message_id, config.MSG_VERIFIED)
+            # Verified: drop the ack and hand the user the main menu.
+            try:
+                await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
+            except Exception:
+                pass
+            await show(bot, tg_id, "menu")
         else:
             await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT, _register_btn())
     else:
@@ -272,7 +282,7 @@ async def retry_worker(bot):
                     if dep >= config.MIN_DEPOSIT:
                         await db.set_verified(r["tg_id"], dep)
                         try:
-                            await bot.send_message(r["tg_id"], config.MSG_VERIFIED, parse_mode="HTML")
+                            await show(bot, r["tg_id"], "menu")
                         except Exception:
                             logging.exception("retry_worker: notify failed for %s", r["tg_id"])
         except asyncio.CancelledError:
