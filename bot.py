@@ -215,6 +215,13 @@ async def _replace(bot, tg_id, old_msg_id, text, kb_rows=None):
     m = await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=markup)
     await db.set_ui_msg(tg_id, m.message_id)
 
+async def _show_menu(bot, tg_id, test_mode=False):
+    # The verified landing screen. In test mode the caption carries a banner so
+    # the bypass is obvious on-screen.
+    s = config.SCREENS["menu"]
+    text = config.MSG_TEST_MODE + "\n\n" + s["text"] if test_mode else s["text"]
+    await render(bot, tg_id, s["photo"], text, s["kb"])
+
 async def _run_verification(bot, tg_id, uid):
     # Immediate ack while we query the panel (can take up to ~20s), then verdict.
     ack = await bot.send_message(
@@ -235,7 +242,7 @@ async def _run_verification(bot, tg_id, uid):
                 await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
             except Exception:
                 pass
-            await show(bot, tg_id, "menu")
+            await _show_menu(bot, tg_id)
         else:
             await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT, _register_btn())
     else:
@@ -262,6 +269,14 @@ async def capture_uid(m: Message, bot: Bot, state: FSMContext):
     await db.save_uid_only(tg_id, uid)
     await state.clear()
     await wipe(bot, tg_id)
+    if config.TEST_MODE:
+        # TODO: testing bypass - no panel lookup, no campaign or deposit check.
+        # Set VERIFY_MODE back to "live" before real users reach the bot.
+        # Deposit is recorded as 0 because nothing was actually checked.
+        logging.warning("VERIFY_MODE=test: bypassing verification for tg_id=%s uid=%s", tg_id, uid)
+        await db.set_verified(tg_id, Decimal(0))
+        await _show_menu(bot, tg_id, test_mode=True)
+        return
     await _run_verification(bot, tg_id, uid)
 
 async def retry_worker(bot):
@@ -282,7 +297,7 @@ async def retry_worker(bot):
                     if dep >= config.MIN_DEPOSIT:
                         await db.set_verified(r["tg_id"], dep)
                         try:
-                            await show(bot, r["tg_id"], "menu")
+                            await _show_menu(bot, r["tg_id"])
                         except Exception:
                             logging.exception("retry_worker: notify failed for %s", r["tg_id"])
         except asyncio.CancelledError:
@@ -293,6 +308,9 @@ async def retry_worker(bot):
 async def main():
     await db.connect()
     bot = Bot(os.environ["BOT_TOKEN"])
+    if config.TEST_MODE:
+        logging.warning("VERIFY_MODE=test - panel verification is BYPASSED. "
+                        "Set VERIFY_MODE=live before real users.")
     await bot.delete_webhook(drop_pending_updates=True)
     # Connect the panel-bot verification session (degrades gracefully if unset).
     await panelbot.start()

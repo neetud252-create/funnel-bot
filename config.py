@@ -15,6 +15,14 @@ ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip(
 MIN_DEPOSIT = Decimal(os.getenv("MIN_DEPOSIT", "50"))
 CAMPAIGN_ID = os.getenv("CAMPAIGN_ID", "969716")
 
+# Verification mode. "live" (default) runs the real @AffiliatePocketBot lookup.
+# "test" skips the panel entirely and verifies any numeric UID on the spot.
+# TODO: VERIFY_MODE MUST be set back to "live" (or unset) before real users
+# reach the bot - in test mode ANY account ID gets full access with no check
+# against the campaign or the deposit minimum.
+VERIFY_MODE = os.getenv("VERIFY_MODE", "live").strip().lower()
+TEST_MODE = VERIFY_MODE == "test"
+
 E_INFO  = "5334544901428229844"
 E_POINT = "5415758949129404605"
 E_BACK  = "5305522282695768654"
@@ -145,6 +153,10 @@ MSG_NEED_DEPOSIT = T_MONEY + " <b>Almost there.</b>\n\nYour account is registere
 
 # Account not found, or registered under a different campaign.
 MSG_WRONG_LINK = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Account not linked to us.</b>\n\nTo get access, your Pocket Option account must be created through our official link. Please register with the button below, then send your new account ID."
+
+# Prepended to the menu screen when TEST_MODE is on, so a bypassed verification
+# is never mistaken for a real one.
+MSG_TEST_MODE = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>TEST MODE \U00002014 verification bypassed, real check is OFF</b>"
 
 # Panel bot didn't answer in time; the retry worker will keep checking.
 MSG_DELAYED = T_CLOCK + " <b>Verification in progress.</b>\n\nWe're checking your account now \U00002014 this can take a little while. You'll be notified here automatically as soon as it's confirmed."
