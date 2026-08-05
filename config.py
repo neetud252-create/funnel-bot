@@ -120,7 +120,7 @@ SCREENS = {
     # signal engine lands - wire them to per-user state then.
     "menu": {
         "photo": "menu",
-        "text": T_ROBOT + " <b>Go+ main menu</b>\n\n" + T_BOLT + " <b>Signals</b>\nAvailable: 3\nUsed: 0\nLeft: 3\n\n" + T_STAR + " <b>Your level:</b> Start",
+        "text": T_ROBOT + " <b>Go+ main menu</b>\n\n" + T_BOLT + " <b>Signals</b>\nAvailable today: 30 signals\nUsed: 0\nLeft: 30\n\n" + T_STAR + " <b>Your level:</b> Start",
         "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "success")],
                [("\U0001F332 My level", "cb:menu:level", "primary")],
                [("\U0001F9D1 Support", "url:" + SUPPORT_URL)],

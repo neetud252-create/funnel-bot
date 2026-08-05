@@ -185,7 +185,7 @@ async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_action(cb: CallbackQuery):
     # TODO: real signal delivery + level logic; placeholder popup for now.
-    await cb.answer("Coming soon", show_alert=True)
+    await cb.answer("Coming soon \U0001F680", show_alert=True)
 
 @dp.callback_query(F.data.startswith("gallery:"))
 async def gallery(cb: CallbackQuery, bot: Bot):
