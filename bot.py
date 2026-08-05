@@ -30,6 +30,13 @@ def photo_for(key):
 def video_for(key):
     return _video_cache.get(key) or FSInputFile("assets/" + key + ".mp4")
 
+def media_missing(key, ext):
+    # A cached file_id means Telegram already holds the media; otherwise we have
+    # to upload the local file, and an asset that never got committed takes the
+    # whole screen down (see assets/howto.jpg, assets/mode.jpg).
+    cache = _video_cache if ext == "mp4" else _photo_cache
+    return not cache.get(key) and not os.path.exists("assets/" + key + "." + ext)
+
 def remember(key, msg):
     try:
         if msg and getattr(msg, "photo", None):
@@ -115,7 +122,13 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
             await bot.delete_message(chat_id=tg_id, message_id=msg_id)
         except Exception as e:
             logging.warning("delete screen failed: %s", e)
-    if is_video:
+    if media_missing(media_key, "mp4" if is_video else "jpg"):
+        # Text-only fallback: the user still gets the screen and its buttons
+        # instead of a tap that does nothing.
+        logging.error("asset %r missing - sending %r as text only; commit the "
+                      "file to assets/ to restore the image", media_key, media_key)
+        m = await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=kb)
+    elif is_video:
         m = await bot.send_video(tg_id, video_for(media_key), caption=text,
                                  parse_mode="HTML", reply_markup=kb)
         remember_video(media_key, m)
