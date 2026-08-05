@@ -146,6 +146,16 @@ SCREENS = {
                [("\U0001F513 Automatic", "cb:mode:auto", "primary")],
                [("\U000000AB Back", "cb:go:menu")]],
     },
+    # Market-type picker, opened from "Manual" on the mode screen. Both types are
+    # still placeholders - see type_action in bot.py. Speech emoji is plain
+    # unicode for the same reason as the mode screen above.
+    "type": {
+        "photo": "type",
+        "text": "\U0001F4AC <b>Select market type:</b>\n\n" + T_N1 + " <b>OTC</b> \U00002014 available even on weekends\n" + T_N2 + " <b>FIN</b> \U00002014 real exchange market prices\n\n" + T_DOWN + " <b>Choose below</b>",
+        "kb": [[("\U0001F539 OTC", "cb:type:otc", "success")],
+               [("\U0001F512 FIN", "cb:type:fin", "primary")],
+               [("\U000000AB Back", "cb:menu:signal")]],
+    },
     # TODO(Group C): replace stub with the real step-by-step registration guide
     "howto": {
         "photo": "howto",

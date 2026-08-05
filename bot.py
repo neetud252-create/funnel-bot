@@ -214,9 +214,21 @@ async def menu_signal(cb: CallbackQuery, bot: Bot):
     await cb.answer()
     await show(bot, cb.from_user.id, "mode")
 
+# Must stay above mode_action, same definition-order reason as menu_signal.
+@dp.callback_query(F.data == "mode:manual")
+async def mode_manual(cb: CallbackQuery, bot: Bot):
+    await cb.answer()
+    await show(bot, cb.from_user.id, "type")
+
+@dp.callback_query(F.data.startswith("type:"))
+async def type_action(cb: CallbackQuery):
+    # TODO: next step after the market type is picked (asset/expiry selection).
+    await cb.answer("Coming soon \U0001F680", show_alert=True)
+
 @dp.callback_query(F.data.startswith("mode:"))
 async def mode_action(cb: CallbackQuery):
-    # TODO: real signal logic for both modes, pending the signal source decision.
+    # TODO: automatic-mode signal logic, pending the signal source decision
+    # ("mode:manual" is handled above and opens the market-type screen).
     await cb.answer("Coming soon \U0001F680", show_alert=True)
 
 @dp.callback_query(F.data.startswith("menu:"))
