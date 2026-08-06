@@ -171,6 +171,22 @@ SCREENS = {
                [("\U0001F512 Commodities", "cb:asset:commodities")],
                [("\U000000AB Back", "cb:mode:manual")]],
     },
+    # Currency-pair picker, opened from "Currency pairs" on the asset screen.
+    # Shuffle emoji is plain unicode - no verified custom emoji ID for it, same as
+    # the speech emoji above. Pairs are placeholders - see pair_action in bot.py.
+    # TODO: the "1/10" indicator and "›" are inert (cb:noop) until real pagination
+    # lands; the page count is not derived from anything yet.
+    # TODO: assets/pairs.jpg does not exist yet - until it is added, render()
+    # falls back to sending this screen as text with its keyboard intact.
+    "pairs": {
+        "photo": "pairs",
+        "text": "\U0001F500 <b>Select a currency pair:</b>\n\n" + T_DOWN + " <b>Choose below</b>",
+        "kb": [[("AUD/CAD OTC", "cb:pair:audcad"), ("AUD/CHF OTC", "cb:pair:audchf")],
+               [("AUD/NZD OTC", "cb:pair:audnzd"), ("AUD/USD OTC", "cb:pair:audusd")],
+               [("CAD/CHF OTC", "cb:pair:cadchf"), ("CHF/JPY OTC", "cb:pair:chfjpy")],
+               [("1/10", "cb:noop"), ("\U0000203A", "cb:noop")],
+               [("\U000000AB Back", "cb:type:otc")]],
+    },
     # TODO(Group C): replace stub with the real step-by-step registration guide
     "howto": {
         "photo": "howto",

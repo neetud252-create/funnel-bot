@@ -226,9 +226,21 @@ async def type_otc(cb: CallbackQuery, bot: Bot):
     await cb.answer()
     await show(bot, cb.from_user.id, "asset")
 
+# Must stay above asset_action, same definition-order reason as menu_signal.
+@dp.callback_query(F.data == "asset:forex")
+async def asset_forex(cb: CallbackQuery, bot: Bot):
+    await cb.answer()
+    await show(bot, cb.from_user.id, "pairs")
+
+@dp.callback_query(F.data.startswith("pair:"))
+async def pair_action(cb: CallbackQuery):
+    # TODO: next step after a pair is picked (expiry, then the signal itself).
+    await cb.answer("Coming soon \U0001F680", show_alert=True)
+
 @dp.callback_query(F.data.startswith("asset:"))
 async def asset_action(cb: CallbackQuery):
-    # TODO: next step after the asset category is picked (asset list / expiry).
+    # TODO: the four locked categories ("asset:forex" is handled above and opens
+    # the currency-pair screen).
     await cb.answer("Coming soon \U0001F680", show_alert=True)
 
 @dp.callback_query(F.data.startswith("type:"))
