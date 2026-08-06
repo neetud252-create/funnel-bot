@@ -233,8 +233,20 @@ async def asset_forex(cb: CallbackQuery, bot: Bot):
     await show(bot, cb.from_user.id, "pairs")
 
 @dp.callback_query(F.data.startswith("pair:"))
-async def pair_action(cb: CallbackQuery):
-    # TODO: next step after a pair is picked (expiry, then the signal itself).
+async def pair_action(cb: CallbackQuery, bot: Bot):
+    # Any of the six pairs opens the test menu. show() sends a new message (it
+    # never edits), same as every other screen.
+    await cb.answer()
+    await show(bot, cb.from_user.id, "test_menu")
+
+@dp.callback_query(F.data.startswith("s:"))
+async def s_action(cb: CallbackQuery):
+    # Every S option is locked for now.
+    await cb.answer("\U0001F512 Locked. Coming soon", show_alert=True)
+
+@dp.callback_query(F.data.startswith("m:"))
+async def m_action(cb: CallbackQuery):
+    # TODO: real behaviour for the M options.
     await cb.answer("Coming soon \U0001F680", show_alert=True)
 
 @dp.callback_query(F.data.startswith("asset:"))

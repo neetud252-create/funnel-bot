@@ -187,6 +187,25 @@ SCREENS = {
                [("1/10", "cb:noop"), ("\U0000203A", "cb:noop")],
                [("\U000000AB Back", "cb:type:otc")]],
     },
+    # Shown after a currency pair is picked. S buttons are locked, M buttons are
+    # placeholders - see s_action / m_action in bot.py. All emoji here are plain
+    # unicode by request, no pe().
+    # TODO: S35 and S40 are intentionally absent - the rows jump 30 -> 45.
+    # TODO: assets/test_menu.jpg does not exist yet - until it is added, render()
+    # falls back to sending this screen as text with its keyboard intact.
+    "test_menu": {
+        "photo": "test_menu",
+        "text": "\U0001F680 <b>Upcoming Project Test</b>\nWe're preparing something new and exciting.\nBe early. Be involved. Help us build better.\n\n\U00002B07️ <b>Choose below</b>",
+        "kb": [[("\U0001F512 S5", "cb:s:5")],
+               [("\U0001F512 S10", "cb:s:10"), ("\U0001F512 S15", "cb:s:15")],
+               [("\U0001F512 S20", "cb:s:20"), ("\U0001F512 S25", "cb:s:25"), ("\U0001F512 S30", "cb:s:30")],
+               [("\U0001F512 S45", "cb:s:45"), ("\U0001F512 S50", "cb:s:50"), ("\U0001F512 S55", "cb:s:55")],
+               [("\U0001F525 M1", "cb:m:1")],
+               [("M2", "cb:m:2"), ("M3", "cb:m:3")],
+               [("M4", "cb:m:4"), ("M5", "cb:m:5"), ("M6", "cb:m:6")],
+               [("M7", "cb:m:7"), ("M8", "cb:m:8"), ("M9", "cb:m:9")],
+               [("\U00002705 M10", "cb:m:10")]],
+    },
     # TODO(Group C): replace stub with the real step-by-step registration guide
     "howto": {
         "photo": "howto",
