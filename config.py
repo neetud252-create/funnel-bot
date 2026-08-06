@@ -156,6 +156,21 @@ SCREENS = {
                [("\U0001F512 FIN", "cb:type:fin", "primary")],
                [("\U000000AB Back", "cb:menu:signal")]],
     },
+    # Asset-category picker, opened from "OTC" on the market-type screen. All five
+    # categories are still placeholders - see asset_action in bot.py. Speech emoji
+    # is plain unicode for the same reason as the mode screen above.
+    # TODO: assets/asset.jpg does not exist yet - until it is added, render()
+    # falls back to sending this screen as text with its keyboard intact.
+    "asset": {
+        "photo": "asset",
+        "text": "\U0001F4AC <b>Select asset category:</b>\n\n" + T_N1 + " <b>Currency pairs</b> \U00002014 classic Forex\n" + T_N2 + " <b>Cryptocurrencies</b> \U00002014 high volatility\n" + T_N3 + " <b>Stocks</b> \U00002014 global companies\n" + T_N4 + " <b>Indices</b> \U00002014 market trends\n" + T_N5 + " <b>Commodities</b> \U00002014 gold, oil &amp; more\n\n" + T_DOWN + " <b>Choose below</b>",
+        "kb": [[("\U0001F504 Currency pairs", "cb:asset:forex", "success")],
+               [("\U0001F512 Cryptocurrencies", "cb:asset:crypto")],
+               [("\U0001F512 Stocks", "cb:asset:stocks")],
+               [("\U0001F512 Indices", "cb:asset:indices")],
+               [("\U0001F512 Commodities", "cb:asset:commodities")],
+               [("\U000000AB Back", "cb:mode:manual")]],
+    },
     # TODO(Group C): replace stub with the real step-by-step registration guide
     "howto": {
         "photo": "howto",

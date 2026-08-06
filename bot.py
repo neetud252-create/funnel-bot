@@ -220,9 +220,21 @@ async def mode_manual(cb: CallbackQuery, bot: Bot):
     await cb.answer()
     await show(bot, cb.from_user.id, "type")
 
+# Must stay above type_action, same definition-order reason as menu_signal.
+@dp.callback_query(F.data == "type:otc")
+async def type_otc(cb: CallbackQuery, bot: Bot):
+    await cb.answer()
+    await show(bot, cb.from_user.id, "asset")
+
+@dp.callback_query(F.data.startswith("asset:"))
+async def asset_action(cb: CallbackQuery):
+    # TODO: next step after the asset category is picked (asset list / expiry).
+    await cb.answer("Coming soon \U0001F680", show_alert=True)
+
 @dp.callback_query(F.data.startswith("type:"))
 async def type_action(cb: CallbackQuery):
-    # TODO: next step after the market type is picked (asset/expiry selection).
+    # TODO: FIN market flow ("type:otc" is handled above and opens the
+    # asset-category screen).
     await cb.answer("Coming soon \U0001F680", show_alert=True)
 
 @dp.callback_query(F.data.startswith("mode:"))
