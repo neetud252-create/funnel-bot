@@ -23,6 +23,9 @@ OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
 _video_cache = {}
 _nudge_tasks = {}
+_signal_tasks = {}
+_pair_choice = {}
+_expiry_choice = {}
 
 def photo_for(key):
     return _photo_cache.get(key) or FSInputFile("assets/" + key + ".jpg")
@@ -232,11 +235,17 @@ async def asset_forex(cb: CallbackQuery, bot: Bot):
     await cb.answer()
     await show(bot, cb.from_user.id, "pairs")
 
+# Callback data -> button label, so the signal screen can name the pair the user
+# actually picked instead of a hardcoded one.
+_PAIR_LABELS = {item[1][3:]: item[0] for row in config.SCREENS["pairs"]["kb"]
+                for item in row if item[1].startswith("cb:pair:")}
+
 @dp.callback_query(F.data.startswith("pair:"))
 async def pair_action(cb: CallbackQuery, bot: Bot):
     # Any of the six pairs opens the test menu. show() sends a new message (it
     # never edits), same as every other screen.
     await cb.answer()
+    _pair_choice[cb.from_user.id] = _PAIR_LABELS.get(cb.data, config.DEFAULT_PAIR)
     await show(bot, cb.from_user.id, "test_menu")
 
 @dp.callback_query(F.data.startswith("s:"))
@@ -244,10 +253,79 @@ async def s_action(cb: CallbackQuery):
     # Every S option is locked for now.
     await cb.answer("\U0001F512 Locked. Coming soon", show_alert=True)
 
+async def _edit_signal(bot, tg_id, msg_id, text, is_caption):
+    # The screen being counted down on is a photo when assets/test_menu.jpg (or
+    # assets/buy.jpg) exists and plain text when render() fell back, so pick the
+    # matching edit method. A failed edit only costs one tick - "message is not
+    # modified", a flood wait or a screen the user already navigated away from
+    # must never take the countdown down with it.
+    try:
+        if is_caption:
+            await bot.edit_message_caption(chat_id=tg_id, message_id=msg_id,
+                                           caption=text, parse_mode="HTML")
+        else:
+            await bot.edit_message_text(text=text, chat_id=tg_id, message_id=msg_id,
+                                        parse_mode="HTML")
+    except Exception as e:
+        logging.warning("signal edit failed for tg_id=%s msg_id=%s: %s", tg_id, msg_id, e)
+
+async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
+    # Edits the tapped screen in place from 00:30 down to 00:00 (no new message,
+    # and the edits drop the button grid so nothing is tappable mid-analysis),
+    # then swaps it for the finished signal.
+    try:
+        for left in range(config.SIGNAL_COUNTDOWN, -1, -config.SIGNAL_STEP):
+            timer = "%02d:%02d" % divmod(left, 60)
+            await _edit_signal(bot, tg_id, msg_id,
+                               config.SIGNAL_ANALYZING.format(timer=timer), is_caption)
+            if left:
+                await asyncio.sleep(config.SIGNAL_STEP)
+        user = await db.get_user(tg_id)
+        if user and user["ui_msg_id"] != msg_id:
+            # Another screen took over the chat while we counted down; it owns
+            # ui_msg_id now, so dropping the signal beats clobbering it.
+            return
+        pair = _pair_choice.get(tg_id, config.DEFAULT_PAIR)
+        # render() deletes the analyzing message and falls back to text-only if
+        # assets/buy.jpg is missing.
+        await render(bot, tg_id, "buy",
+                     config.SIGNAL_RESULT.format(pair=pair, expiry=expiry),
+                     config.SIGNAL_KB)
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logging.exception("signal flow failed for tg_id=%s", tg_id)
+    finally:
+        if _signal_tasks.get(tg_id) is asyncio.current_task():
+            _signal_tasks.pop(tg_id, None)
+
+def _start_signal(bot, cb, expiry):
+    # Cancel any countdown already running for this user first: two of them
+    # would fight over the same message and both try to replace it at the end.
+    tg_id = cb.from_user.id
+    _expiry_choice[tg_id] = expiry
+    old = _signal_tasks.pop(tg_id, None)
+    if old:
+        old.cancel()
+    _signal_tasks[tg_id] = asyncio.create_task(
+        _run_signal(bot, tg_id, cb.message.message_id,
+                    bool(getattr(cb.message, "photo", None)), expiry))
+
 @dp.callback_query(F.data.startswith("m:"))
-async def m_action(cb: CallbackQuery):
-    # TODO: real behaviour for the M options.
-    await cb.answer("Coming soon \U0001F680", show_alert=True)
+async def m_action(cb: CallbackQuery, bot: Bot):
+    # The unlocked options: expiration comes straight from the button (m:5 -> M5).
+    await cb.answer()
+    if not cb.message:
+        return
+    _start_signal(bot, cb, "M" + cb.data.split(":", 1)[1])
+
+@dp.callback_query(F.data == "new_signal")
+async def new_signal(cb: CallbackQuery, bot: Bot):
+    # Re-runs the flow on the signal message itself, reusing the last expiration.
+    await cb.answer()
+    if not cb.message:
+        return
+    _start_signal(bot, cb, _expiry_choice.get(cb.from_user.id, "M1"))
 
 @dp.callback_query(F.data.startswith("asset:"))
 async def asset_action(cb: CallbackQuery):

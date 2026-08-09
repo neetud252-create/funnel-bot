@@ -216,6 +216,29 @@ SCREENS = {
 
 REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 
+# --- Signal flow: an unlocked M button on the test menu edits that screen into
+# the analyzing countdown, then replaces it with the finished signal. All emoji
+# here are plain unicode by request, no pe(). See _run_signal in bot.py.
+SIGNAL_COUNTDOWN = 30   # seconds shown on the timer, counted down to 00:00
+SIGNAL_STEP = 5         # seconds between edits of the same message
+
+# Only {timer} may change between edits - Telegram rejects an edit whose text is
+# identical to what is already on screen.
+SIGNAL_ANALYZING = ("\U0001F4CA \U0001F50D I'm analyzing the chart. It won't take long.\n"
+                    "\U0000231B Please wait {timer} \U00002014 the signal is almost there.")
+
+# TODO: the direction is hardcoded to BUY until the signal engine lands.
+SIGNAL_RESULT = ("\U00002705 The analysis is complete!\n\n"
+                 "\U0001F4B1 Currency pair: {pair}\n"
+                 "\U000023F1\U0000FE0F Expiration time: {expiry}\n"
+                 "\U0001F514 Signal: BUY \U0001F7E2\U0001F7E2")
+
+SIGNAL_KB = [[("\U0001F680 New Signal", "cb:new_signal", "success")]]
+
+# TODO: the picked pair only lives in memory (bot.py _pair_choice), so a restart
+# mid-funnel falls back to this label.
+DEFAULT_PAIR = "AUD/CAD OTC"
+
 # Delayed follow-up sent a few seconds after the register screen opens (bot.py).
 REGISTER_NUDGE = pe("5420323339723881652", "\U000026A0\U0000FE0F") + " <b>Don't leave your account half-done.</b>\n\nRegistering takes one minute. Your ID unlocks everything.\n\n" + pe("5188481279963715781", "\U0001F680") + " <b>Finish now \U00002014 send your account ID below.</b>"
 
