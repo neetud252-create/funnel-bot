@@ -115,7 +115,7 @@ SCREENS = {
     },
     "register": {
         "photo": "register",
-        "text": pe("5465198403573012261", "\U0001F510") + " <b>To access Go+, register for a new Pocket Option account using my link:</b>\n\n\U0001F449 " + REF_LINK + "\n\U00002E3B\n\n" + pe("5352825278672412291", "\U00002705") + " <b>Once you register, send your new account ID in the text box below</b> \U0001F447\n\n" + pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Please note:</b> Your ID must contain <b>numbers only</b> \U00002014 no extra symbols \U00002757\n\nExample: <b>123456789</b>",
+        "text": "\U000026A1 <b>Ready to activate Go+?</b>\n\nRegistration takes about one minute.\n\n\U0001F680 <b>Activate Go+ now.</b>",
         "kb": [[("\U0001F511 Register & Get Access", "url:" + REF_LINK, "success", "5307843983102204243")],
                [("\U0001F465 How to register", "cb:go:howto", "primary")],
                [("\U0001F64B Support", "url:" + SUPPORT_URL)]],
