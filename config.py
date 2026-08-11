@@ -117,7 +117,7 @@ SCREENS = {
         "photo": "register",
         "text": "\U000026A1 <b>Ready to activate Go+?</b>\n\nRegistration takes about one minute.\n\n\U0001F680 <b>Activate Go+ now.</b>",
         "kb": [[("\U0001F511 Register & Get Access", "url:" + REF_LINK, "success", "5307843983102204243")],
-               [("\U0001F465 How to register", "cb:go:howto", "primary")],
+               [("\U0001F465 How to register", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary")],
                [("\U0001F64B Support", "url:" + SUPPORT_URL)]],
     },
     # Post-verification home screen (shown once a UID passes the campaign +
