@@ -109,7 +109,7 @@ SCREENS = {
     },
     "access": {
         "video": "access",
-        "text": pe("5276032951342088188", "\U0001F4A5") + " <b>This is where it starts.</b>\n\n" + pe("5287684458881756303", "\U0001F916") + " <b>Go Plus shows you what it sees \U00002014 you decide what to do.</b>\n\n" + pe("5244837092042750681", "\U0001F4C8") + " <b>Simple as that.</b>\n\n" + pe("5352825278672412291", "\U00002705") + " <b>Activate the bot now and explore the signals for yourself \U0001F447</b>",
+        "text": "\U0001F4A5 <b>I made $18,400 in an instant!</b>\n\nMany people try to learn sophisticated trading strategies to be able to buy themselves a brand new car, a rolex and a new house. I just follow the instructions from Go Plus and lock in profits right away.\n\n\U0001F916 <b>Go Plus tells you what to do \U00002014 and you just do what it tells you.</b>\n\n\U0001F4C8 <b>It couldn't be easier than that.</b>\n\n\U00002705 <b>Activate the bot right now and follow your dream \U0001F447</b>",
         # Interim: routes into the UID-capture register flow (Group C adds full verification)
         "kb": [[("Activate Bot", "cb:go:register", "success", "6280525956771745921")]],
     },
