@@ -115,8 +115,8 @@ SCREENS = {
     },
     "register": {
         "photo": "register",
-        "text": "\U000026A1 <b>Ready to activate Go+?</b>\n\nRegistration takes about one minute.\n\n\U0001F680 <b>Activate Go+ now.</b>",
-        "kb": [[("\U0001F511 Register & Get Access", "url:" + REF_LINK, "success", "5307843983102204243")],
+        "text": "\U0001F510 To access Go+, register for a new Pocket Option account using my link:\n\n\U0001F449 https://shorturl.at/2fu2t\n\n\U00002705 Once you register, send your new account ID in the text box below \U0001F447\n\n\U000026A0\U0000FE0F Please note: Your ID must contain numbers only \U00002014 no extra symbols \U00002757\n\nExample: 123456789",
+        "kb": [[("\U0001F511 Register & Get Access", "url:https://shorturl.at/2fu2t", "success", "5307843983102204243")],
                [("\U0001F465 How to register", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary")],
                [("\U0001F64B Support", "url:" + SUPPORT_URL)]],
     },
@@ -240,7 +240,7 @@ SIGNAL_KB = [[("\U0001F680 New Signal", "cb:new_signal", "success")]]
 DEFAULT_PAIR = "AUD/CAD OTC"
 
 # Delayed follow-up sent a few seconds after the register screen opens (bot.py).
-REGISTER_NUDGE = pe("5420323339723881652", "\U000026A0\U0000FE0F") + " <b>Don't leave your account half-done.</b>\n\nRegistering takes one minute. Your ID unlocks everything.\n\n" + pe("5188481279963715781", "\U0001F680") + " <b>Finish now \U00002014 send your account ID below.</b>"
+REGISTER_NUDGE = "\U00002757 Only 2 Go+ activations left today.\n\nNo extensions. No second chance.\n\n\U0001F680 Activate Go+ now."
 
 # --- Group F verification verdict messages (pe() style, factual, no scarcity) ---
 _MINDEP = str(int(MIN_DEPOSIT)) if MIN_DEPOSIT == MIN_DEPOSIT.to_integral_value() else str(MIN_DEPOSIT)
