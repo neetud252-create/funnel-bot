@@ -1,9 +1,9 @@
 import os
 from decimal import Decimal
 
-_ch = os.getenv("CHANNEL_ID", "@apextraderrr")
+_ch = os.getenv("CHANNEL_ID", "@apexxtraderz")
 CHANNEL_ID  = int(_ch) if _ch.lstrip("-").isdigit() else _ch
-CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/apextraderrr")
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/apexxtraderz")
 # Link defaults MUST stay valid http(s) URLs even when unset: Telegram rejects
 # the whole message if any inline button URL is malformed, which takes down the
 # entire screen (this is what broke the menu after verification).
