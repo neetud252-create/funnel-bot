@@ -125,7 +125,7 @@ SCREENS = {
     # signal engine lands - wire them to per-user state then.
     "menu": {
         "photo": "menu",
-        "text": T_ROBOT + " <b>Go+ main menu</b>\n\n" + T_BOLT + " <b>Signals</b>\nAvailable today: 30 signals\nUsed: 0\nLeft: 30\n\n" + T_STAR + " <b>Your level:</b> Start",
+        "text": "\U0001F916 <b>Go+ main menu</b>\n\n\U0001F514 <b>Signals</b>\n\U00002014 Available today: 30 signals\n\U00002014 Used: 0\n\U00002014 Left: 30\n\n\U0001FAAB <b>Your level:</b> Start",
         "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "success")],
                [("\U0001F332 My level", "cb:menu:level", "primary")],
                [("\U0001F9D1 Support", "url:" + SUPPORT_URL)],
@@ -254,9 +254,10 @@ MSG_NEED_DEPOSIT = T_MONEY + " <b>Almost there.</b>\n\nYour account is registere
 # Account not found, or registered under a different campaign.
 MSG_WRONG_LINK = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Account not linked to us.</b>\n\nTo get access, your Pocket Option account must be created through our official link. Please register with the button below, then send your new account ID."
 
-# Prepended to the menu screen when TEST_MODE is on, so a bypassed verification
-# is never mistaken for a real one.
-MSG_TEST_MODE = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>TEST MODE \U00002014 verification bypassed, real check is OFF</b>"
+# Prepended to the menu screen when TEST_MODE is on. Blanked so the banner no
+# longer shows; kept defined because bot.py still references it. NOTE: this only
+# hides the notice - VERIFY_MODE=test still bypasses verification entirely.
+MSG_TEST_MODE = ""
 
 # Panel bot didn't answer in time; the retry worker will keep checking.
 MSG_DELAYED = T_CLOCK + " <b>Verification is taking a moment.</b>\n\nWe're still checking your account. You'll be notified here automatically as soon as it's confirmed \U00002014 or you can send your account ID again shortly."
