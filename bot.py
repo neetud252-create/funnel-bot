@@ -1,4 +1,4 @@
-import asyncio, os, logging, re
+import asyncio, os, logging, random, re
 from decimal import Decimal
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
@@ -308,8 +308,12 @@ async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
         pair = _pair_choice.get(tg_id, config.DEFAULT_PAIR)
         # render() deletes the analyzing message and falls back to text-only if
         # assets/buy.jpg is missing.
+        # Fresh independent draw per signal - no alternating or cycling, so two
+        # signals in a row can land on the same direction.
+        direction = random.choice(config.SIGNAL_DIRECTIONS)
         await render(bot, tg_id, "buy",
-                     config.SIGNAL_RESULT.format(pair=pair, expiry=expiry),
+                     config.SIGNAL_RESULT.format(pair=pair, expiry=expiry,
+                                                 direction=direction),
                      config.SIGNAL_KB)
     except asyncio.CancelledError:
         pass

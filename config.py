@@ -228,11 +228,18 @@ SIGNAL_COUNTDOWN = 30   # fallback wait (seconds) when the expiration won't pars
 SIGNAL_ANALYZING = ("\U0001F4CA Analyzing the market...\n\n"
                     "Your signal will be delivered in approximately {wait}.")
 
-# TODO: the direction is hardcoded to BUY until the signal engine lands.
+# TODO: the direction is picked at random per signal (see _run_signal in bot.py)
+# until the real signal engine lands - it is not derived from any market data.
 SIGNAL_RESULT = ("\U00002705 The analysis is complete!\n\n"
                  "\U0001F4B1 Currency pair: {pair}\n"
                  "\U000023F1\U0000FE0F Expiration time: {expiry}\n"
-                 "\U0001F514 Signal: BUY \U0001F7E2\U0001F7E2")
+                 "\U0001F514 Signal: {direction}")
+
+# One of these is chosen uniformly at random for every signal. BUY pairs with UP
+# and SELL pairs with DOWN on purpose: drawing the two halves independently
+# would produce contradictory signals like "SELL ... UP".
+SIGNAL_DIRECTIONS = ("BUY \U0001F7E2\U0001F7E2 UP \U00002B06\U0000FE0F",
+                     "SELL \U0001F534\U0001F534 DOWN \U00002B07\U0000FE0F")
 
 SIGNAL_KB = [[("\U0001F680 New Signal", "cb:new_signal", "success")]]
 
