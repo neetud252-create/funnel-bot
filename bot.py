@@ -269,17 +269,37 @@ async def _edit_signal(bot, tg_id, msg_id, text, is_caption):
     except Exception as e:
         logging.warning("signal edit failed for tg_id=%s msg_id=%s: %s", tg_id, msg_id, e)
 
-async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
-    # Edits the tapped screen in place from 00:30 down to 00:00 (no new message,
-    # and the edits drop the button grid so nothing is tappable mid-analysis),
-    # then swaps it for the finished signal.
+def _expiry_seconds(expiry):
+    # The M button IS the delay: "M1" -> 60s, "M10" -> 600s. Anything we cannot
+    # parse falls back to the old fixed wait rather than firing instantly.
     try:
-        for left in range(config.SIGNAL_COUNTDOWN, -1, -config.SIGNAL_STEP):
-            timer = "%02d:%02d" % divmod(left, 60)
-            await _edit_signal(bot, tg_id, msg_id,
-                               config.SIGNAL_ANALYZING.format(timer=timer), is_caption)
-            if left:
-                await asyncio.sleep(config.SIGNAL_STEP)
+        minutes = int(str(expiry).strip().lstrip("Mm"))
+    except (TypeError, ValueError):
+        return config.SIGNAL_COUNTDOWN
+    return minutes * 60 if minutes > 0 else config.SIGNAL_COUNTDOWN
+
+def _wait_label(seconds):
+    # Human label for the delay: 60 -> "1 minute", 600 -> "10 minutes".
+    minutes, rem = divmod(seconds, 60)
+    if minutes and not rem:
+        return "%d minute%s" % (minutes, "" if minutes == 1 else "s")
+    return "%d second%s" % (seconds, "" if seconds == 1 else "s")
+
+async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
+    # Edits the tapped screen once into the static "analyzing" notice (no new
+    # message, and the edit drops the button grid so nothing is tappable while
+    # we wait), sits out the selected expiration, then swaps it for the finished
+    # signal. There is no live timer - the screen is written exactly once. The
+    # deadline is taken before that edit, so its round-trip does not push
+    # delivery late: M1 lands 60s after the tap, M10 lands 600s after it.
+    try:
+        total = _expiry_seconds(expiry)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + total
+        await _edit_signal(bot, tg_id, msg_id,
+                           config.SIGNAL_ANALYZING.format(wait=_wait_label(total)),
+                           is_caption)
+        await asyncio.sleep(max(0, deadline - loop.time()))
         user = await db.get_user(tg_id)
         if user and user["ui_msg_id"] != msg_id:
             # Another screen took over the chat while we counted down; it owns

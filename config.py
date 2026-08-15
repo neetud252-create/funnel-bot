@@ -217,15 +217,16 @@ SCREENS = {
 REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 
 # --- Signal flow: an unlocked M button on the test menu edits that screen into
-# the analyzing countdown, then replaces it with the finished signal. All emoji
-# here are plain unicode by request, no pe(). See _run_signal in bot.py.
-SIGNAL_COUNTDOWN = 30   # seconds shown on the timer, counted down to 00:00
-SIGNAL_STEP = 5         # seconds between edits of the same message
+# a single static "analyzing" notice, then replaces it with the finished signal
+# once the selected wait has elapsed. All emoji here are plain unicode by
+# request, no pe(). See _run_signal in bot.py.
+SIGNAL_COUNTDOWN = 30   # fallback wait (seconds) when the expiration won't parse
 
-# Only {timer} may change between edits - Telegram rejects an edit whose text is
-# identical to what is already on screen.
-SIGNAL_ANALYZING = ("\U0001F4CA \U0001F50D I'm analyzing the chart. It won't take long.\n"
-                    "\U0000231B Please wait {timer} \U00002014 the signal is almost there.")
+# Shown once, right after the M button is tapped, and never edited again - there
+# is no live timer. {wait} is the human label for the delay ("1 minute",
+# "10 minutes").
+SIGNAL_ANALYZING = ("\U0001F4CA Analyzing the market...\n\n"
+                    "Your signal will be delivered in approximately {wait}.")
 
 # TODO: the direction is hardcoded to BUY until the signal engine lands.
 SIGNAL_RESULT = ("\U00002705 The analysis is complete!\n\n"
