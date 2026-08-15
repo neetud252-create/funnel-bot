@@ -140,7 +140,7 @@ SCREENS = {
     # custom emoji ID for it, and an invalid ID makes Telegram reject the whole
     # message. Swap in pe(E_SPEECH, ...) once a real ID is on hand.
     "mode": {
-        "photo": "mode",
+        "photo": "trading_mode",
         "text": "\U0001F4AC <b>Select trading mode:</b>\n\n" + T_N1 + " <b>Manual</b> \U00002014 you choose asset &amp; time\n" + T_N2 + " <b>Automatic</b> \U00002014 bot chooses everything\n\n" + T_DOWN + " <b>Choose below</b>",
         "kb": [[("\U0000270B Manual", "cb:mode:manual", "success")],
                [("\U0001F513 Automatic", "cb:mode:auto", "primary")],
@@ -150,7 +150,7 @@ SCREENS = {
     # still placeholders - see type_action in bot.py. Speech emoji is plain
     # unicode for the same reason as the mode screen above.
     "type": {
-        "photo": "type",
+        "photo": "trading_type",
         "text": "\U0001F4AC <b>Select market type:</b>\n\n" + T_N1 + " <b>OTC</b> \U00002014 available even on weekends\n" + T_N2 + " <b>FIN</b> \U00002014 real exchange market prices\n\n" + T_DOWN + " <b>Choose below</b>",
         "kb": [[("\U0001F539 OTC", "cb:type:otc", "success")],
                [("\U0001F512 FIN", "cb:type:fin", "primary")],
@@ -162,7 +162,7 @@ SCREENS = {
     # TODO: assets/asset.jpg does not exist yet - until it is added, render()
     # falls back to sending this screen as text with its keyboard intact.
     "asset": {
-        "photo": "asset",
+        "photo": "asset_category",
         "text": "\U0001F4AC <b>Select asset category:</b>\n\n" + T_N1 + " <b>Currency pairs</b> \U00002014 classic Forex\n" + T_N2 + " <b>Cryptocurrencies</b> \U00002014 high volatility\n" + T_N3 + " <b>Stocks</b> \U00002014 global companies\n" + T_N4 + " <b>Indices</b> \U00002014 market trends\n" + T_N5 + " <b>Commodities</b> \U00002014 gold, oil &amp; more\n\n" + T_DOWN + " <b>Choose below</b>",
         "kb": [[("\U0001F504 Currency pairs", "cb:asset:forex", "success")],
                [("\U0001F512 Cryptocurrencies", "cb:asset:crypto")],
@@ -179,7 +179,7 @@ SCREENS = {
     # TODO: assets/pairs.jpg does not exist yet - until it is added, render()
     # falls back to sending this screen as text with its keyboard intact.
     "pairs": {
-        "photo": "pairs",
+        "photo": "currency_pair",
         "text": "\U0001F500 <b>Select a currency pair:</b>\n\n" + T_DOWN + " <b>Choose below</b>",
         "kb": [[("AUD/CAD OTC", "cb:pair:audcad"), ("AUD/CHF OTC", "cb:pair:audchf")],
                [("AUD/NZD OTC", "cb:pair:audnzd"), ("AUD/USD OTC", "cb:pair:audusd")],
@@ -194,7 +194,7 @@ SCREENS = {
     # TODO: assets/test_menu.jpg does not exist yet - until it is added, render()
     # falls back to sending this screen as text with its keyboard intact.
     "test_menu": {
-        "photo": "test_menu",
+        "photo": "expiration_time",
         "text": "\U0001F680 <b>Upcoming Project Test</b>\nWe're preparing something new and exciting.\nBe early. Be involved. Help us build better.\n\n\U00002B07️ <b>Choose below</b>",
         "kb": [[("\U0001F512 S5", "cb:s:5")],
                [("\U0001F512 S10", "cb:s:10"), ("\U0001F512 S15", "cb:s:15")],
