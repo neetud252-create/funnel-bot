@@ -291,11 +291,11 @@ async def _edit_signal(bot, tg_id, msg_id, text, is_caption):
         logging.warning("signal edit failed for tg_id=%s msg_id=%s: %s", tg_id, msg_id, e)
 
 def _wait_label(seconds):
-    # Human label for the delay: 30 -> "30 seconds", 60 -> "1 minute".
-    minutes, rem = divmod(seconds, 60)
-    if minutes and not rem:
-        return "%d minute%s" % (minutes, "" if minutes == 1 else "s")
-    return "%d second%s" % (seconds, "" if seconds == 1 else "s")
+    # mm:ss clock label for the analyzing screen: 30 -> "00:30", 90 -> "01:30".
+    # Derived from config.SIGNAL_COUNTDOWN rather than hardcoded into the copy,
+    # so retuning the delay cannot leave the screen promising a stale number.
+    minutes, secs = divmod(seconds, 60)
+    return "%02d:%02d" % (minutes, secs)
 
 async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
     # Edits the tapped screen once into the static "analyzing" notice (no new

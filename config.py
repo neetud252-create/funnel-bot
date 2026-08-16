@@ -50,6 +50,12 @@ E_CLOCK = "5258095024725321202"
 E_CHART = "5231200819986047254"
 E_LENS  = "5348544647977254780"
 E_BOLT  = "5895638385300606573"
+# Signal loading screen only. Deliberately separate IDs from E_CHART / E_LENS
+# above: those belong to other screens and must not shift if this one is
+# restyled.
+E_SIG_CHART = "5451882707875276247"
+E_SIG_LENS  = "5188217332748527444"
+E_SIG_GLASS = "5386367538735104399"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -73,6 +79,9 @@ T_CLOCK = pe(E_CLOCK, "\u23F0")
 T_CHART = pe(E_CHART, "\U0001F4CA")
 T_LENS  = pe(E_LENS, "\U0001F50D")
 T_BOLT  = pe(E_BOLT, "\u26A1")
+T_SIG_CHART = pe(E_SIG_CHART, "\U0001F4C8")
+T_SIG_LENS  = pe(E_SIG_LENS, "\U0001F50D")
+T_SIG_GLASS = pe(E_SIG_GLASS, "\U0000231B")
 
 # --- Currency pairs ---------------------------------------------------------
 # Single source of truth for the OTC pair list: the keyboard, the pagination,
@@ -288,8 +297,9 @@ REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 
 # --- Signal flow: an unlocked M button on the test menu edits that screen into
 # a single static "analyzing" notice, then replaces it with the finished signal
-# once the fixed wait below has elapsed. All emoji here are plain unicode by
-# request, no pe(). See _run_signal in bot.py.
+# once the fixed wait below has elapsed. The loading screen below uses premium
+# emoji via pe(); the result screen further down is still plain unicode.
+# See _run_signal in bot.py.
 # The one delay for every signal, in seconds, counted from the user's final
 # selection. Deliberately independent of the chosen expiration: M1 and M10 both
 # land in 30s, and the tapped M value survives only as the {expiry} label on the
@@ -297,9 +307,16 @@ REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 SIGNAL_COUNTDOWN = 30
 
 # Shown once, right after the M button is tapped, and never edited again - there
-# is no live timer. {wait} is the human label for the delay ("30 seconds").
-SIGNAL_ANALYZING = ("\U0001F4CA Analyzing the market...\n\n"
-                    "Your signal will be delivered in approximately {wait}.")
+# is no live timer, so {wait} is the full delay ("00:30" from _wait_label in
+# bot.py) and not a value that ticks down.
+# The chart leads the message, then the analyzing line, then the wait line. All
+# three emoji are premium custom emoji, so this caption only renders correctly
+# with parse_mode="HTML" - <tg-emoji> is silently dropped otherwise. The visible
+# character inside each tag is the plain-unicode fallback Telegram shows to
+# clients that cannot display the custom emoji; it is not a replacement for it.
+SIGNAL_ANALYZING = (T_SIG_CHART + "\n\n"
+                    + T_SIG_LENS + " <b>I'm analyzing the chart. It won't take long.</b>\n\n"
+                    + T_SIG_GLASS + " Please wait {wait} — the signal is almost there.")
 
 # TODO: the direction is picked at random per signal (see _run_signal in bot.py)
 # until the real signal engine lands - it is not derived from any market data.
