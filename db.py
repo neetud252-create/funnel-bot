@@ -18,6 +18,14 @@ CREATE TABLE IF NOT EXISTS users (
     created_at   TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
+-- Daily signal quota. The counter is stored per user so a restart cannot reset
+-- it, and last_reset_date is what makes the rollover automatic: any row whose
+-- date is not CURRENT_DATE is treated as 0 used and rewritten on first touch,
+-- so no cron job or startup sweep is needed.
+-- NOTE: CURRENT_DATE is the Postgres server's date (UTC on Railway), so "a new
+-- day" means midnight UTC for every user regardless of their own timezone.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS signals_used_today INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reset_date DATE;
 
 CREATE TABLE IF NOT EXISTS traders (
     trader_id  TEXT PRIMARY KEY,
@@ -109,6 +117,63 @@ async def set_verified(tg_id: int, deposit):
         await c.execute(
             "UPDATE users SET verified=TRUE, deposit=$2, last_checked=now() WHERE tg_id=$1",
             tg_id, deposit)
+
+# --- Daily signal quota -----------------------------------------------------
+# Both helpers below roll the counter over themselves when last_reset_date is
+# not today, so the reset happens automatically on the first read or write of a
+# new day. Nothing schedules it.
+
+# Kept as module constants so the test harness and db.py can't disagree on the
+# statement text.
+_ROLLOVER_SQL = """
+    UPDATE users
+       SET signals_used_today = 0, last_reset_date = CURRENT_DATE
+     WHERE tg_id = $1
+       AND last_reset_date IS DISTINCT FROM CURRENT_DATE
+    RETURNING signals_used_today
+"""
+
+# One statement, so two taps arriving together can't both read "29 used" and
+# both pass. The WHERE is the gate: it matches only while the user is under the
+# limit (or the stored date is stale, which means a fresh day starting at 1).
+_CONSUME_SQL = """
+    UPDATE users
+       SET signals_used_today = CASE
+               WHEN last_reset_date IS DISTINCT FROM CURRENT_DATE THEN 1
+               ELSE signals_used_today + 1
+           END,
+           last_reset_date = CURRENT_DATE
+     WHERE tg_id = $1
+       AND (last_reset_date IS DISTINCT FROM CURRENT_DATE
+            OR signals_used_today < $2)
+    RETURNING signals_used_today
+"""
+
+async def signal_state(tg_id: int, limit: int):
+    # Read-side: (used, left) for today. Performs the rollover write when the
+    # stored date is stale so the column on disk matches what the menu shows.
+    async with pool.acquire() as c:
+        row = await c.fetchrow(_ROLLOVER_SQL, tg_id)
+        if row is None:
+            row = await c.fetchrow(
+                "SELECT signals_used_today FROM users WHERE tg_id=$1", tg_id)
+        used = row["signals_used_today"] if row else 0
+        return used, max(0, limit - used)
+
+async def consume_signal(tg_id: int, limit: int):
+    # Write-side: count one delivered signal. Returns (ok, used, left); ok is
+    # False when the user is already at the cap, and nothing is incremented.
+    async with pool.acquire() as c:
+        row = await c.fetchrow(_CONSUME_SQL, tg_id, limit)
+        if row is not None:
+            used = row["signals_used_today"]
+            return True, used, max(0, limit - used)
+        # Refused: report the current count so the caller can show the menu
+        # numbers without a second round trip.
+        cur = await c.fetchrow(
+            "SELECT signals_used_today FROM users WHERE tg_id=$1", tg_id)
+        used = cur["signals_used_today"] if cur else limit
+        return False, used, max(0, limit - used)
 
 async def unverified_with_uid():
     async with pool.acquire() as c:

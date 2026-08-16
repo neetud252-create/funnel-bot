@@ -143,7 +143,11 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
 
 async def show(bot, tg_id, key):
     s = config.SCREENS[key]
-    if "video" in s:
+    if key == "menu":
+        # The menu caption is a template ({limit}/{used}/{left}); routing it
+        # here means no caller can render it raw and leak the braces on screen.
+        await _show_menu(bot, tg_id)
+    elif "video" in s:
         await render(bot, tg_id, s["video"], s["text"], s["kb"], is_video=True)
     else:
         await render(bot, tg_id, s["photo"], s["text"], s["kb"])
@@ -322,6 +326,14 @@ async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
             # Another screen took over the chat while we counted down; it owns
             # ui_msg_id now, so dropping the signal beats clobbering it.
             return
+        # The quota is spent here, at delivery, not at the tap: a countdown
+        # that got cancelled or superseded never cost the user a signal, and
+        # this single atomic UPDATE is what actually enforces the cap.
+        ok, used, left = await db.consume_signal(tg_id, config.DAILY_SIGNAL_LIMIT)
+        if not ok:
+            # Raced past the cap while this one was counting down.
+            await render(bot, tg_id, "buy", config.MSG_DAILY_LIMIT, config.LIMIT_KB)
+            return
         pair = _pair_choice.get(tg_id, config.DEFAULT_PAIR)
         # render() deletes the analyzing message and falls back to text-only if
         # assets/buy.jpg is missing.
@@ -340,10 +352,21 @@ async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
         if _signal_tasks.get(tg_id) is asyncio.current_task():
             _signal_tasks.pop(tg_id, None)
 
-def _start_signal(bot, cb, expiry):
+async def _start_signal(bot, cb, expiry):
+    # Single entry point for both M taps and "New Signal", so the daily cap is
+    # checked in exactly one place. This answers the callback itself (with the
+    # limit alert or an empty ack) - callers must not answer first, or Telegram
+    # discards the alert as a duplicate.
+    tg_id = cb.from_user.id
+    used, left = await db.signal_state(tg_id, config.DAILY_SIGNAL_LIMIT)
+    if left <= 0:
+        # Over the cap: no countdown is started and no message is touched, so
+        # the user keeps whatever screen they were on.
+        await cb.answer(config.MSG_DAILY_LIMIT, show_alert=True)
+        return
+    await cb.answer()
     # Cancel any countdown already running for this user first: two of them
     # would fight over the same message and both try to replace it at the end.
-    tg_id = cb.from_user.id
     _expiry_choice[tg_id] = expiry
     old = _signal_tasks.pop(tg_id, None)
     if old:
@@ -355,18 +378,18 @@ def _start_signal(bot, cb, expiry):
 @dp.callback_query(F.data.startswith("m:"))
 async def m_action(cb: CallbackQuery, bot: Bot):
     # The unlocked options: expiration comes straight from the button (m:5 -> M5).
-    await cb.answer()
     if not cb.message:
+        await cb.answer()
         return
-    _start_signal(bot, cb, "M" + cb.data.split(":", 1)[1])
+    await _start_signal(bot, cb, "M" + cb.data.split(":", 1)[1])
 
 @dp.callback_query(F.data == "new_signal")
 async def new_signal(cb: CallbackQuery, bot: Bot):
     # Re-runs the flow on the signal message itself, reusing the last expiration.
-    await cb.answer()
     if not cb.message:
+        await cb.answer()
         return
-    _start_signal(bot, cb, _expiry_choice.get(cb.from_user.id, "M1"))
+    await _start_signal(bot, cb, _expiry_choice.get(cb.from_user.id, "M1"))
 
 @dp.callback_query(F.data.startswith("asset:"))
 async def asset_action(cb: CallbackQuery):
@@ -422,9 +445,14 @@ async def _replace(bot, tg_id, old_msg_id, text, kb_rows=None):
 
 async def _show_menu(bot, tg_id, test_mode=False):
     # The verified landing screen. In test mode the caption carries a banner so
-    # the bypass is obvious on-screen.
+    # the bypass is obvious on-screen. The signal counters are read fresh on
+    # every render (signal_state also does the new-day rollover), so the numbers
+    # are correct whenever the user lands here rather than only at login.
     s = config.SCREENS["menu"]
-    text = config.MSG_TEST_MODE + "\n\n" + s["text"] if test_mode else s["text"]
+    used, left = await db.signal_state(tg_id, config.DAILY_SIGNAL_LIMIT)
+    text = s["text"].format(limit=config.DAILY_SIGNAL_LIMIT, used=used, left=left)
+    if test_mode:
+        text = config.MSG_TEST_MODE + "\n\n" + text
     await render(bot, tg_id, s["photo"], text, s["kb"])
 
 async def _run_verification(bot, tg_id, uid):

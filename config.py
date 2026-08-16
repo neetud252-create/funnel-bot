@@ -193,11 +193,14 @@ SCREENS = {
                [("\U0001F64B Support", "url:" + SUPPORT_URL)]],
     },
     # Post-verification home screen (shown once a UID passes the campaign +
-    # deposit check). TODO: the signal counters and level are static until the
-    # signal engine lands - wire them to per-user state then.
+    # deposit check). The signal counters are a format template - {limit},
+    # {used} and {left} are filled per user by _show_menu in bot.py, which is
+    # also why show() routes "menu" through it rather than rendering this text
+    # directly (raw braces would leak onto the screen).
+    # TODO: the level is still static.
     "menu": {
         "photo": "menu",
-        "text": "\U0001F916 <b>Go+ main menu</b>\n\n\U0001F514 <b>Signals</b>\n\U00002014 Available today: 30 signals\n\U00002014 Used: 0\n\U00002014 Left: 30\n\n\U0001FAAB <b>Your level:</b> Start",
+        "text": "\U0001F916 <b>Go+ main menu</b>\n\n\U0001F514 <b>Signals</b>\n\U00002014 Available today: {limit} signals\n\U00002014 Used: {used}\n\U00002014 Left: {left}\n\n\U0001FAAB <b>Your level:</b> Start",
         "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "success")],
                [("\U0001F332 My level", "cb:menu:level", "primary")],
                [("\U0001F9D1 Support", "url:" + SUPPORT_URL)],
@@ -309,6 +312,19 @@ SIGNAL_DIRECTIONS = ("BUY \U0001F7E2\U0001F7E2 UP \U00002B06\U0000FE0F",
                      "SELL \U0001F534\U0001F534 DOWN \U00002B07\U0000FE0F")
 
 SIGNAL_KB = [[("\U0001F680 New Signal", "cb:new_signal", "success")]]
+
+# --- Daily signal quota -----------------------------------------------------
+# Per user, per day. Stored in users.signals_used_today / users.last_reset_date
+# (see db.py), so a restart does not hand anyone a fresh 30.
+DAILY_SIGNAL_LIMIT = int(os.getenv("DAILY_SIGNAL_LIMIT", "30"))
+
+# Shown both as the popup on a tap that is over the cap and as the screen text
+# if the cap is reached while a signal is already being prepared. Plain text
+# with no HTML: it is passed to cb.answer(), which does not parse markup.
+MSG_DAILY_LIMIT = "Daily limit reached. Come back tomorrow."
+
+# The limit screen still needs a way back, otherwise the user is stranded on it.
+LIMIT_KB = [[("\U000000AB Back", "cb:go:menu")]]
 
 # TODO: the picked pair only lives in memory (bot.py _pair_choice), so a restart
 # mid-funnel falls back to this label.

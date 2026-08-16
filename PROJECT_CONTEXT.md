@@ -210,7 +210,7 @@ The user types their account ID. `capture_uid` (`bot.py:416-433`) wraps `_captur
 | **Trigger** | verification success, or `go:menu` |
 | **Screen** | `menu` (`config.py:126-136`), rendered by `_show_menu` (`bot.py:382-387`) |
 | **Image key** | `menu` → **`assets/menu.jpg`** ✅ exists |
-| **Caption** | "🤖 **Go+ main menu** … Available today: 30 signals / Used: 0 / Left: 30 … Your level: Start" — **static placeholders** |
+| **Caption** | "🤖 **Go+ main menu** … Available today: {limit} signals / Used: {used} / Left: {left} … Your level: Start" — a template filled per user by `_show_menu`; the level is still static |
 | **Buttons** | `🚀 Get a signal` → `menu:signal` · `🌲 My level` → `menu:level` · `🧑 Support`, `VIP team`, `Pocket Option`, `✈️ Telegram channel`, `▶️ YouTube channel` → URLs |
 
 #### Stage 12 — Trading mode
@@ -234,6 +234,18 @@ Buttons: `🔄 Currency pairs` → `asset:forex` (→ `pairs`) · Cryptocurrenci
 Buttons: six OTC pairs per page → `pair:<code>` · `N/10` → `noop` (inert indicator) · `›` → `pairpage:<next>` → `pairs_page` · `« Back` → `type:otc`.
 
 **57 OTC pairs over 10 pages.** The list lives in `config.PAIRS` (deduped from `PAIRS_RAW` by `_dedupe_pairs`) and is the single source of truth — the keyboard, the callback codes, the page count and the signal label all derive from it. `pair_code("AUD/CAD OTC")` → `audcad` (stable across restarts, unlike an index). `PAIR_PAGES` is recomputed on import as `ceil(len(PAIRS) / PAIRS_PER_PAGE)`, so adding a pair to `PAIRS_RAW` is the only edit needed. Grid is unchanged: 2 per row × 3 rows + the nav row + Back. `›` wraps from the last page back to page 1, so all 57 pairs are reachable with forward-only taps and no button was added to the layout. `SCREENS["pairs"]["kb"]` is `pairs_kb(0)`, so a plain `show(…, "pairs")` still renders page 1.
+
+#### Daily signal quota
+
+Each user gets **30 signals per day**, tracked per Telegram ID in `users.signals_used_today` / `users.last_reset_date` (both added by `ALTER TABLE … IF NOT EXISTS` in `db.SCHEMA`, so deploying needs no migration step). The limit is `config.DAILY_SIGNAL_LIMIT`, overridable via the `DAILY_SIGNAL_LIMIT` env var.
+
+**Reset** is lazy, not scheduled: `db.signal_state` and `db.consume_signal` both treat a row whose `last_reset_date` is not `CURRENT_DATE` as 0-used and rewrite it on the spot. Nothing cron-like is needed, and a restart cannot clear the count because it lives in the table. ⚠️ `CURRENT_DATE` is the **Postgres server's** date (UTC on Railway) — "a new day" is midnight UTC for everyone, not per-user local midnight.
+
+**Enforcement** happens in two places:
+- `_start_signal` (the single entry point for both `m:*` and `new_signal`) reads `signal_state` and, at 0 left, answers the callback with `config.MSG_DAILY_LIMIT` as an alert and starts no countdown. It answers the callback itself, so `m_action`/`new_signal` must **not** call `cb.answer()` first — Telegram discards a second answer, which would silently swallow the alert.
+- `_run_signal` calls `db.consume_signal` at **delivery** time, not at the tap. One atomic conditional `UPDATE … WHERE signals_used_today < $2 RETURNING …` is the real gate, so simultaneous taps cannot both pass. Spending the quota at delivery also means a countdown that was cancelled or superseded costs the user nothing.
+
+**Menu numbers** are filled per render: `SCREENS["menu"]["text"]` is a `{limit}`/`{used}`/`{left}` template and `_show_menu` formats it. `show()` special-cases `"menu"` to route through `_show_menu`, so the `cb:go:menu` Back path can't render raw braces.
 
 #### Stage 16 — Test menu (expiration picker)
 
@@ -451,7 +463,7 @@ Actions use a 3-char prefix convention: `cb:` → callback (stripped by `build_k
 
 ### Remaining constants (lines 217-267)
 
-`REVIEWS` (album keys) · `SIGNAL_COUNTDOWN=30`, `SIGNAL_STEP=5` · `SIGNAL_ANALYZING` (only `{timer}` may vary between edits — Telegram rejects an unchanged edit) · `SIGNAL_RESULT` (BUY hardcoded) · `SIGNAL_KB` · `DEFAULT_PAIR` · `REGISTER_NUDGE` · verdict messages `MSG_NEED_DEPOSIT`, `MSG_WRONG_LINK`, `MSG_TEST_MODE`, `MSG_DELAYED`, `MSG_UID_ERROR`.
+`REVIEWS` (album keys) · `SIGNAL_COUNTDOWN=30`, `SIGNAL_STEP=5` · `SIGNAL_ANALYZING` (only `{timer}` may vary between edits — Telegram rejects an unchanged edit) · `SIGNAL_RESULT` (BUY hardcoded) · `SIGNAL_KB` · `DEFAULT_PAIR` · `PAIRS`/`PAIR_CODES`/`PAIR_PAGES`/`pairs_kb()` · `DAILY_SIGNAL_LIMIT=30`, `MSG_DAILY_LIMIT`, `LIMIT_KB` · `REGISTER_NUDGE` · verdict messages `MSG_NEED_DEPOSIT`, `MSG_WRONG_LINK`, `MSG_TEST_MODE`, `MSG_DELAYED`, `MSG_UID_ERROR`.
 
 ---
 
@@ -475,6 +487,8 @@ Actions use a 3-char prefix convention: `cb:` → callback (stripped by `build_k
 | `last_checked` | `TIMESTAMPTZ` | Last verification timestamp |
 | `created_at` | `TIMESTAMPTZ DEFAULT now()` | |
 | `album_ids` | `TEXT` | Added via `ALTER`; CSV of review-album message ids — **only ever set to `NULL`** |
+| `signals_used_today` | `INT NOT NULL DEFAULT 0` | Added via `ALTER`; signals delivered to this user on `last_reset_date` |
+| `last_reset_date` | `DATE` | Added via `ALTER`; the day `signals_used_today` counts. Not today ⇒ treated as 0 and rewritten on next read/write |
 
 ### `traders`
 
@@ -610,7 +624,7 @@ All except the mandatory three have in-code defaults. `TELEGRAM_*`/`TELETHON_SES
 - **Signal engine** — direction is hardcoded to BUY (`config.py:230`); no market data anywhere
 - **Automatic mode**, **FIN market**, **crypto/stocks/indices/commodities**, **all S expirations**, **My level** — all "Coming soon" alerts
 - **Pairs pagination** — ✅ done: 57 pairs over 10 pages, `PAIR_PAGES` derived from `len(config.PAIRS)`, `›` pages forward and wraps. Still forward-only (no `‹`), because adding a third button would change the button layout
-- **Menu counters** — "30 signals / Used: 0 / Left: 30" and "Level: Start" are static text, not per-user state
+- **Menu counters** — ✅ the signal counters are live per-user state (see *Daily signal quota* below). **"Level: Start" is still static text.**
 - **`howto` screen** — stub text: "Step-by-step registration guide coming here."
 - **Placeholder links** — `REF_LINK`, `SUPPORT`, `VIP_LINK`, `YOUTUBE_URL` all still default to `PLACEHOLDER` values
 - **`_pair_choice` / `_expiry_choice`** — in-memory only; a restart mid-funnel loses the user's pair
