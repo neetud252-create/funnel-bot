@@ -74,6 +74,78 @@ T_CHART = pe(E_CHART, "\U0001F4CA")
 T_LENS  = pe(E_LENS, "\U0001F50D")
 T_BOLT  = pe(E_BOLT, "\u26A1")
 
+# --- Currency pairs ---------------------------------------------------------
+# Single source of truth for the OTC pair list: the keyboard, the pagination,
+# the callback codes and the label shown on the signal screen are all derived
+# from PAIRS below. Appending here is the only edit needed to add a pair.
+# Order is preserved (the first six are the original ones, so page 1 looks
+# exactly as it did) and duplicates are dropped by _dedupe_pairs.
+PAIRS_RAW = [
+    "AUD/CAD OTC", "AUD/CHF OTC", "AUD/NZD OTC", "AUD/USD OTC",
+    "CAD/CHF OTC", "CHF/JPY OTC", "EUR/GBP OTC", "EUR/HUF OTC",
+    "EUR/NZD OTC", "EUR/TRY OTC", "EUR/USD OTC", "GBP/AUD OTC",
+    "GBP/JPY OTC", "JOD/CNY OTC", "MAD/USD OTC", "NZD/JPY OTC",
+    "TND/USD OTC", "USD/ARS OTC", "USD/BRL OTC", "USD/CAD OTC",
+    "USD/CNH OTC", "USD/DZD OTC", "USD/INR OTC", "USD/MXN OTC",
+    "USD/SGD OTC", "USD/VND OTC", "EUR/JPY OTC", "USD/BDT OTC",
+    "USD/PKR OTC", "BHD/CNY OTC", "ZAR/USD OTC", "USD/COP OTC",
+    "USD/THB OTC", "USD/IDR OTC", "CAD/JPY OTC", "OMR/CNY OTC",
+    "CHF/NOK OTC", "NZD/USD OTC", "USD/PHP OTC", "AED/CNY OTC",
+    "QAR/CNY OTC", "USD/JPY OTC", "EUR/RUB OTC", "NGN/USD OTC",
+    "AUD/JPY OTC", "USD/CLP OTC", "USD/CHF OTC", "UAH/USD OTC",
+    "GBP/USD OTC", "USD/EGP OTC", "YER/USD OTC", "SAR/CNY OTC",
+    "USD/MYR OTC", "LBP/USD OTC", "USD/RUB OTC", "EUR/CHF OTC",
+    "KES/USD OTC",
+]
+
+def pair_code(label):
+    # "AUD/CAD OTC" -> "audcad". callback_data is capped at 64 bytes and has to
+    # stay stable across restarts, so it is derived from the pair itself rather
+    # than from a list index (which would shift when a pair is inserted).
+    base = str(label).upper().replace("OTC", "")
+    return "".join(ch for ch in base if ch.isalnum()).lower()
+
+def _dedupe_pairs(labels):
+    # Keyed on the code, so "eur/usd otc" and "EUR/USD  OTC" collapse into one
+    # button instead of two that behave identically.
+    seen, out = set(), []
+    for raw in labels:
+        label = " ".join(str(raw).split())
+        code = pair_code(label)
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        out.append(label)
+    return out
+
+PAIRS = _dedupe_pairs(PAIRS_RAW)
+# code -> label, for naming the pair on the signal screen after a tap.
+PAIR_CODES = {pair_code(p): p for p in PAIRS}
+
+# Grid is unchanged from the original screen: 2 buttons per row, 3 rows of
+# pairs, then the page indicator row and Back.
+PAIRS_PER_ROW  = 2
+PAIR_ROWS      = 3
+PAIRS_PER_PAGE = PAIRS_PER_ROW * PAIR_ROWS
+# Recalculated from PAIRS on import - never hardcode the page count again.
+PAIR_PAGES = max(1, -(-len(PAIRS) // PAIRS_PER_PAGE))
+
+def pairs_kb(page=0):
+    # Keyboard for one page. The page number wraps in both directions, so an
+    # out-of-range value from a stale button can't produce an empty screen.
+    page = page % PAIR_PAGES
+    chunk = PAIRS[page * PAIRS_PER_PAGE:(page + 1) * PAIRS_PER_PAGE]
+    rows = [[(label, "cb:pair:" + pair_code(label))
+             for label in chunk[i:i + PAIRS_PER_ROW]]
+            for i in range(0, len(chunk), PAIRS_PER_ROW)]
+    # Same two-button pagination row as before - the indicator stays inert and
+    # "\u203A" now advances, wrapping past the last page back to the first, so
+    # every pair is reachable without adding a button to the layout.
+    rows.append([("%d/%d" % (page + 1, PAIR_PAGES), "cb:noop"),
+                 ("\U0000203A", "cb:pairpage:%d" % ((page + 1) % PAIR_PAGES))])
+    rows.append([("\U000000AB Back", "cb:type:otc")])
+    return rows
+
 SCREENS = {
     "gate": {
         "photo": "gate",
@@ -173,19 +245,14 @@ SCREENS = {
     },
     # Currency-pair picker, opened from "Currency pairs" on the asset screen.
     # Shuffle emoji is plain unicode - no verified custom emoji ID for it, same as
-    # the speech emoji above. Pairs are placeholders - see pair_action in bot.py.
-    # TODO: the "1/10" indicator and "›" are inert (cb:noop) until real pagination
-    # lands; the page count is not derived from anything yet.
-    # TODO: assets/pairs.jpg does not exist yet - until it is added, render()
-    # falls back to sending this screen as text with its keyboard intact.
+    # the speech emoji above.
+    # The keyboard is page 1 only - what show() renders for a plain "pairs"
+    # screen. Paging goes through show_pairs() in bot.py, which calls the same
+    # pairs_kb() builder, so the two can't drift apart.
     "pairs": {
         "photo": "currency_pair",
         "text": "\U0001F500 <b>Select a currency pair:</b>\n\n" + T_DOWN + " <b>Choose below</b>",
-        "kb": [[("AUD/CAD OTC", "cb:pair:audcad"), ("AUD/CHF OTC", "cb:pair:audchf")],
-               [("AUD/NZD OTC", "cb:pair:audnzd"), ("AUD/USD OTC", "cb:pair:audusd")],
-               [("CAD/CHF OTC", "cb:pair:cadchf"), ("CHF/JPY OTC", "cb:pair:chfjpy")],
-               [("1/10", "cb:noop"), ("\U0000203A", "cb:noop")],
-               [("\U000000AB Back", "cb:type:otc")]],
+        "kb": pairs_kb(0),
     },
     # Shown after a currency pair is picked. S buttons are locked, M buttons are
     # placeholders - see s_action / m_action in bot.py. All emoji here are plain

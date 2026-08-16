@@ -229,23 +229,40 @@ async def type_otc(cb: CallbackQuery, bot: Bot):
     await cb.answer()
     await show(bot, cb.from_user.id, "asset")
 
+async def show_pairs(bot, tg_id, page=0):
+    # The pair picker is the one screen whose keyboard depends on state, so it
+    # is built per page instead of taken straight off SCREENS. pairs_kb wraps
+    # the page number, so a stale button can never render an empty grid.
+    s = config.SCREENS["pairs"]
+    await render(bot, tg_id, s["photo"], s["text"], config.pairs_kb(page))
+
 # Must stay above asset_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "asset:forex")
 async def asset_forex(cb: CallbackQuery, bot: Bot):
     await cb.answer()
-    await show(bot, cb.from_user.id, "pairs")
+    await show_pairs(bot, cb.from_user.id, 0)
 
-# Callback data -> button label, so the signal screen can name the pair the user
-# actually picked instead of a hardcoded one.
-_PAIR_LABELS = {item[1][3:]: item[0] for row in config.SCREENS["pairs"]["kb"]
-                for item in row if item[1].startswith("cb:pair:")}
+# Must stay above pair_action: "pairpage:3" does not match "pair:" (the 5th
+# character is "p", not ":"), but keeping the specific handler first matches how
+# every other pair of handlers in this file is ordered.
+@dp.callback_query(F.data.startswith("pairpage:"))
+async def pairs_page(cb: CallbackQuery, bot: Bot):
+    # "›" on the pair picker. Re-renders the same screen one page along.
+    await cb.answer()
+    try:
+        page = int(cb.data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        page = 0
+    await show_pairs(bot, cb.from_user.id, page)
 
 @dp.callback_query(F.data.startswith("pair:"))
 async def pair_action(cb: CallbackQuery, bot: Bot):
-    # Any of the six pairs opens the test menu. show() sends a new message (it
-    # never edits), same as every other screen.
+    # Any pair on any page opens the test menu. show() sends a new message (it
+    # never edits), same as every other screen. The label comes from
+    # config.PAIR_CODES, which covers the whole list rather than one page.
     await cb.answer()
-    _pair_choice[cb.from_user.id] = _PAIR_LABELS.get(cb.data, config.DEFAULT_PAIR)
+    code = cb.data.split(":", 1)[1]
+    _pair_choice[cb.from_user.id] = config.PAIR_CODES.get(code, config.DEFAULT_PAIR)
     await show(bot, cb.from_user.id, "test_menu")
 
 @dp.callback_query(F.data.startswith("s:"))
