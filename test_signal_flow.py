@@ -106,19 +106,23 @@ class FakeBot:
     async def send_photo(self, chat_id, photo, caption=None, parse_mode=None,
                          reply_markup=None):
         mid = self._mid()
+        # photo_for() hands us an FSInputFile, so .path is the asset actually
+        # going over the wire - that is what proves which image was sent.
         self.calls.append({"kind": "photo", "id": mid, "body": caption,
-                           "markup": reply_markup, "parse_mode": parse_mode})
+                           "markup": reply_markup, "parse_mode": parse_mode,
+                           "asset": str(getattr(photo, "path", photo))})
         return FakeMsg(mid, caption=caption)
 
     async def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
         mid = self._mid()
         self.calls.append({"kind": "text", "id": mid, "body": text,
-                           "markup": reply_markup, "parse_mode": parse_mode})
+                           "markup": reply_markup, "parse_mode": parse_mode,
+                           "asset": None})
         return FakeMsg(mid, text=text)
 
     async def delete_message(self, chat_id, message_id):
         self.calls.append({"kind": "delete", "id": message_id, "body": None,
-                           "markup": None, "parse_mode": None})
+                           "markup": None, "parse_mode": None, "asset": None})
 
 
 class FakeUser:
@@ -180,6 +184,14 @@ def assert_layout(label, calls, config, wait_label, expect_image=True):
         return
     seq = calls[first_send:]
 
+    # The whole point of the change: once an expiration is chosen, its screen's
+    # artwork must not come back. Checked across every send in the flow, not just
+    # the waiting image, so no other code path can smuggle it in either.
+    sent_assets = [c["asset"] for c in calls if c["kind"] == "photo"]
+    check(label + ": expiration image is never sent after selection",
+          not any("expiration_time" in (a or "") for a in sent_assets),
+          str(sent_assets))
+
     if expect_image:
         img = seq[0]
         check(label + ": message 1 is the waiting image", img["kind"] == "photo",
@@ -187,6 +199,10 @@ def assert_layout(label, calls, config, wait_label, expect_image=True):
         check(label + ": waiting image carries no caption", img["body"] is None,
               repr(img["body"]))
         check(label + ": waiting image carries no buttons", img["markup"] is None)
+        check(label + ": waiting image is the configured waiting asset",
+              (img["asset"] or "").replace("\\", "/").endswith(
+                  "assets/" + config.SIGNAL_WAIT_PHOTO + ".jpg"),
+              repr(img["asset"]))
         seq = seq[1:]
 
     chart = seq[0]
@@ -250,6 +266,24 @@ async def main():
               str(config.SIGNAL_COUNTDOWN))
         check("wait label renders as 00:30", wait_label == "00:30", repr(wait_label))
 
+        # --- the expiration screen itself must be untouched ------------------
+        print("\n[ui] expiration selection screen is unchanged")
+        exp = config.SCREENS["test_menu"]
+        check("expiration screen still shows expiration_time.jpg",
+              exp["photo"] == "expiration_time", repr(exp["photo"]))
+        check("waiting image is not the expiration image",
+              config.SIGNAL_WAIT_PHOTO != "expiration_time",
+              repr(config.SIGNAL_WAIT_PHOTO))
+        actions = [b[1] for row in exp["kb"] for b in row]
+        m_opts = sorted(int(a.split(":")[2]) for a in actions if a.startswith("cb:m:"))
+        s_opts = sorted(int(a.split(":")[2]) for a in actions if a.startswith("cb:s:"))
+        check("all ten M expirations still offered",
+              m_opts == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], str(m_opts))
+        check("all nine S expirations still offered",
+              s_opts == [5, 10, 15, 20, 25, 30, 45, 50, 55], str(s_opts))
+        check("expiration screen button count unchanged", len(actions) == 19,
+              str(len(actions)))
+
         # --- path 1: every unlocked M button on the expiration screen --------
         print("\n[path] m_action - every expiration button")
         for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
@@ -264,6 +298,9 @@ async def main():
                   str(sleeps))
             check("M%d: expiration reaches the result screen" % n,
                   any("M%d" % n in (c["body"] or "") for c in calls))
+            check("M%d: selected expiration is still stored internally" % n,
+                  bot_mod._expiry_choice.get(tg_id) == "M%d" % n,
+                  repr(bot_mod._expiry_choice.get(tg_id)))
 
         # --- path 2: the "New Signal" button on the result screen ------------
         print("\n[path] new_signal - repeat from the result screen")

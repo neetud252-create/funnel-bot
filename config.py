@@ -81,7 +81,10 @@ T_LENS  = pe(E_LENS, "\U0001F50D")
 T_BOLT  = pe(E_BOLT, "\u26A1")
 T_SIG_CHART = pe(E_SIG_CHART, "\U0001F4CA")
 T_SIG_LENS  = pe(E_SIG_LENS, "\U0001F50D")
-T_SIG_GLASS = pe(E_SIG_GLASS, "\U000023F3")
+# Fallback glyph is the spiral the reference shows. The entity ID is unchanged -
+# it is still the one supplied for this slot - so premium clients see exactly
+# what they saw before; only the non-premium fallback character moved.
+T_SIG_GLASS = pe(E_SIG_GLASS, "\U0001F300")
 
 # --- Currency pairs ---------------------------------------------------------
 # Single source of truth for the OTC pair list: the keyboard, the pagination,
@@ -266,12 +269,14 @@ SCREENS = {
         "text": "\U0001F500 <b>Select a currency pair:</b>\n\n" + T_DOWN + " <b>Choose below</b>",
         "kb": pairs_kb(0),
     },
-    # Shown after a currency pair is picked. S buttons are locked, M buttons are
-    # placeholders - see s_action / m_action in bot.py. All emoji here are plain
-    # unicode by request, no pe().
+    # The expiration screen, shown after a currency pair is picked. S buttons are
+    # locked; every M button starts a signal - see s_action / m_action in bot.py.
+    # All emoji here are plain unicode by request, no pe().
     # TODO: S35 and S40 are intentionally absent - the rows jump 30 -> 45.
-    # TODO: assets/test_menu.jpg does not exist yet - until it is added, render()
-    # falls back to sending this screen as text with its keyboard intact.
+    # There is no assets/test_menu.jpg and there never was: "test_menu" is the
+    # screen key, and the image it renders is assets/expiration_time.jpg. This is
+    # the only screen that shows it - tapping an M button here leads to the
+    # waiting screen, which uses SIGNAL_WAIT_PHOTO instead.
     "test_menu": {
         "photo": "expiration_time",
         "text": "\U0001F680 <b>Upcoming Project Test</b>\nWe're preparing something new and exciting.\nBe early. Be involved. Help us build better.\n\n\U00002B07️ <b>Choose below</b>",
@@ -314,10 +319,14 @@ REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 # result screen below.
 SIGNAL_COUNTDOWN = 30
 
-# The image above the waiting text. Unchanged by the three-message split - this
-# is the same asset the tapped expiration screen was already showing, it is just
-# re-sent without its caption or button grid instead of being edited in place.
-SIGNAL_WAIT_PHOTO = "expiration_time"
+# The image above the waiting text. Deliberately NOT "expiration_time": that is
+# the asset of the selection screen the user just tapped through, and re-sending
+# it here put the "Set the Expiration Time" graphic back on screen immediately
+# after the choice was made. assets/ai.jpg is the loading artwork ("LOADING /
+# PLEASE WAIT..."), which is what this moment actually is. The expiration screen
+# itself still uses expiration_time.jpg - see SCREENS["test_menu"] above; only
+# the post-selection flow changed.
+SIGNAL_WAIT_PHOTO = "ai"
 
 # Message 2: the chart, alone. No text, no caption, no keyboard.
 SIGNAL_CHART = T_SIG_CHART
