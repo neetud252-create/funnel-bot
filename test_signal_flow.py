@@ -1,14 +1,14 @@
 """Verification test for the signal waiting screen.
 
 Asserts that every code path that can produce a signal puts up the same
-three-message waiting screen, in the same order, and always waits the full
-config.SIGNAL_COUNTDOWN regardless of which expiration was tapped:
+two-message waiting screen, in the same order, sends no media whatsoever while
+doing it, and always waits the full config.SIGNAL_COUNTDOWN regardless of which
+expiration was tapped:
 
-    1. the waiting image, no caption and no buttons
-    2. the chart custom emoji, alone in its own text message
-    3. the two-line analysis notice
+    1. the chart custom emoji, alone in its own text message
+    2. the two-line analysis notice
     -- config.SIGNAL_COUNTDOWN seconds --
-    4. the finished signal
+    3. the finished signal
 
 Run from the repo root:  python test_signal_flow.py
 
@@ -120,6 +120,26 @@ class FakeBot:
                            "asset": None})
         return FakeMsg(mid, text=text)
 
+    async def send_video(self, chat_id, video, caption=None, parse_mode=None,
+                         reply_markup=None):
+        mid = self._mid()
+        self.calls.append({"kind": "video", "id": mid, "body": caption,
+                           "markup": reply_markup, "parse_mode": parse_mode,
+                           "asset": str(getattr(video, "path", video))})
+        return FakeMsg(mid, caption=caption)
+
+    async def send_media_group(self, chat_id, media):
+        # Recorded rather than left to raise AttributeError, so an album sneaking
+        # into the analysis stage fails as a readable assertion.
+        out = []
+        for item in media:
+            mid = self._mid()
+            self.calls.append({"kind": "album", "id": mid, "body": None,
+                               "markup": None, "parse_mode": None,
+                               "asset": str(getattr(item, "media", item))})
+            out.append(FakeMsg(mid))
+        return out
+
     async def delete_message(self, chat_id, message_id):
         self.calls.append({"kind": "delete", "id": message_id, "body": None,
                            "markup": None, "parse_mode": None, "asset": None})
@@ -173,7 +193,7 @@ async def drive(bot_mod, fake_bot, cb, sleeps):
     return fake_bot.calls[start:]
 
 
-def assert_layout(label, calls, config, wait_label, expect_image=True):
+def assert_layout(label, calls, config, wait_label):
     """The heart of the test: the exact message sequence, in order."""
     kinds = [c["kind"] for c in calls]
 
@@ -183,27 +203,6 @@ def assert_layout(label, calls, config, wait_label, expect_image=True):
     if first_send is None:
         return
     seq = calls[first_send:]
-
-    # The whole point of the change: once an expiration is chosen, its screen's
-    # artwork must not come back. Checked across every send in the flow, not just
-    # the waiting image, so no other code path can smuggle it in either.
-    sent_assets = [c["asset"] for c in calls if c["kind"] == "photo"]
-    check(label + ": expiration image is never sent after selection",
-          not any("expiration_time" in (a or "") for a in sent_assets),
-          str(sent_assets))
-
-    if expect_image:
-        img = seq[0]
-        check(label + ": message 1 is the waiting image", img["kind"] == "photo",
-              "got " + img["kind"])
-        check(label + ": waiting image carries no caption", img["body"] is None,
-              repr(img["body"]))
-        check(label + ": waiting image carries no buttons", img["markup"] is None)
-        check(label + ": waiting image is the configured waiting asset",
-              (img["asset"] or "").replace("\\", "/").endswith(
-                  "assets/" + config.SIGNAL_WAIT_PHOTO + ".jpg"),
-              repr(img["asset"]))
-        seq = seq[1:]
 
     chart = seq[0]
     check(label + ": chart is its own text message", chart["kind"] == "text",
@@ -217,7 +216,7 @@ def assert_layout(label, calls, config, wait_label, expect_image=True):
 
     analysis = seq[1]
     expected = config.SIGNAL_ANALYZING.format(wait=wait_label)
-    check(label + ": message 3 is the analysis text", analysis["kind"] == "text")
+    check(label + ": message 2 is the analysis text", analysis["kind"] == "text")
     check(label + ": analysis text matches exactly", analysis["body"] == expected,
           repr(analysis["body"]))
     check(label + ": analysis text does NOT contain the chart emoji",
@@ -236,9 +235,23 @@ def assert_layout(label, calls, config, wait_label, expect_image=True):
         check(label + ": delivered message is the signal result",
               "Currency pair" in body, repr(body[:60]))
 
+    # No media of any kind during the analysis stage. Everything the flow sends
+    # before the finished signal must be a plain text message - the delivered
+    # signal itself is a separate stage and is allowed to carry artwork.
+    final_ids = {c["id"] for c in final}
+    stage = [c for c in calls if c["kind"] != "delete" and c["id"] not in final_ids]
+    check(label + ": analysis stage is exactly two messages", len(stage) == 2,
+          str([c["kind"] for c in stage]))
+    check(label + ": analysis stage sends no media at all",
+          all(c["kind"] == "text" for c in stage),
+          str([(c["kind"], c["asset"]) for c in stage if c["kind"] != "text"]))
+    check(label + ": analysis stage references no asset file",
+          all(not c["asset"] for c in stage),
+          str([c["asset"] for c in stage if c["asset"]]))
+
     # Nothing from the waiting screen is left on the chat.
     deleted = {c["id"] for c in calls if c["kind"] == "delete"}
-    waiting_ids = [c["id"] for c in calls[first_send:first_send + (3 if expect_image else 2)]]
+    waiting_ids = [c["id"] for c in stage]
     check(label + ": every waiting message is cleaned up",
           all(i in deleted for i in waiting_ids),
           "left behind: " + str([i for i in waiting_ids if i not in deleted]))
@@ -271,9 +284,9 @@ async def main():
         exp = config.SCREENS["test_menu"]
         check("expiration screen still shows expiration_time.jpg",
               exp["photo"] == "expiration_time", repr(exp["photo"]))
-        check("waiting image is not the expiration image",
-              config.SIGNAL_WAIT_PHOTO != "expiration_time",
-              repr(config.SIGNAL_WAIT_PHOTO))
+        check("no waiting-image constant is left to point an asset at",
+              not hasattr(config, "SIGNAL_WAIT_PHOTO"),
+              "config.SIGNAL_WAIT_PHOTO still exists")
         actions = [b[1] for row in exp["kb"] for b in row]
         m_opts = sorted(int(a.split(":")[2]) for a in actions if a.startswith("cb:m:"))
         s_opts = sorted(int(a.split(":")[2]) for a in actions if a.startswith("cb:s:"))
@@ -331,21 +344,27 @@ async def main():
         check("m_action and new_signal emit an identical call sequence",
               shape_a == shape_b, str(shape_a) + " vs " + str(shape_b))
 
-        # --- degraded: waiting image missing ---------------------------------
-        print("\n[edge] waiting image missing from assets/")
-        tg_id = 8001
-        fake_bot = FakeBot()
-        fake_db._users[tg_id] = {"ui_msg_id": 970, "album_ids": None}
-        original = config.SIGNAL_WAIT_PHOTO
-        config.SIGNAL_WAIT_PHOTO = "definitely_not_a_real_asset"
-        try:
-            calls = await drive(bot_mod, fake_bot, FakeCB(tg_id, "m:5", 970), sleeps)
-            assert_layout("no-image", calls, config, wait_label, expect_image=False)
-        finally:
-            config.SIGNAL_WAIT_PHOTO = original
-        check("waiting image asset exists in assets/",
-              os.path.exists(os.path.join("assets", original + ".jpg")),
-              "assets/" + original + ".jpg is missing")
+        # --- every currency pair takes the same route ------------------------
+        print("\n[coverage] every currency pair produces the same text-only stage")
+        pairs = sorted(set(config.PAIR_CODES.values()))
+        print("  %d pairs" % len(pairs))
+        bad_pairs = []
+        for i, pair in enumerate(pairs):
+            tg_id = 20000 + i
+            fake_bot = FakeBot()
+            fake_db._users[tg_id] = {"ui_msg_id": 800 + i, "album_ids": None}
+            bot_mod._pair_choice[tg_id] = pair
+            calls = await drive(bot_mod, fake_bot, FakeCB(tg_id, "m:1", 800 + i),
+                                sleeps)
+            sends = [c for c in calls if c["kind"] != "delete"]
+            # Two text messages, then the delivered signal naming this pair.
+            if (len(sends) != 3
+                    or [c["kind"] for c in sends[:2]] != ["text", "text"]
+                    or any(c["asset"] for c in sends[:2])
+                    or pair not in (sends[2]["body"] or "")):
+                bad_pairs.append(pair)
+        check("all %d currency pairs use the text-only analysis stage" % len(pairs),
+              not bad_pairs, str(bad_pairs[:5]))
 
         # --- the tapped screen is torn down before the wait screen -----------
         print("\n[edge] tapped screen is removed before the wait screen goes up")
@@ -366,7 +385,7 @@ async def main():
         for f in FAILURES:
             print("  FAILED: " + f)
         return 1
-    print("PASS - every signal path uses the three-message waiting screen.")
+    print("PASS - every signal path uses the two-message, text-only analysis stage.")
     return 0
 
 

@@ -275,8 +275,8 @@ SCREENS = {
     # TODO: S35 and S40 are intentionally absent - the rows jump 30 -> 45.
     # There is no assets/test_menu.jpg and there never was: "test_menu" is the
     # screen key, and the image it renders is assets/expiration_time.jpg. This is
-    # the only screen that shows it - tapping an M button here leads to the
-    # waiting screen, which uses SIGNAL_WAIT_PHOTO instead.
+    # the only screen that shows it - tapping an M button here leads straight to
+    # the waiting screen, which is text-only.
     "test_menu": {
         "photo": "expiration_time",
         "text": "\U0001F680 <b>Upcoming Project Test</b>\nWe're preparing something new and exciting.\nBe early. Be involved. Help us build better.\n\n\U00002B07️ <b>Choose below</b>",
@@ -301,13 +301,15 @@ SCREENS = {
 REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 
 # --- Signal flow: an unlocked M button on the test menu tears down the tapped
-# screen and puts up the waiting screen - three separate messages, in this order
+# screen and puts up the waiting screen - two text messages, in this order
 # (see _send_wait_screen in bot.py):
-#   1. SIGNAL_WAIT_PHOTO, image only, no caption and no buttons
-#   2. SIGNAL_CHART, the chart emoji alone in its own text message
-#   3. SIGNAL_ANALYZING, the two-line analysis notice
-# The chart deliberately does NOT ride along as the photo's caption: it is its
-# own message, which is what puts it on its own line at full custom-emoji size.
+#   1. SIGNAL_CHART, the chart emoji alone in its own text message
+#   2. SIGNAL_ANALYZING, the two-line analysis notice
+# The analysis stage sends NO media at all - no photo, no album, no video. There
+# is deliberately no waiting-image constant here to point one at.
+# The chart is its own message rather than a caption, which is what puts it on
+# its own line at full custom-emoji size - and a caption would require the photo
+# this stage must not send.
 # All three emoji are premium custom emoji, so these only render correctly with
 # parse_mode="HTML" - <tg-emoji> is dropped otherwise, leaving the plain-unicode
 # fallback that is written inside each tag. That fallback is what clients which
@@ -319,19 +321,10 @@ REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 # result screen below.
 SIGNAL_COUNTDOWN = 30
 
-# The image above the waiting text. Deliberately NOT "expiration_time": that is
-# the asset of the selection screen the user just tapped through, and re-sending
-# it here put the "Set the Expiration Time" graphic back on screen immediately
-# after the choice was made. assets/ai.jpg is the loading artwork ("LOADING /
-# PLEASE WAIT..."), which is what this moment actually is. The expiration screen
-# itself still uses expiration_time.jpg - see SCREENS["test_menu"] above; only
-# the post-selection flow changed.
-SIGNAL_WAIT_PHOTO = "ai"
-
-# Message 2: the chart, alone. No text, no caption, no keyboard.
+# Message 1: the chart, alone. No text, no caption, no keyboard, no photo.
 SIGNAL_CHART = T_SIG_CHART
 
-# Message 3. Written once and never edited - there is no live timer, so {wait}
+# Message 2. Written once and never edited - there is no live timer, so {wait}
 # is the full delay ("00:30" from _wait_label in bot.py), not a ticking value.
 SIGNAL_ANALYZING = (T_SIG_LENS + " <b>I'm analyzing the chart. It won't take long.</b>\n\n"
                     + T_SIG_GLASS + " Please wait {wait} — the signal is almost there.")

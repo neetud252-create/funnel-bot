@@ -275,14 +275,15 @@ async def s_action(cb: CallbackQuery):
     await cb.answer("\U0001F512 Locked. Coming soon", show_alert=True)
 
 async def _send_wait_screen(bot, tg_id, msg_id, total):
-    # The waiting screen is three separate messages, in this order: the image on
-    # its own, then the chart emoji on its own, then the analysis text. The chart
-    # is a standalone message on purpose - as a photo caption it would render as
-    # a small inline glyph on the same line as the text instead of the full-size
-    # custom emoji the reference shows.
+    # The waiting screen is two text messages and nothing else: the chart emoji
+    # on its own, then the analysis text. This stage sends NO media - no photo,
+    # no album, no video. The chart is a standalone message on purpose: as a
+    # caption it would render as a small inline glyph on the same line as the
+    # text instead of the full-size custom emoji the reference shows, and a
+    # caption needs a photo to hang off, which is exactly what must not be here.
     # Returns (ui_id, extra_ids): ui_id is the message render() will clear when
-    # the signal lands, extra_ids are the two text messages this has to delete
-    # itself, since render() only ever clears ui_msg_id.
+    # the signal lands, extra_ids are the messages this has to delete itself,
+    # since render() only ever clears ui_msg_id.
     # Clear the screen first, so the tapped button grid is gone while we wait.
     # ui_msg_id is the tapped screen, album_ids holds the waiting messages of a
     # run this tap just cancelled (they are parked there precisely so they
@@ -298,28 +299,14 @@ async def _send_wait_screen(bot, tg_id, msg_id, total):
     if msg_id and msg_id not in stale:
         stale.append(msg_id)
     await _drop_msgs(bot, tg_id, stale)
-    key = config.SIGNAL_WAIT_PHOTO
-    photo_msg = None
-    if media_missing(key, "jpg"):
-        # Same fallback as render(): losing the image must not lose the signal,
-        # so the two text messages still go out on their own.
-        logging.error("asset %r missing - waiting screen goes out without its "
-                      "image; commit the file to assets/ to restore it", key)
-    else:
-        photo_msg = await bot.send_photo(tg_id, photo_for(key))
-        remember(key, photo_msg)
     chart_msg = await bot.send_message(tg_id, config.SIGNAL_CHART, parse_mode="HTML")
     text_msg = await bot.send_message(
         tg_id, config.SIGNAL_ANALYZING.format(wait=_wait_label(total)),
         parse_mode="HTML")
-    # With no image the chart message becomes the screen render() replaces, so
-    # the fallback path still leaves exactly one message behind for it to clear.
-    if photo_msg:
-        ui_id = photo_msg.message_id
-        extra_ids = [chart_msg.message_id, text_msg.message_id]
-    else:
-        ui_id = chart_msg.message_id
-        extra_ids = [text_msg.message_id]
+    # The chart message is the one render() replaces with the finished signal,
+    # so it goes in ui_msg_id and the analysis text is the lone extra.
+    ui_id = chart_msg.message_id
+    extra_ids = [text_msg.message_id]
     await db.set_ui_msg(tg_id, ui_id)
     # Park the extras in album_ids so that if the user walks off to another
     # screen mid-wait, wipe() takes them down with everything else.
