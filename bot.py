@@ -290,17 +290,8 @@ async def _edit_signal(bot, tg_id, msg_id, text, is_caption):
     except Exception as e:
         logging.warning("signal edit failed for tg_id=%s msg_id=%s: %s", tg_id, msg_id, e)
 
-def _expiry_seconds(expiry):
-    # The M button IS the delay: "M1" -> 60s, "M10" -> 600s. Anything we cannot
-    # parse falls back to the old fixed wait rather than firing instantly.
-    try:
-        minutes = int(str(expiry).strip().lstrip("Mm"))
-    except (TypeError, ValueError):
-        return config.SIGNAL_COUNTDOWN
-    return minutes * 60 if minutes > 0 else config.SIGNAL_COUNTDOWN
-
 def _wait_label(seconds):
-    # Human label for the delay: 60 -> "1 minute", 600 -> "10 minutes".
+    # Human label for the delay: 30 -> "30 seconds", 60 -> "1 minute".
     minutes, rem = divmod(seconds, 60)
     if minutes and not rem:
         return "%d minute%s" % (minutes, "" if minutes == 1 else "s")
@@ -309,12 +300,15 @@ def _wait_label(seconds):
 async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
     # Edits the tapped screen once into the static "analyzing" notice (no new
     # message, and the edit drops the button grid so nothing is tappable while
-    # we wait), sits out the selected expiration, then swaps it for the finished
-    # signal. There is no live timer - the screen is written exactly once. The
-    # deadline is taken before that edit, so its round-trip does not push
-    # delivery late: M1 lands 60s after the tap, M10 lands 600s after it.
+    # we wait), waits out the fixed delay, then swaps it for the finished
+    # signal. There is no live timer - the screen is written exactly once.
+    # The wait is always config.SIGNAL_COUNTDOWN, whichever expiration was
+    # tapped: the M button now only labels the trade on the result screen, it
+    # does not set the delay. The deadline is taken before that edit, so its
+    # round-trip does not push delivery late - every signal lands 30s after the
+    # final tap, M1 and M10 alike.
     try:
-        total = _expiry_seconds(expiry)
+        total = config.SIGNAL_COUNTDOWN
         loop = asyncio.get_running_loop()
         deadline = loop.time() + total
         await _edit_signal(bot, tg_id, msg_id,

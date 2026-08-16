@@ -288,13 +288,16 @@ REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 
 # --- Signal flow: an unlocked M button on the test menu edits that screen into
 # a single static "analyzing" notice, then replaces it with the finished signal
-# once the selected wait has elapsed. All emoji here are plain unicode by
+# once the fixed wait below has elapsed. All emoji here are plain unicode by
 # request, no pe(). See _run_signal in bot.py.
-SIGNAL_COUNTDOWN = 30   # fallback wait (seconds) when the expiration won't parse
+# The one delay for every signal, in seconds, counted from the user's final
+# selection. Deliberately independent of the chosen expiration: M1 and M10 both
+# land in 30s, and the tapped M value survives only as the {expiry} label on the
+# result screen below.
+SIGNAL_COUNTDOWN = 30
 
 # Shown once, right after the M button is tapped, and never edited again - there
-# is no live timer. {wait} is the human label for the delay ("1 minute",
-# "10 minutes").
+# is no live timer. {wait} is the human label for the delay ("30 seconds").
 SIGNAL_ANALYZING = ("\U0001F4CA Analyzing the market...\n\n"
                     "Your signal will be delivered in approximately {wait}.")
 
