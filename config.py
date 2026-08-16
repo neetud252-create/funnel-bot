@@ -339,8 +339,11 @@ SIGNAL_RESULT = ("\U00002705 The analysis is complete!\n\n"
 # One of these is chosen uniformly at random for every signal. BUY pairs with UP
 # and SELL pairs with DOWN on purpose: drawing the two halves independently
 # would produce contradictory signals like "SELL ... UP".
-SIGNAL_DIRECTIONS = ("BUY \U0001F7E2\U0001F7E2 UP \U00002B06\U0000FE0F",
-                     "SELL \U0001F534\U0001F534 DOWN \U00002B07\U0000FE0F")
+# Each direction carries the artwork its result screen shows, so a direction can
+# never be drawn without its matching image: assets/buy.jpg is the green BUY
+# board, assets/sell.jpg the red SELL one.
+SIGNAL_DIRECTIONS = (("BUY \U0001F7E2\U0001F7E2 UP \U00002B06\U0000FE0F", "buy"),
+                     ("SELL \U0001F534\U0001F534 DOWN \U00002B07\U0000FE0F", "sell"))
 
 SIGNAL_KB = [[("\U0001F680 New Signal", "cb:new_signal", "success")]]
 

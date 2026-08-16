@@ -125,7 +125,10 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
             await bot.delete_message(chat_id=tg_id, message_id=msg_id)
         except Exception as e:
             logging.warning("delete screen failed: %s", e)
-    if media_missing(media_key, "mp4" if is_video else "jpg"):
+    if media_key is None:
+        # Deliberately text-only, not a missing asset - nothing to warn about.
+        m = await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=kb)
+    elif media_missing(media_key, "mp4" if is_video else "jpg"):
         # Text-only fallback: the user still gets the screen and its buttons
         # instead of a tap that does nothing.
         logging.error("asset %r missing - sending %r as text only; commit the "
@@ -361,16 +364,23 @@ async def _run_signal(bot, tg_id, msg_id, expiry):
         # this single atomic UPDATE is what actually enforces the cap.
         ok, used, left = await db.consume_signal(tg_id, config.DAILY_SIGNAL_LIMIT)
         if not ok:
-            # Raced past the cap while this one was counting down.
-            await render(bot, tg_id, "buy", config.MSG_DAILY_LIMIT, config.LIMIT_KB)
+            # Raced past the cap while this one was counting down. Text-only by
+            # design: this screen used to pass "buy" as its media key and render
+            # as text purely because assets/buy.jpg did not exist. That asset is
+            # now the green BUY board, and putting it above "Daily limit
+            # reached" would read as a signal to trade.
+            await render(bot, tg_id, None, config.MSG_DAILY_LIMIT, config.LIMIT_KB)
             return
         pair = _pair_choice.get(tg_id, config.DEFAULT_PAIR)
-        # render() deletes the analyzing message and falls back to text-only if
-        # assets/buy.jpg is missing.
         # Fresh independent draw per signal - no alternating or cycling, so two
-        # signals in a row can land on the same direction.
-        direction = random.choice(config.SIGNAL_DIRECTIONS)
-        await render(bot, tg_id, "buy",
+        # signals in a row can land on the same direction. The artwork travels
+        # with the direction (see config.SIGNAL_DIRECTIONS), so BUY can only ever
+        # render the green board and SELL only the red one.
+        direction, photo = random.choice(config.SIGNAL_DIRECTIONS)
+        # render() clears the analysis messages and puts the image up with the
+        # result as its caption, keeping the New Signal button on that same
+        # message. It falls back to text-only if the asset is missing.
+        await render(bot, tg_id, photo,
                      config.SIGNAL_RESULT.format(pair=pair, expiry=expiry,
                                                  direction=direction),
                      config.SIGNAL_KB)

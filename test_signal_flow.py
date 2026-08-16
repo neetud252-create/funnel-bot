@@ -344,6 +344,81 @@ async def main():
         check("m_action and new_signal emit an identical call sequence",
               shape_a == shape_b, str(shape_a) + " vs " + str(shape_b))
 
+        # --- BUY and SELL each get their own artwork -------------------------
+        print("\n[result] direction artwork")
+        check("both directions are paired with an asset",
+              all(isinstance(d, tuple) and len(d) == 2
+                  for d in config.SIGNAL_DIRECTIONS),
+              str(config.SIGNAL_DIRECTIONS))
+        for label, key in config.SIGNAL_DIRECTIONS:
+            check("%s artwork assets/%s.jpg exists" % (label.split()[0], key),
+                  os.path.exists(os.path.join("assets", key + ".jpg")),
+                  "assets/" + key + ".jpg is missing")
+        mapping = {d.split()[0]: k for d, k in config.SIGNAL_DIRECTIONS}
+        check("BUY maps to the green buy.jpg", mapping.get("BUY") == "buy",
+              repr(mapping))
+        check("SELL maps to the red sell.jpg", mapping.get("SELL") == "sell",
+              repr(mapping))
+
+        real_random = bot_mod.random
+        for idx, (want_label, want_key) in enumerate(config.SIGNAL_DIRECTIONS):
+            word = want_label.split()[0]
+            tg_id = 9100 + idx
+            fake_bot = FakeBot()
+            fake_db._users[tg_id] = {"ui_msg_id": 990 + idx, "album_ids": None}
+            # Force the draw so both branches are exercised, not just whichever
+            # one random happened to pick.
+            bot_mod.random = types.SimpleNamespace(choice=lambda seq, i=idx: seq[i])
+            try:
+                calls = await drive(bot_mod, fake_bot,
+                                    FakeCB(tg_id, "m:5", 990 + idx), sleeps)
+            finally:
+                bot_mod.random = real_random
+            assert_layout(word, calls, config, wait_label)
+            sends = [c for c in calls if c["kind"] != "delete"]
+            result = sends[-1]
+            check("%s: result screen is a photo" % word, result["kind"] == "photo",
+                  result["kind"])
+            check("%s: result photo is assets/%s.jpg" % (word, want_key),
+                  (result["asset"] or "").replace("\\", "/").endswith(
+                      "assets/" + want_key + ".jpg"),
+                  repr(result["asset"]))
+            check("%s: caption rides on the image, not a second message" % word,
+                  len(sends) == 3 and result["body"] is not None,
+                  str([c["kind"] for c in sends]))
+            check("%s: caption names the direction" % word,
+                  want_label in (result["body"] or ""), repr(result["body"]))
+            check("%s: New Signal button still attached" % word,
+                  result["markup"] is not None)
+            other = "sell" if want_key == "buy" else "buy"
+            check("%s: the other direction's artwork never appears" % word,
+                  not any(other + ".jpg" in (c["asset"] or "") for c in calls),
+                  str([c["asset"] for c in calls if c["asset"]]))
+
+        # --- the daily-limit screen must not show the BUY board --------------
+        print("\n[edge] daily limit screen stays text-only")
+        tg_id = 9300
+        fake_bot = FakeBot()
+        fake_db._users[tg_id] = {"ui_msg_id": 995, "album_ids": None}
+        db_mod = sys.modules["db"]
+        real_consume = db_mod.consume_signal
+
+        async def capped(tg, limit):
+            return False, limit, 0
+
+        db_mod.consume_signal = capped
+        try:
+            calls = await drive(bot_mod, fake_bot, FakeCB(tg_id, "m:5", 995), sleeps)
+        finally:
+            db_mod.consume_signal = real_consume
+        sends = [c for c in calls if c["kind"] != "delete"]
+        check("limit screen sends no image at all",
+              all(c["kind"] == "text" for c in sends),
+              str([(c["kind"], c["asset"]) for c in sends]))
+        check("limit screen shows the limit message",
+              config.MSG_DAILY_LIMIT in (sends[-1]["body"] or ""),
+              repr(sends[-1]["body"]))
+
         # --- every currency pair takes the same route ------------------------
         print("\n[coverage] every currency pair produces the same text-only stage")
         pairs = sorted(set(config.PAIR_CODES.values()))
