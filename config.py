@@ -79,9 +79,9 @@ T_CLOCK = pe(E_CLOCK, "\u23F0")
 T_CHART = pe(E_CHART, "\U0001F4CA")
 T_LENS  = pe(E_LENS, "\U0001F50D")
 T_BOLT  = pe(E_BOLT, "\u26A1")
-T_SIG_CHART = pe(E_SIG_CHART, "\U0001F4C8")
+T_SIG_CHART = pe(E_SIG_CHART, "\U0001F4CA")
 T_SIG_LENS  = pe(E_SIG_LENS, "\U0001F50D")
-T_SIG_GLASS = pe(E_SIG_GLASS, "\U0000231B")
+T_SIG_GLASS = pe(E_SIG_GLASS, "\U000023F3")
 
 # --- Currency pairs ---------------------------------------------------------
 # Single source of truth for the OTC pair list: the keyboard, the pagination,
@@ -295,27 +295,36 @@ SCREENS = {
 
 REVIEWS = ["reviews1", "reviews2", "reviews3", "reviews4", "reviews5"]
 
-# --- Signal flow: an unlocked M button on the test menu edits that screen into
-# a single static "analyzing" notice, then replaces it with the finished signal
-# once the fixed wait below has elapsed. The loading screen below uses premium
-# emoji via pe(); the result screen further down is still plain unicode.
-# See _run_signal in bot.py.
+# --- Signal flow: an unlocked M button on the test menu tears down the tapped
+# screen and puts up the waiting screen - three separate messages, in this order
+# (see _send_wait_screen in bot.py):
+#   1. SIGNAL_WAIT_PHOTO, image only, no caption and no buttons
+#   2. SIGNAL_CHART, the chart emoji alone in its own text message
+#   3. SIGNAL_ANALYZING, the two-line analysis notice
+# The chart deliberately does NOT ride along as the photo's caption: it is its
+# own message, which is what puts it on its own line at full custom-emoji size.
+# All three emoji are premium custom emoji, so these only render correctly with
+# parse_mode="HTML" - <tg-emoji> is dropped otherwise, leaving the plain-unicode
+# fallback that is written inside each tag. That fallback is what clients which
+# cannot show custom emoji display; it is not a replacement for the entity.
+# The result screen further down is still plain unicode.
 # The one delay for every signal, in seconds, counted from the user's final
 # selection. Deliberately independent of the chosen expiration: M1 and M10 both
 # land in 30s, and the tapped M value survives only as the {expiry} label on the
 # result screen below.
 SIGNAL_COUNTDOWN = 30
 
-# Shown once, right after the M button is tapped, and never edited again - there
-# is no live timer, so {wait} is the full delay ("00:30" from _wait_label in
-# bot.py) and not a value that ticks down.
-# The chart leads the message, then the analyzing line, then the wait line. All
-# three emoji are premium custom emoji, so this caption only renders correctly
-# with parse_mode="HTML" - <tg-emoji> is silently dropped otherwise. The visible
-# character inside each tag is the plain-unicode fallback Telegram shows to
-# clients that cannot display the custom emoji; it is not a replacement for it.
-SIGNAL_ANALYZING = (T_SIG_CHART + "\n\n"
-                    + T_SIG_LENS + " <b>I'm analyzing the chart. It won't take long.</b>\n\n"
+# The image above the waiting text. Unchanged by the three-message split - this
+# is the same asset the tapped expiration screen was already showing, it is just
+# re-sent without its caption or button grid instead of being edited in place.
+SIGNAL_WAIT_PHOTO = "expiration_time"
+
+# Message 2: the chart, alone. No text, no caption, no keyboard.
+SIGNAL_CHART = T_SIG_CHART
+
+# Message 3. Written once and never edited - there is no live timer, so {wait}
+# is the full delay ("00:30" from _wait_label in bot.py), not a ticking value.
+SIGNAL_ANALYZING = (T_SIG_LENS + " <b>I'm analyzing the chart. It won't take long.</b>\n\n"
                     + T_SIG_GLASS + " Please wait {wait} — the signal is almost there.")
 
 # TODO: the direction is picked at random per signal (see _run_signal in bot.py)

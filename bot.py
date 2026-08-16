@@ -274,21 +274,67 @@ async def s_action(cb: CallbackQuery):
     # Every S option is locked for now.
     await cb.answer("\U0001F512 Locked. Coming soon", show_alert=True)
 
-async def _edit_signal(bot, tg_id, msg_id, text, is_caption):
-    # The screen being counted down on is a photo when assets/test_menu.jpg (or
-    # assets/buy.jpg) exists and plain text when render() fell back, so pick the
-    # matching edit method. A failed edit only costs one tick - "message is not
-    # modified", a flood wait or a screen the user already navigated away from
-    # must never take the countdown down with it.
-    try:
-        if is_caption:
-            await bot.edit_message_caption(chat_id=tg_id, message_id=msg_id,
-                                           caption=text, parse_mode="HTML")
-        else:
-            await bot.edit_message_text(text=text, chat_id=tg_id, message_id=msg_id,
-                                        parse_mode="HTML")
-    except Exception as e:
-        logging.warning("signal edit failed for tg_id=%s msg_id=%s: %s", tg_id, msg_id, e)
+async def _send_wait_screen(bot, tg_id, msg_id, total):
+    # The waiting screen is three separate messages, in this order: the image on
+    # its own, then the chart emoji on its own, then the analysis text. The chart
+    # is a standalone message on purpose - as a photo caption it would render as
+    # a small inline glyph on the same line as the text instead of the full-size
+    # custom emoji the reference shows.
+    # Returns (ui_id, extra_ids): ui_id is the message render() will clear when
+    # the signal lands, extra_ids are the two text messages this has to delete
+    # itself, since render() only ever clears ui_msg_id.
+    # Clear the screen first, so the tapped button grid is gone while we wait.
+    # ui_msg_id is the tapped screen, album_ids holds the waiting messages of a
+    # run this tap just cancelled (they are parked there precisely so they
+    # cannot be orphaned here), and msg_id is added only when it is neither -
+    # a tap on a stale keyboard - so the common path issues no redundant delete.
+    user = await db.get_user(tg_id)
+    stale = []
+    if user:
+        if user["ui_msg_id"]:
+            stale.append(int(user["ui_msg_id"]))
+        if user["album_ids"]:
+            stale.extend(int(m) for m in str(user["album_ids"]).split(","))
+    if msg_id and msg_id not in stale:
+        stale.append(msg_id)
+    await _drop_msgs(bot, tg_id, stale)
+    key = config.SIGNAL_WAIT_PHOTO
+    photo_msg = None
+    if media_missing(key, "jpg"):
+        # Same fallback as render(): losing the image must not lose the signal,
+        # so the two text messages still go out on their own.
+        logging.error("asset %r missing - waiting screen goes out without its "
+                      "image; commit the file to assets/ to restore it", key)
+    else:
+        photo_msg = await bot.send_photo(tg_id, photo_for(key))
+        remember(key, photo_msg)
+    chart_msg = await bot.send_message(tg_id, config.SIGNAL_CHART, parse_mode="HTML")
+    text_msg = await bot.send_message(
+        tg_id, config.SIGNAL_ANALYZING.format(wait=_wait_label(total)),
+        parse_mode="HTML")
+    # With no image the chart message becomes the screen render() replaces, so
+    # the fallback path still leaves exactly one message behind for it to clear.
+    if photo_msg:
+        ui_id = photo_msg.message_id
+        extra_ids = [chart_msg.message_id, text_msg.message_id]
+    else:
+        ui_id = chart_msg.message_id
+        extra_ids = [text_msg.message_id]
+    await db.set_ui_msg(tg_id, ui_id)
+    # Park the extras in album_ids so that if the user walks off to another
+    # screen mid-wait, wipe() takes them down with everything else.
+    await db.set_album(tg_id, ",".join(str(i) for i in extra_ids))
+    return ui_id, extra_ids
+
+async def _drop_msgs(bot, tg_id, ids):
+    # Best-effort delete. Deliberately touches no DB state: the cancellation
+    # path below runs this detached, and a set_album(None) landing late would
+    # wipe the bookkeeping of whichever run superseded it.
+    for mid in ids:
+        try:
+            await bot.delete_message(chat_id=tg_id, message_id=mid)
+        except Exception:
+            pass
 
 def _wait_label(seconds):
     # mm:ss clock label for the analyzing screen: 30 -> "00:30", 90 -> "01:30".
@@ -297,26 +343,29 @@ def _wait_label(seconds):
     minutes, secs = divmod(seconds, 60)
     return "%02d:%02d" % (minutes, secs)
 
-async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
-    # Edits the tapped screen once into the static "analyzing" notice (no new
-    # message, and the edit drops the button grid so nothing is tappable while
-    # we wait), waits out the fixed delay, then swaps it for the finished
+async def _run_signal(bot, tg_id, msg_id, expiry):
+    # Puts up the three-message waiting screen, waits out the fixed delay, then
+    # clears the two text messages and replaces the image with the finished
     # signal. There is no live timer - the screen is written exactly once.
     # The wait is always config.SIGNAL_COUNTDOWN, whichever expiration was
     # tapped: the M button now only labels the trade on the result screen, it
-    # does not set the delay. The deadline is taken before that edit, so its
-    # round-trip does not push delivery late - every signal lands 30s after the
-    # final tap, M1 and M10 alike.
+    # does not set the delay. The deadline is taken before the three sends, so
+    # their round-trips do not push delivery late - every signal lands 30s after
+    # the final tap, M1 and M10 alike.
+    extra_ids = []
     try:
         total = config.SIGNAL_COUNTDOWN
         loop = asyncio.get_running_loop()
         deadline = loop.time() + total
-        await _edit_signal(bot, tg_id, msg_id,
-                           config.SIGNAL_ANALYZING.format(wait=_wait_label(total)),
-                           is_caption)
+        ui_id, extra_ids = await _send_wait_screen(bot, tg_id, msg_id, total)
         await asyncio.sleep(max(0, deadline - loop.time()))
+        # Unconditional, and ahead of the ownership check below: these two are
+        # ours either way, and a screen that took over mid-wait replaced only
+        # ui_msg_id, so nothing else is going to clean them up.
+        await _drop_msgs(bot, tg_id, extra_ids)
+        await db.set_album(tg_id, None)
         user = await db.get_user(tg_id)
-        if user and user["ui_msg_id"] != msg_id:
+        if user and user["ui_msg_id"] != ui_id:
             # Another screen took over the chat while we counted down; it owns
             # ui_msg_id now, so dropping the signal beats clobbering it.
             return
@@ -339,7 +388,11 @@ async def _run_signal(bot, tg_id, msg_id, is_caption, expiry):
                                                  direction=direction),
                      config.SIGNAL_KB)
     except asyncio.CancelledError:
-        pass
+        # Superseded by a newer tap. Detached, because every await in here is
+        # about to be cancelled too; the replacement run's wipe() is the backstop
+        # if this loses the race.
+        if extra_ids:
+            asyncio.create_task(_drop_msgs(bot, tg_id, list(extra_ids)))
     except Exception:
         logging.exception("signal flow failed for tg_id=%s", tg_id)
     finally:
@@ -366,8 +419,7 @@ async def _start_signal(bot, cb, expiry):
     if old:
         old.cancel()
     _signal_tasks[tg_id] = asyncio.create_task(
-        _run_signal(bot, tg_id, cb.message.message_id,
-                    bool(getattr(cb.message, "photo", None)), expiry))
+        _run_signal(bot, tg_id, cb.message.message_id, expiry))
 
 @dp.callback_query(F.data.startswith("m:"))
 async def m_action(cb: CallbackQuery, bot: Bot):
