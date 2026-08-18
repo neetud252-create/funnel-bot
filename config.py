@@ -76,6 +76,12 @@ E_NUDGE_ROCKET        = "5188481279963715781"
 NUDGE_WARN_FALLBACK   = "\U000026A0\U0000FE0F"   # warning sign
 NUDGE_ROCKET_FALLBACK = "\U0001F680"             # rocket
 E_SIG_GLASS = "5386367538735104399"
+# Expiration-time screen (SCREENS["test_menu"]) only. Swap these to restyle it
+# without touching the copy; each is rendered through pe(), which keeps the
+# plain-emoji fallback that non-Premium clients see.
+E_EXP_CLOCK = "5382194935057372936"
+E_EXP_BULB  = "5258216851472654189"
+E_EXP_DOWN  = "5406745015365943482"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -299,7 +305,12 @@ SCREENS = {
     # the waiting screen, which is text-only.
     "test_menu": {
         "photo": "expiration_time",
-        "text": "\U0001F680 <b>Upcoming Project Test</b>\nWe're preparing something new and exciting.\nBe early. Be involved. Help us build better.\n\n\U00002B07️ <b>Choose below</b>",
+        # TODO: "Recommended: S5" is fixed copy - nothing computes it. Note that
+        # every S button is locked by s_action, so S5 cannot actually be picked;
+        # switch this to an M value or unlock S5 before it reads as truthful.
+        "text": (pe(E_EXP_CLOCK, "\U000023F1") + " <b>Choose the expiration time:</b>\n\n"
+                 + pe(E_EXP_BULB, "\U0001F4A1") + " <b>Recommended:</b> S5\n\n"
+                 + pe(E_EXP_DOWN, "\U00002B07\U0000FE0F") + " Choose below"),
         "kb": [[("\U0001F512 S5", "cb:s:5")],
                [("\U0001F512 S10", "cb:s:10"), ("\U0001F512 S15", "cb:s:15")],
                [("\U0001F512 S20", "cb:s:20"), ("\U0001F512 S25", "cb:s:25"), ("\U0001F512 S30", "cb:s:30")],
