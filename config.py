@@ -40,6 +40,14 @@ ENABLE_AUTO_RETRY = os.getenv("ENABLE_AUTO_RETRY", "").strip().lower() in ("1", 
 # everyone. This throttles per user before the shared queue is ever touched.
 UID_LOOKUP_COOLDOWN = int(os.getenv("UID_LOOKUP_COOLDOWN", "20"))
 
+# Chat the boot-time media warm sends throwaway uploads to (and deletes again).
+# Telegram issues a file_id only in response to an actual send, so warming needs
+# somewhere to send. Falls back to the first admin; unset means warming is
+# skipped and the first user on each screen pays for that upload once.
+_warm = os.getenv("MEDIA_WARM_CHAT", "").strip()
+MEDIA_WARM_CHAT = (int(_warm) if _warm.lstrip("-").isdigit()
+                   else (_warm or (ADMIN_IDS[0] if ADMIN_IDS else None)))
+
 E_INFO  = "5334544901428229844"
 E_POINT = "5415758949129404605"
 E_BACK  = "5305522282695768654"

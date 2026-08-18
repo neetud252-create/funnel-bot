@@ -1,4 +1,4 @@
-import asyncio, os, logging, random, re, time
+import asyncio, hashlib, os, logging, random, re, time
 from decimal import Decimal
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -31,32 +31,181 @@ _expiry_choice = {}
 # one extra lookup is harmless.
 _uid_lookup_at = {}
 
+# Cache entries are (file_id, content_hash). The hash is of the file's BYTES at
+# the moment Telegram issued that file_id, so replacing artwork on disk changes
+# the hash, invalidates the entry and triggers exactly one re-upload - there is
+# never a cache to clear by hand after swapping an image.
+# _file_hashes memoises sha256 on (mtime_ns, size), so each file is read once
+# per process and every later check is a bare os.stat.
+_file_hashes = {}
+
+def asset_path(key, ext):
+    return "assets/" + key + "." + ext
+
+def content_hash(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _file_hashes.get(path)
+    if hit and hit[0] == sig:
+        return hit[1]
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return None
+    digest = h.hexdigest()
+    _file_hashes[path] = (sig, digest)
+    return digest
+
+def cached_id(key, ext):
+    """Stored file_id, but only while the file on disk still matches the hash it
+    was cached under. A mismatch drops the entry so the caller re-uploads."""
+    cache = _video_cache if ext == "mp4" else _photo_cache
+    entry = cache.get(key)
+    if not entry:
+        return None
+    file_id, cached_hash = entry
+    path = asset_path(key, ext)
+    if not os.path.exists(path):
+        # Not shipped in this image - nothing to compare against, so trust it.
+        return file_id
+    if cached_hash and content_hash(path) != cached_hash:
+        logging.info("asset %r changed on disk - re-uploading", key)
+        cache.pop(key, None)
+        return None
+    return file_id
+
 def photo_for(key):
-    return _photo_cache.get(key) or FSInputFile("assets/" + key + ".jpg")
+    return cached_id(key, "jpg") or FSInputFile(asset_path(key, "jpg"))
 
 def video_for(key):
-    return _video_cache.get(key) or FSInputFile("assets/" + key + ".mp4")
+    return cached_id(key, "mp4") or FSInputFile(asset_path(key, "mp4"))
 
 def media_missing(key, ext):
     # A cached file_id means Telegram already holds the media; otherwise we have
     # to upload the local file, and an asset that never got committed takes the
     # whole screen down (see assets/howto.jpg, assets/mode.jpg).
+    return not cached_id(key, ext) and not os.path.exists(asset_path(key, ext))
+
+async def _store(key, ext, file_id):
+    # Write through to the DB, but only when something actually changed - once
+    # the cache is warm this is a dict comparison and no query at all.
+    h = content_hash(asset_path(key, ext))
     cache = _video_cache if ext == "mp4" else _photo_cache
-    return not cache.get(key) and not os.path.exists("assets/" + key + "." + ext)
-
-def remember(key, msg):
+    if cache.get(key) == (file_id, h):
+        return
+    cache[key] = (file_id, h)
     try:
-        if msg and getattr(msg, "photo", None):
-            _photo_cache[key] = msg.photo[-1].file_id
+        await db.save_media_cache(key, file_id, h)
     except Exception:
-        pass
+        logging.exception("media_cache write failed for %r", key)
 
-def remember_video(key, msg):
+async def _forget(key, ext):
+    (_video_cache if ext == "mp4" else _photo_cache).pop(key, None)
     try:
-        if msg and getattr(msg, "video", None):
-            _video_cache[key] = msg.video.file_id
+        await db.drop_media_cache(key)
     except Exception:
-        pass
+        logging.exception("media_cache delete failed for %r", key)
+
+async def remember(key, msg):
+    try:
+        fid = msg.photo[-1].file_id if msg and getattr(msg, "photo", None) else None
+    except Exception:
+        return
+    if fid:
+        await _store(key, "jpg", fid)
+
+async def remember_video(key, msg):
+    try:
+        fid = msg.video.file_id if msg and getattr(msg, "video", None) else None
+    except Exception:
+        return
+    if fid:
+        await _store(key, "mp4", fid)
+
+async def send_media(bot, tg_id, key, is_video, text, kb):
+    """Send a screen's media, preferring the cached file_id.
+
+    Telegram can reject a stored file_id - they expire, and one issued to a
+    different bot is never valid here. That must not surface as a broken screen:
+    drop the row and pay for a single upload instead.
+    """
+    ext = "mp4" if is_video else "jpg"
+    send = bot.send_video if is_video else bot.send_photo
+    media = cached_id(key, ext) or FSInputFile(asset_path(key, ext))
+    try:
+        return await send(tg_id, media, caption=text, parse_mode="HTML",
+                          reply_markup=kb)
+    except TelegramBadRequest:
+        if not isinstance(media, str):
+            raise               # a fresh upload failed; nothing to retry with
+        logging.warning("cached file_id rejected for %r - dropping it and "
+                        "re-uploading", key)
+        await _forget(key, ext)
+        return await send(tg_id, FSInputFile(asset_path(key, ext)), caption=text,
+                          parse_mode="HTML", reply_markup=kb)
+
+async def load_media_cache():
+    """One query at startup. Photo vs video is inferred from which file exists,
+    which is why the table carries no kind column."""
+    try:
+        rows = await db.load_media_cache()
+    except Exception:
+        logging.exception("media_cache load failed - starting with an empty cache")
+        return
+    for r in rows:
+        key = r["asset_key"]
+        entry = (r["file_id"], r["content_hash"])
+        if os.path.exists(asset_path(key, "mp4")):
+            _video_cache[key] = entry
+        else:
+            _photo_cache[key] = entry
+    logging.info("media_cache loaded: %d photo, %d video",
+                 len(_photo_cache), len(_video_cache))
+
+async def warm_media_cache(bot):
+    """Upload every asset whose file_id is missing or stale, once, so no real
+    user pays for an upload. Detached on purpose - polling is already serving
+    while this works through the list."""
+    chat = config.MEDIA_WARM_CHAT
+    if not chat:
+        logging.info("MEDIA_WARM_CHAT not set - skipping cache warm; the first "
+                     "user on each screen pays for that screen's upload once")
+        return
+    try:
+        names = sorted(os.listdir("assets"))
+    except OSError:
+        logging.exception("cannot list assets/ - skipping cache warm")
+        return
+    warmed = 0
+    for name in names:
+        key, _, ext = name.rpartition(".")
+        if ext not in ("jpg", "mp4") or not key:
+            continue
+        if cached_id(key, ext):
+            continue
+        try:
+            sender = bot.send_video if ext == "mp4" else bot.send_photo
+            m = await sender(chat, FSInputFile(asset_path(key, ext)))
+            if ext == "mp4":
+                await remember_video(key, m)
+            else:
+                await remember(key, m)
+            warmed += 1
+            try:
+                await bot.delete_message(chat_id=chat, message_id=m.message_id)
+            except Exception:
+                pass
+            # Spaced out so warming cannot trip Telegram's flood limits.
+            await asyncio.sleep(1)
+        except Exception:
+            logging.exception("cache warm failed for %r", key)
+    logging.info("media_cache warm complete: %d asset(s) uploaded", warmed)
 
 # Telegram rejects the entire message if any inline button URL is malformed, so
 # one unset link env var can blank out a whole screen. Require a scheme and a
@@ -138,14 +287,12 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
         logging.error("asset %r missing - sending %r as text only; commit the "
                       "file to assets/ to restore the image", media_key, media_key)
         m = await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=kb)
-    elif is_video:
-        m = await bot.send_video(tg_id, video_for(media_key), caption=text,
-                                 parse_mode="HTML", reply_markup=kb)
-        remember_video(media_key, m)
     else:
-        m = await bot.send_photo(tg_id, photo_for(media_key), caption=text,
-                                 parse_mode="HTML", reply_markup=kb)
-        remember(media_key, m)
+        m = await send_media(bot, tg_id, media_key, is_video, text, kb)
+        if is_video:
+            await remember_video(media_key, m)
+        else:
+            await remember(media_key, m)
     await db.set_ui_msg(tg_id, m.message_id)
 
 async def show(bot, tg_id, key):
@@ -205,7 +352,7 @@ async def results(cb: CallbackQuery, bot: Bot):
     media = [InputMediaPhoto(media=photo_for(k)) for k in config.REVIEWS]
     msgs = await bot.send_media_group(tg_id, media)
     for k, msg in zip(config.REVIEWS, msgs):
-        remember(k, msg)
+        await remember(k, msg)
     s = config.SCREENS["results"]
     m = await bot.send_message(tg_id, s["text"], parse_mode="HTML",
                                reply_markup=build_kb(s["kb"]))
@@ -746,6 +893,10 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     # Connect the panel-bot verification session (degrades gracefully if unset).
     await panelbot.start()
+    # file_id cache: one query to load it, then warm the gaps in the background
+    # so startup is not delayed and no user ever pays for an upload.
+    await load_media_cache()
+    asyncio.create_task(warm_media_cache(bot))
     # Railway routes the custom domain to $PORT (8080). Run the postback API
     # (uvicorn) and long polling side by side, plus the retry worker if enabled.
     port = int(os.environ.get("PORT", 8000))

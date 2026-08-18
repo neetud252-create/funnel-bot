@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS traders (
     last_event TEXT,
     updated_at TIMESTAMPTZ DEFAULT now()
 );
+-- Telegram file_id cache. Keyed on the asset key; content_hash is the sha256 of
+-- the file on disk at the moment that file_id was issued, so replacing artwork
+-- invalidates the row automatically and no cache ever needs clearing by hand.
+CREATE TABLE IF NOT EXISTS media_cache (
+    asset_key    TEXT PRIMARY KEY,
+    file_id      TEXT NOT NULL,
+    content_hash TEXT,
+    updated_at   TIMESTAMPTZ DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS postbacks (
     id         BIGSERIAL PRIMARY KEY,
     raw        JSONB,
@@ -134,6 +143,28 @@ async def uid_owners(uid: str):
     async with pool.acquire() as c:
         rows = await c.fetch("SELECT tg_id FROM users WHERE uid=$1 ORDER BY tg_id", uid)
         return [r["tg_id"] for r in rows]
+
+# --- media file_id cache ---
+async def load_media_cache():
+    # ONE query at startup; bot.py fans the rows into its in-memory dicts.
+    async with pool.acquire() as c:
+        return await c.fetch("SELECT asset_key, file_id, content_hash FROM media_cache")
+
+async def save_media_cache(asset_key: str, file_id: str, content_hash):
+    async with pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO media_cache (asset_key, file_id, content_hash, updated_at)
+            VALUES ($1, $2, $3, now())
+            ON CONFLICT (asset_key) DO UPDATE SET
+                file_id      = EXCLUDED.file_id,
+                content_hash = EXCLUDED.content_hash,
+                updated_at   = now()
+        """, asset_key, file_id, content_hash)
+
+async def drop_media_cache(asset_key: str):
+    # Called when Telegram rejects a stored file_id, so the next send re-uploads.
+    async with pool.acquire() as c:
+        await c.execute("DELETE FROM media_cache WHERE asset_key=$1", asset_key)
 
 # --- Group C: affiliate postbacks ---
 async def log_postback(raw: dict):
