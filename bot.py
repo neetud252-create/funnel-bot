@@ -1,7 +1,7 @@
 import asyncio, os, logging, random, re
 from decimal import Decimal
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
@@ -158,8 +158,32 @@ async def show(bot, tg_id, key):
 @dp.message(CommandStart())
 async def start(m: Message, bot: Bot, state: FSMContext):
     await state.clear()
-    await db.touch_user(m.from_user.id, m.from_user.username)
-    await show(bot, m.from_user.id, "gate")
+    tg_id = m.from_user.id
+    await db.touch_user(tg_id, m.from_user.username)
+    user = await db.get_user(tg_id)
+    if user and user["verified"]:
+        # Verified users go straight to the menu and never re-enter the funnel
+        # or the intro sequence. The stored flag is trusted deliberately - the
+        # panel bot is NOT re-queried here. Panel lookups are rate limited and
+        # serialised behind a lock, so one per /start would risk a FloodWait;
+        # panelbot then raises PanelUnavailable("floodwait") and NO verification
+        # succeeds for ANY user until it clears. A stale flag costs nothing; a
+        # FloodWait breaks the funnel for everyone at once.
+        await _show_menu(bot, tg_id)
+        return
+    await show(bot, tg_id, "gate")
+
+@dp.message(Command("unverify"))
+async def unverify_cmd(m: Message):
+    # Admin-only testing helper: /unverify [tg_id], defaults to the caller.
+    # Registered above the Reg.waiting_uid handler so it still works mid-funnel.
+    if m.from_user.id not in config.ADMIN_IDS:
+        return
+    parts = (m.text or "").split()
+    target = (int(parts[1]) if len(parts) > 1 and parts[1].lstrip("-").isdigit()
+              else m.from_user.id)
+    await db.unverify(target)
+    await m.answer("Un-verified tg_id=%d. Send /start to re-run the flow." % target)
 
 @dp.callback_query(F.data == "check_sub")
 async def check_sub(cb: CallbackQuery, bot: Bot):

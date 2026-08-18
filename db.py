@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS users (
     created_at   TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+-- Backfill for users verified before verified_at existed. set_verified wrote
+-- last_checked at the moment of verification, so it is the best record we have.
+-- Idempotent (only NULL rows), so it is safe to re-run on every boot.
+UPDATE users SET verified_at = COALESCE(last_checked, created_at)
+ WHERE verified = TRUE AND verified_at IS NULL;
 -- Daily signal quota. The counter is stored per user so a restart cannot reset
 -- it, and last_reset_date is what makes the rollover automatic: any row whose
 -- date is not CURRENT_DATE is treated as 0 used and rewritten on first touch,
@@ -166,10 +172,22 @@ async def cache_trader(trader_id: str, deposit, last_event="panel"):
         """, trader_id, deposit, last_event)
 
 async def set_verified(tg_id: int, deposit):
+    # The ONE place `verified` is ever set. Every grant path routes through here
+    # (bot.py: the ACCESS branch, the TEST_MODE bypass, retry_worker), so no
+    # route can hand out access without stamping the flag. verified_at uses
+    # COALESCE so a re-verification keeps the original moment.
     async with pool.acquire() as c:
         await c.execute(
-            "UPDATE users SET verified=TRUE, deposit=$2, last_checked=now() WHERE tg_id=$1",
+            "UPDATE users SET verified=TRUE, deposit=$2, last_checked=now(), "
+            "verified_at=COALESCE(verified_at, now()) WHERE tg_id=$1",
             tg_id, deposit)
+
+async def unverify(tg_id: int):
+    # Testing helper behind /unverify. Drops the user back to the start of the
+    # funnel; uid is deliberately kept so the same id can be re-sent at once.
+    async with pool.acquire() as c:
+        await c.execute("UPDATE users SET verified=FALSE, verified_at=NULL, "
+                        "deposit=0, last_checked=NULL WHERE tg_id=$1", tg_id)
 
 # --- Daily signal quota -----------------------------------------------------
 # Both helpers below roll the counter over themselves when last_reset_date is
