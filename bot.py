@@ -505,12 +505,19 @@ async def _run_verification(bot, tg_id, uid):
         parse_mode="HTML")
     try:
         info = await panelbot.lookup_trader(uid)
-    except panelbot.PanelUnavailable:
+    except panelbot.PanelUnavailable as e:
         # Panel silent/disabled: defer to the retry worker, tell the user.
+        # The reason string ("disabled"/"timeout"/"floodwait"/"session"/"error")
+        # is what separates a broken session from a slow panel.
+        logging.warning("VERIFY uid=%s tg_id=%s -> PanelUnavailable(%s) -> MSG_DELAYED",
+                        uid, tg_id, e)
         await _replace(bot, tg_id, ack.message_id, config.MSG_DELAYED)
         return
     if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
         dep = info.get("sum_deposits") or Decimal(0)
+        logging.info("VERIFY uid=%s tg_id=%s campaign MATCH dep=%s min=%s -> %s",
+                     uid, tg_id, dep, config.MIN_DEPOSIT,
+                     "ACCESS" if dep >= config.MIN_DEPOSIT else "NEED_DEPOSIT")
         if dep >= config.MIN_DEPOSIT:
             await db.set_verified(tg_id, dep)
             # Verified: drop the ack and hand the user the main menu.
@@ -522,7 +529,11 @@ async def _run_verification(bot, tg_id, uid):
         else:
             await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT, _register_btn())
     else:
-        # Not found, or a different campaign.
+        # Not found, or a different campaign. record_found=False with a healthy
+        # panel usually means the reply format changed - see PANEL PARSE above.
+        logging.info("VERIFY uid=%s tg_id=%s -> WRONG_LINK (record_found=%s "
+                     "campaign_id=%s expected=%s)", uid, tg_id, info is not None,
+                     info.get("campaign_id") if info else None, config.CAMPAIGN_ID)
         await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK, _register_btn())
 
 @dp.message(Reg.waiting_uid)
