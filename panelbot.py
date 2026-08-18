@@ -39,10 +39,23 @@ HARD_TIMEOUT = REPLY_TIMEOUT + 10
 LOG_RAW = os.getenv("PANEL_LOG_RAW", "").strip().lower() in ("1", "true", "yes", "on")
 RAW_LOG_LIMIT = 1000
 
+# Deploy-overlap protection. Two containers connecting the same StringSession at
+# once makes Telegram PERMANENTLY revoke the auth key (AuthKeyDuplicatedError) -
+# the session cannot be recovered, only regenerated. Railway's Teardown Overlap
+# and Draining are set to 0, and this delay is the second layer: hold off the
+# connect long enough for any previous container to be fully gone. The wait runs
+# in a background task, so aiogram and uvicorn still start immediately.
+try:
+    CONNECT_DELAY = max(0, int(os.getenv("PANEL_CONNECT_DELAY", "20").strip()))
+except ValueError:
+    CONNECT_DELAY = 20
+
 _client = None
 _enabled = False
 _lock = asyncio.Lock()
 _last = 0.0
+_start_task = None      # kept referenced so the task is not garbage collected
+_starting = False       # True while the delayed connect is still pending
 
 
 class PanelUnavailable(Exception):
@@ -67,8 +80,40 @@ def _env(name):
 
 
 async def start():
-    """Connect the Telethon user session. If creds/session are missing or the
-    session isn't authorized, log it and leave verification disabled."""
+    """Kick off the panel session connect and return immediately.
+
+    The connect is deliberately NOT awaited: it waits CONNECT_DELAY seconds
+    first (deploy-overlap protection), and blocking on that would delay long
+    polling and the uvicorn postback server by the same amount. Until it
+    finishes, available() stays False and lookups raise
+    PanelUnavailable("warmup"), which the caller already routes to MSG_DELAYED
+    and the retry worker.
+    """
+    global _start_task, _starting
+    _starting = True
+    _start_task = asyncio.create_task(_connect_session())
+    return _start_task
+
+
+async def _connect_session():
+    """Background wrapper around the connect.
+
+    Nothing awaits this task, so an escaping exception would surface only as an
+    "exception was never retrieved" warning at garbage-collection time. Catch it
+    here so a failure is always visible and _starting always clears.
+    """
+    global _starting
+    try:
+        await _do_connect()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("verification DISABLED - panelbot start task crashed")
+    finally:
+        _starting = False
+
+
+async def _do_connect():
     global _client, _enabled
     api_id = _env("TELEGRAM_API_ID")
     api_hash = _env("TELEGRAM_API_HASH")
@@ -89,6 +134,14 @@ async def start():
         # reported as a generic start failure.
         log.error("verification DISABLED - TELEGRAM_API_ID must be all digits, got %r", api_id)
         return
+    # Config is validated first so a misconfigured deploy reports immediately
+    # rather than CONNECT_DELAY seconds later.
+    if CONNECT_DELAY:
+        log.info("panelbot: holding %ss before connecting so any previous "
+                 "container is fully gone (PANEL_CONNECT_DELAY). Lookups return "
+                 "MSG_DELAYED until this completes.", CONNECT_DELAY)
+        await asyncio.sleep(CONNECT_DELAY)
+    client = None
     try:
         client = TelegramClient(StringSession(session), int(api_id), api_hash)
         await client.connect()
@@ -114,9 +167,29 @@ async def start():
             log.warning("panel bot %s did not resolve (%s) - lookups will probably "
                         "time out; check the handle and make sure the session "
                         "account has pressed Start on it", PANEL_BOT, e)
-    except Exception:
-        log.exception("verification DISABLED - panelbot start failed (malformed "
-                      "TELETHON_SESSION, wrong api_id/api_hash pair, or network error)")
+    except Exception as e:
+        # Classified by class name, not by importing telethon error classes: a
+        # symbol missing from the installed version would raise at import time
+        # and take the whole bot down (bot.py imports this module at startup).
+        if type(e).__name__ == "AuthKeyDuplicatedError":
+            # Terminal and unrecoverable. Telegram revokes the auth key for good
+            # when two clients use one session concurrently, so there is nothing
+            # to retry - a new StringSession must be generated. Kept distinct
+            # from the malformed-session message below because the remedy and
+            # the cause are completely different.
+            log.error("verification DISABLED - TELETHON_SESSION permanently "
+                      "killed by simultaneous use - regenerate it. Two containers "
+                      "connected the same session at once (deploy overlap). Not "
+                      "retrying: the auth key is revoked server-side and no "
+                      "restart will bring it back.")
+        else:
+            log.exception("verification DISABLED - panelbot start failed (malformed "
+                          "TELETHON_SESSION, wrong api_id/api_hash pair, or network error)")
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
         _client = None
         _enabled = False
 
@@ -259,7 +332,10 @@ async def lookup_trader(uid):
     a lock + spacing; caches the snapshot into the traders table.
     """
     if not available():
-        raise PanelUnavailable("disabled")
+        # "warmup" while the CONNECT_DELAY hold is still pending: a transient
+        # state after every deploy, not a misconfiguration. Both reasons route
+        # to MSG_DELAYED, but the logs must not confuse the two.
+        raise PanelUnavailable("warmup" if _starting else "disabled")
     try:
         text = await asyncio.wait_for(_query(uid), timeout=HARD_TIMEOUT)
     except asyncio.TimeoutError:
