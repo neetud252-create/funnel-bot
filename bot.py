@@ -431,11 +431,27 @@ async def m_action(cb: CallbackQuery, bot: Bot):
 
 @dp.callback_query(F.data == "new_signal")
 async def new_signal(cb: CallbackQuery, bot: Bot):
-    # Re-runs the flow on the signal message itself, reusing the last expiration.
+    # Opens the currency-pair picker at page 1 instead of immediately repeating
+    # the previous signal. The daily cap is re-checked here because this path no
+    # longer runs through _start_signal, which is where it used to be gated -
+    # without this, New Signal would be a way around the cap.
     if not cb.message:
         await cb.answer()
         return
-    await _start_signal(bot, cb, _expiry_choice.get(cb.from_user.id, "M1"))
+    tg_id = cb.from_user.id
+    _, left = await db.signal_state(tg_id, config.DAILY_SIGNAL_LIMIT)
+    if left <= 0:
+        # Same contract as _start_signal: answer with the alert and touch no
+        # message, so the user keeps the result screen they are on.
+        await cb.answer(config.MSG_DAILY_LIMIT, show_alert=True)
+        return
+    await cb.answer()
+    # A countdown still running for this user would render its result over the
+    # pair picker when it lands. _start_signal cancels for the same reason.
+    old = _signal_tasks.pop(tg_id, None)
+    if old:
+        old.cancel()
+    await show_pairs(bot, tg_id, 0)
 
 @dp.callback_query(F.data.startswith("asset:"))
 async def asset_action(cb: CallbackQuery):

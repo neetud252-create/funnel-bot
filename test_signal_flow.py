@@ -315,34 +315,62 @@ async def main():
                   bot_mod._expiry_choice.get(tg_id) == "M%d" % n,
                   repr(bot_mod._expiry_choice.get(tg_id)))
 
-        # --- path 2: the "New Signal" button on the result screen ------------
-        print("\n[path] new_signal - repeat from the result screen")
+        # --- path 2: "New Signal" opens the currency-pair picker -------------
+        # It used to repeat the previous signal immediately. It now sends the
+        # user back to pair selection, so there is no countdown on this path.
+        print("\n[path] new_signal - opens the pair picker at page 1")
         tg_id = 6001
         fake_bot = FakeBot()
-        bot_mod._expiry_choice[tg_id] = "M7"
         fake_db._users[tg_id] = {"ui_msg_id": 950, "album_ids": None}
+        sleeps.clear()
         cb = FakeCB(tg_id, "new_signal", message_id=950)
-        calls = await drive(bot_mod, fake_bot, cb, sleeps)
-        assert_layout("new_signal", calls, config, wait_label)
-        check("new_signal: waited the full countdown",
-              len(sleeps) == 1 and 29 < sleeps[0] <= config.SIGNAL_COUNTDOWN,
-              str(sleeps))
-        check("new_signal: reuses the last expiration",
-              any("M7" in (c["body"] or "") for c in calls))
+        await bot_mod.new_signal(cb, fake_bot)
+        calls = fake_bot.calls
+        check("new_signal: starts no countdown",
+              bot_mod._signal_tasks.get(tg_id) is None)
+        check("new_signal: schedules no sleep", not sleeps, str(sleeps))
+        check("new_signal: removes the tapped signal screen",
+              any(c["kind"] == "delete" and c["id"] == 950 for c in calls),
+              str([(c["kind"], c["id"]) for c in calls]))
+        check("new_signal: renders the pair screen image",
+              any(config.SCREENS["pairs"]["photo"] in (c["asset"] or "")
+                  for c in calls),
+              str([(c["kind"], c["asset"]) for c in calls]))
+        check("new_signal: pager reset to page 1",
+              any(("1/%d" % config.PAIR_PAGES) in str(c["markup"] or "")
+                  for c in calls))
+        signal_assets = [k for _, k in config.SIGNAL_DIRECTIONS]
+        check("new_signal: produces no signal result",
+              not any(any(a in (c["asset"] or "") for a in signal_assets)
+                      for c in calls),
+              str([(c["kind"], c["asset"]) for c in calls]))
 
-        # --- both paths agree ------------------------------------------------
-        print("\n[cross-check] both paths produce the same layout")
-        tg_a, tg_b = 7001, 7002
-        bot_a, bot_b = FakeBot(), FakeBot()
-        fake_db._users[tg_a] = {"ui_msg_id": 960, "album_ids": None}
-        fake_db._users[tg_b] = {"ui_msg_id": 961, "album_ids": None}
-        bot_mod._expiry_choice[tg_b] = "M3"
-        a = await drive(bot_mod, bot_a, FakeCB(tg_a, "m:3", 960), sleeps)
-        b = await drive(bot_mod, bot_b, FakeCB(tg_b, "new_signal", 961), sleeps)
-        shape_a = [c["kind"] for c in a]
-        shape_b = [c["kind"] for c in b]
-        check("m_action and new_signal emit an identical call sequence",
-              shape_a == shape_b, str(shape_a) + " vs " + str(shape_b))
+        # --- the daily cap still gates this path -----------------------------
+        # New Signal no longer runs through _start_signal, so it carries its own
+        # cap check. Without it the button would be a way around the limit.
+        print("\n[edge] new_signal still respects the daily cap")
+        tg_id = 6002
+        fake_bot = FakeBot()
+        fake_db._users[tg_id] = {"ui_msg_id": 951, "album_ids": None}
+        # fake_db is the same module object as sys.modules["db"], which the
+        # later cap test reaches for as db_mod - that name is not bound yet here.
+        real_state = fake_db.signal_state
+
+        async def exhausted(_tg_id, limit):
+            return limit, 0
+
+        fake_db.signal_state = exhausted
+        try:
+            cb = FakeCB(tg_id, "new_signal", message_id=951)
+            await bot_mod.new_signal(cb, fake_bot)
+        finally:
+            fake_db.signal_state = real_state
+        check("capped new_signal: shows the limit alert",
+              cb.answers and cb.answers[0][0] == config.MSG_DAILY_LIMIT
+              and cb.answers[0][1] is True, str(cb.answers))
+        check("capped new_signal: does not open the pair picker",
+              not fake_bot.calls,
+              str([(c["kind"], c["asset"]) for c in fake_bot.calls]))
 
         # --- BUY and SELL each get their own artwork -------------------------
         print("\n[result] direction artwork")
