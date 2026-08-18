@@ -499,6 +499,12 @@ async def _show_menu(bot, tg_id, test_mode=False):
     await render(bot, tg_id, s["photo"], text, s["kb"])
 
 async def _run_verification(bot, tg_id, uid):
+    """Run the panel check and show the verdict.
+
+    Returns True only when access was granted. Every other outcome tells the
+    user to send their account ID again, so the caller must re-arm UID capture -
+    with ENABLE_AUTO_RETRY off, that re-send is the only route to verification.
+    """
     # Immediate ack while we query the panel (can take up to ~20s), then verdict.
     ack = await bot.send_message(
         tg_id, "\U000023F3 <b>Checking account</b> <code>" + uid + "</code>\U00002026",
@@ -506,13 +512,14 @@ async def _run_verification(bot, tg_id, uid):
     try:
         info = await panelbot.lookup_trader(uid)
     except panelbot.PanelUnavailable as e:
-        # Panel silent/disabled: defer to the retry worker, tell the user.
-        # The reason string ("disabled"/"timeout"/"floodwait"/"session"/"error")
-        # is what separates a broken session from a slow panel.
+        # Panel silent/disabled. The reason string ("disabled"/"timeout"/
+        # "floodwait"/"session"/"warmup"/"error") is what separates a broken
+        # session from a slow panel. MSG_DELAYED asks the user to resend, and
+        # the caller re-arms capture so that actually works.
         logging.warning("VERIFY uid=%s tg_id=%s -> PanelUnavailable(%s) -> MSG_DELAYED",
                         uid, tg_id, e)
         await _replace(bot, tg_id, ack.message_id, config.MSG_DELAYED)
-        return
+        return False
     if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
         dep = info.get("sum_deposits") or Decimal(0)
         logging.info("VERIFY uid=%s tg_id=%s campaign MATCH dep=%s min=%s -> %s",
@@ -526,8 +533,10 @@ async def _run_verification(bot, tg_id, uid):
             except Exception:
                 pass
             await _show_menu(bot, tg_id)
+            return True
         else:
             await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT, _register_btn())
+            return False
     else:
         # Not found, or a different campaign. record_found=False with a healthy
         # panel usually means the reply format changed - see PANEL PARSE above.
@@ -535,6 +544,7 @@ async def _run_verification(bot, tg_id, uid):
                      "campaign_id=%s expected=%s)", uid, tg_id, info is not None,
                      info.get("campaign_id") if info else None, config.CAMPAIGN_ID)
         await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK, _register_btn())
+    return False
 
 @dp.message(Reg.waiting_uid)
 async def capture_uid(m: Message, bot: Bot, state: FSMContext):
@@ -588,7 +598,14 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         await db.set_verified(tg_id, Decimal(0))
         await _show_menu(bot, tg_id, test_mode=True)
         return
-    await _run_verification(bot, tg_id, uid)
+    granted = await _run_verification(bot, tg_id, uid)
+    if not granted:
+        # Every non-granted verdict asks the user to send their ID again
+        # (deposit then resend / register then resend / retry shortly). The
+        # state was cleared above and there is no catch-all message handler, so
+        # without re-arming here their next message matches nothing and is
+        # silently dropped. With ENABLE_AUTO_RETRY off this is the only way in.
+        await state.set_state(Reg.waiting_uid)
 
 async def retry_worker(bot):
     # Every 30 min, re-check users who have a uid but aren't verified yet.
@@ -626,10 +643,17 @@ async def main():
     # Connect the panel-bot verification session (degrades gracefully if unset).
     await panelbot.start()
     # Railway routes the custom domain to $PORT (8080). Run the postback API
-    # (uvicorn), long polling, and the retry worker side by side.
+    # (uvicorn) and long polling side by side, plus the retry worker if enabled.
     port = int(os.environ.get("PORT", 8000))
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
-    await asyncio.gather(server.serve(), dp.start_polling(bot), retry_worker(bot))
+    tasks = [server.serve(), dp.start_polling(bot)]
+    if config.ENABLE_AUTO_RETRY:
+        logging.info("ENABLE_AUTO_RETRY on - background re-check every 30 min")
+        tasks.append(retry_worker(bot))
+    else:
+        logging.info("ENABLE_AUTO_RETRY off - no background re-check; users "
+                     "re-send their account ID after depositing to verify")
+    await asyncio.gather(*tasks)
 
 asyncio.run(main())

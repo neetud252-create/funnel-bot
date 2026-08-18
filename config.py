@@ -28,6 +28,12 @@ CAMPAIGN_ID = os.getenv("CAMPAIGN_ID", "969716")
 VERIFY_MODE = os.getenv("VERIFY_MODE", "live").strip().lower()
 TEST_MODE = VERIFY_MODE == "test"
 
+# Background re-check of pending UIDs (bot.py retry_worker). OFF by default:
+# after depositing, the user re-sends their account ID to trigger a fresh
+# lookup, which is what MSG_NEED_DEPOSIT now instructs. Set ENABLE_AUTO_RETRY=1
+# to restore the 30-minute sweep that used to complete verification on its own.
+ENABLE_AUTO_RETRY = os.getenv("ENABLE_AUTO_RETRY", "").strip().lower() in ("1", "true", "yes", "on")
+
 E_INFO  = "5334544901428229844"
 E_POINT = "5415758949129404605"
 E_BACK  = "5305522282695768654"
@@ -374,7 +380,7 @@ _MINDEP = str(int(MIN_DEPOSIT)) if MIN_DEPOSIT == MIN_DEPOSIT.to_integral_value(
 # screen above is shown instead of a text verdict.
 
 # Campaign matches but deposits are below the minimum.
-MSG_NEED_DEPOSIT = T_MONEY + " <b>Almost there.</b>\n\nYour account is registered through our link. To unlock access, top up your balance with <b>$" + _MINDEP + "</b> or more \U00002014 verification then completes automatically."
+MSG_NEED_DEPOSIT = T_MONEY + " <b>Almost there.</b>\n\nYour account is registered through our link. To unlock access, top up your balance with <b>$" + _MINDEP + "</b> or more \U00002014 then send your account ID here again to complete verification."
 
 # Account not found, or registered under a different campaign.
 MSG_WRONG_LINK = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Account not linked to us.</b>\n\nTo get access, your Pocket Option account must be created through our official link. Please register with the button below, then send your new account ID."
