@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import asyncpg
 
 DB_URL = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
@@ -9,7 +10,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     tg_id        BIGINT PRIMARY KEY,
     username     TEXT,
-    uid          TEXT UNIQUE,
+    uid          TEXT,
     verified     BOOLEAN DEFAULT FALSE,
     deposit      NUMERIC(12,2) DEFAULT 0,
     attempts     INT DEFAULT 0,
@@ -26,6 +27,16 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
 -- day" means midnight UTC for every user regardless of their own timezone.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS signals_used_today INT NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reset_date DATE;
+
+-- One Pocket Option uid may now be claimed by several telegram accounts: the
+-- panel decides access, not our uniqueness. Databases created before this
+-- change still carry the constraint from when uid was TEXT UNIQUE, and the
+-- CREATE TABLE IF NOT EXISTS above will not remove it, so drop it explicitly.
+-- users_uid_key is Postgres's default name for a column-level UNIQUE on
+-- users(uid); connect() verifies afterwards that the drop actually took.
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_uid_key;
+-- The unique index went with the constraint; uid lookups still want one.
+CREATE INDEX IF NOT EXISTS users_uid_idx ON users (uid);
 
 CREATE TABLE IF NOT EXISTS traders (
     trader_id  TEXT PRIMARY KEY,
@@ -46,6 +57,20 @@ async def connect():
     pool = await asyncpg.create_pool(DB_URL, min_size=1, max_size=5)
     async with pool.acquire() as c:
         await c.execute(SCHEMA)
+        # If the drop above did not apply (constraint created under a different
+        # name), every second claimer of a uid would hit UniqueViolationError
+        # inside save_uid_only and be shown MSG_UID_ERROR. Say so loudly at boot
+        # rather than let it surface as a mystery halfway down the funnel.
+        left = await c.fetch("""
+            SELECT c.conname FROM pg_constraint c
+            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+            WHERE c.conrelid = 'users'::regclass AND c.contype = 'u' AND a.attname = 'uid'
+        """)
+        if left:
+            logging.error("users.uid still has a UNIQUE constraint (%s) - shared uids "
+                          "will fail with UniqueViolationError. Drop it manually: "
+                          "ALTER TABLE users DROP CONSTRAINT <name>;",
+                          ", ".join(r["conname"] for r in left))
 
 async def touch_user(tg_id: int, username: str | None):
     async with pool.acquire() as c:
@@ -67,14 +92,31 @@ async def set_album(tg_id, ids):
 
 # Interim UID capture. TODO(Group C): move to a dedicated traders table with
 # verification state + postback linkage; users.uid is a stopgap store for now.
+# Unused since the uniqueness gate was removed from _capture_uid - kept because
+# it is the natural "who owns this" helper. Use uid_owners() for the full list.
 async def uid_owner(uid: str):
     async with pool.acquire() as c:
         row = await c.fetchrow("SELECT tg_id FROM users WHERE uid=$1", uid)
         return row["tg_id"] if row else None
 
 async def save_uid_only(tg_id: int, uid: str):
+    # Idempotent: tg_id is the PK, so a user re-sending their own uid rewrites
+    # the one row rather than creating a second. Upsert rather than a bare
+    # UPDATE so a user who somehow reaches capture without a row (never hit
+    # /start) still gets one instead of silently saving nothing.
     async with pool.acquire() as c:
-        await c.execute("UPDATE users SET uid=$1 WHERE tg_id=$2", uid, tg_id)
+        await c.execute("""
+            INSERT INTO users (tg_id, uid) VALUES ($1, $2)
+            ON CONFLICT (tg_id) DO UPDATE SET uid = EXCLUDED.uid
+        """, tg_id, uid)
+
+
+async def uid_owners(uid: str):
+    """Every telegram id currently holding this uid. Sharing is permitted - the
+    panel decides access - but bot.py logs a WARNING when this returns >1."""
+    async with pool.acquire() as c:
+        rows = await c.fetch("SELECT tg_id FROM users WHERE uid=$1 ORDER BY tg_id", uid)
+        return [r["tg_id"] for r in rows]
 
 # --- Group C: affiliate postbacks ---
 async def log_postback(raw: dict):

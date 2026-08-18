@@ -566,12 +566,18 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         await bot.send_message(tg_id, "\U00002757 Your account ID must be <b>numbers only</b> "
                                "(5\U0000201315 digits). Example: <b>123456789</b>", parse_mode="HTML")
         return
-    owner = await db.uid_owner(uid)
-    if owner is not None and owner != tg_id:
-        await bot.send_message(tg_id, "\U000026A0\U0000FE0F That account ID is already registered to another "
-                               "user. Please double-check and send your own ID.", parse_mode="HTML")
-        return
+    # No uniqueness gate: a uid already held by another telegram account still
+    # goes through the full panel lookup, and access is granted on the campaign
+    # + deposit check alone. Sharing is allowed by design.
     await db.save_uid_only(tg_id, uid)
+    # ...but it is worth seeing. Never let this reporting break the funnel.
+    try:
+        holders = await db.uid_owners(uid)
+        if len(holders) > 1:
+            logging.warning("UID SHARED uid=%s claimed by %d telegram ids: %s",
+                            uid, len(holders), ",".join(str(h) for h in holders))
+    except Exception:
+        logging.exception("uid_owners lookup failed for uid=%s", uid)
     await state.clear()
     await wipe(bot, tg_id)
     if config.TEST_MODE:
