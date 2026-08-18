@@ -168,6 +168,26 @@ async def load_media_cache():
     logging.info("media_cache loaded: %d photo, %d video",
                  len(_photo_cache), len(_video_cache))
 
+def referenced_assets():
+    """Every (key, ext) a screen can actually send.
+
+    Built from the same config the renderers read - SCREENS photo/video, the
+    reviews album and the signal artwork - rather than from a directory
+    listing. An asset sitting in assets/ that no screen references is never
+    uploaded, and adding a screen needs no change here.
+    """
+    ref = set()
+    for s in config.SCREENS.values():
+        if s.get("video"):
+            ref.add((s["video"], "mp4"))
+        if s.get("photo"):
+            ref.add((s["photo"], "jpg"))
+    for key in config.REVIEWS:
+        ref.add((key, "jpg"))
+    for _label, key in config.SIGNAL_DIRECTIONS:
+        ref.add((key, "jpg"))
+    return ref
+
 async def warm_media_cache(bot):
     """Upload every asset whose file_id is missing or stale, once, so no real
     user pays for an upload. Detached on purpose - polling is already serving
@@ -177,17 +197,17 @@ async def warm_media_cache(bot):
         logging.info("MEDIA_WARM_CHAT not set - skipping cache warm; the first "
                      "user on each screen pays for that screen's upload once")
         return
-    try:
-        names = sorted(os.listdir("assets"))
-    except OSError:
-        logging.exception("cannot list assets/ - skipping cache warm")
-        return
-    warmed = 0
-    for name in names:
-        key, _, ext = name.rpartition(".")
-        if ext not in ("jpg", "mp4") or not key:
-            continue
+    warmed = missing = 0
+    for key, ext in sorted(referenced_assets()):
         if cached_id(key, ext):
+            continue
+        if not os.path.exists(asset_path(key, ext)):
+            # Referenced by a screen but not shipped in this image. render()
+            # already degrades these to text-only, so there is nothing to
+            # upload - but it is worth saying out loud once per boot.
+            logging.warning("cache warm: %r is referenced by a screen but "
+                            "missing from assets/", asset_path(key, ext))
+            missing += 1
             continue
         try:
             sender = bot.send_video if ext == "mp4" else bot.send_photo
@@ -205,7 +225,8 @@ async def warm_media_cache(bot):
             await asyncio.sleep(1)
         except Exception:
             logging.exception("cache warm failed for %r", key)
-    logging.info("media_cache warm complete: %d asset(s) uploaded", warmed)
+    logging.info("media_cache warm complete: %d uploaded, %d referenced but "
+                 "missing from assets/", warmed, missing)
 
 # Telegram rejects the entire message if any inline button URL is malformed, so
 # one unset link env var can blank out a whole screen. Require a scheme and a
