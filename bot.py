@@ -1,4 +1,4 @@
-import asyncio, os, logging, random, re
+import asyncio, os, logging, random, re, time
 from decimal import Decimal
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -26,6 +26,10 @@ _nudge_tasks = {}
 _signal_tasks = {}
 _pair_choice = {}
 _expiry_choice = {}
+# tg_id -> time.monotonic() of that user's last panel lookup. In memory on
+# purpose: it only has to survive between two taps, and a restart handing out
+# one extra lookup is harmless.
+_uid_lookup_at = {}
 
 def photo_for(key):
     return _photo_cache.get(key) or FSInputFile("assets/" + key + ".jpg")
@@ -631,6 +635,16 @@ async def capture_uid(m: Message, bot: Bot, state: FSMContext):
         except Exception:
             logging.exception("capture_uid fallback reply failed for tg_id=%s", tg_id)
 
+@dp.message(F.text.regexp(r"^\s*\d+\s*$"))
+async def uid_anytime(m: Message, bot: Bot, state: FSMContext):
+    # A bare number is always a UID attempt, whatever the FSM state says. The
+    # state is cleared on /start (:160), on every non-register navigation
+    # (:245) and before verification runs (:657), so relying on Reg.waiting_uid
+    # alone left users unhandled after their first attempt. Registered below
+    # the Reg.waiting_uid handler, which still wins when that state is set -
+    # both funnel into the same code path, so they cannot drift.
+    await capture_uid(m, bot, state)
+
 async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
     tg_id = m.from_user.id
     uid = (m.text or "").strip()
@@ -638,9 +652,28 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         await bot.delete_message(chat_id=tg_id, message_id=m.message_id)
     except Exception:
         pass
+    user = await db.get_user(tg_id)
+    if user and user["verified"]:
+        # Already verified: never re-run the panel, just put them back on the
+        # menu. Same reasoning as /start - a stale flag costs nothing, an
+        # avoidable lookup risks a FloodWait that hits everyone.
+        await state.clear()
+        await _show_menu(bot, tg_id)
+        return
     if not UID_RE.fullmatch(uid):
+        # Numeric but the wrong length. Answered from the format rule alone -
+        # the panel is never queried for something that cannot be an account id.
         await bot.send_message(tg_id, "\U00002757 Your account ID must be <b>numbers only</b> "
                                "(5\U0000201315 digits). Example: <b>123456789</b>", parse_mode="HTML")
+        await state.set_state(Reg.waiting_uid)
+        return
+    wait = config.UID_LOOKUP_COOLDOWN - (time.monotonic() - _uid_lookup_at.get(tg_id, 0.0))
+    if wait > 0:
+        # Throttled before the shared panel queue is ever touched.
+        logging.info("UID COOLDOWN tg_id=%s uid=%s %.0fs remaining", tg_id, uid, wait)
+        await bot.send_message(tg_id, config.MSG_UID_COOLDOWN.format(seconds=int(wait) + 1),
+                               parse_mode="HTML")
+        await state.set_state(Reg.waiting_uid)
         return
     # No uniqueness gate: a uid already held by another telegram account still
     # goes through the full panel lookup, and access is granted on the campaign
@@ -665,6 +698,9 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         await _clear_nudge(bot, tg_id)
         await _show_menu(bot, tg_id, test_mode=True)
         return
+    # Stamped only where a panel lookup actually happens - the TEST_MODE
+    # bypass above queries nothing, so it must not start a cooldown.
+    _uid_lookup_at[tg_id] = time.monotonic()
     granted = await _run_verification(bot, tg_id, uid)
     if not granted:
         # Every non-granted verdict asks the user to send their ID again

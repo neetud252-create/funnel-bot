@@ -34,6 +34,12 @@ TEST_MODE = VERIFY_MODE == "test"
 # to restore the 30-minute sweep that used to complete verification on its own.
 ENABLE_AUTO_RETRY = os.getenv("ENABLE_AUTO_RETRY", "").strip().lower() in ("1", "true", "yes", "on")
 
+# Minimum seconds between panel lookups for ONE user. Lookups are serialised
+# behind a lock with SPACING between them, so a handful of users re-sending
+# account IDs can stack into a FloodWait that disables verification for
+# everyone. This throttles per user before the shared queue is ever touched.
+UID_LOOKUP_COOLDOWN = int(os.getenv("UID_LOOKUP_COOLDOWN", "20"))
+
 E_INFO  = "5334544901428229844"
 E_POINT = "5415758949129404605"
 E_BACK  = "5305522282695768654"
@@ -404,6 +410,9 @@ MSG_TEST_MODE = ""
 
 # Panel bot didn't answer in time; the retry worker will keep checking.
 MSG_DELAYED = T_CLOCK + " <b>Verification is taking a moment.</b>\n\nWe're still checking your account. You'll be notified here automatically as soon as it's confirmed \U00002014 or you can send your account ID again shortly."
+
+# Sent when a user re-sends their account ID inside UID_LOOKUP_COOLDOWN.
+MSG_UID_COOLDOWN = T_CLOCK + " <b>One moment.</b>\n\nYour last check is still going through. Please wait about {seconds}s, then send your account ID again."
 
 # Last-resort reply when the UID handler itself fails (see capture_uid). Plain
 # text, no buttons, so it can't fail for the same reason the handler did.
