@@ -191,7 +191,10 @@ async def _register_nudge(bot, tg_id, state):
         await asyncio.sleep(4)
         if await state.get_state() != Reg.waiting_uid.state:
             return
-        await bot.send_message(tg_id, config.REGISTER_NUDGE, parse_mode="HTML")
+        nudge = await bot.send_message(tg_id, config.REGISTER_NUDGE, parse_mode="HTML")
+        # Recorded so _clear_nudge can remove it once the user verifies. Still
+        # not ui_msg_id - wipe()/render() must leave this message alone.
+        await db.set_nudge_msg(tg_id, nudge.message_id)
     except asyncio.CancelledError:
         pass
     except Exception:
@@ -498,6 +501,28 @@ async def _show_menu(bot, tg_id, test_mode=False):
         text = config.MSG_TEST_MODE + "\n\n" + text
     await render(bot, tg_id, s["photo"], text, s["kb"])
 
+async def _clear_nudge(bot, tg_id):
+    """Delete the activation nudge once the user is verified.
+
+    Best effort throughout: a bot may only delete its own messages, and only
+    within 48 hours, so a nudge from an earlier session will fail. Logged at
+    debug and swallowed - a failed delete must never break verification.
+    """
+    try:
+        user = await db.get_user(tg_id)
+        mid = user["nudge_msg_id"] if user else None
+        if not mid:
+            return
+        try:
+            await bot.delete_message(chat_id=tg_id, message_id=mid)
+        except Exception as e:
+            logging.debug("nudge delete failed tg_id=%s msg_id=%s: %s", tg_id, mid, e)
+        # Cleared even when the delete failed, so a doomed message_id is not
+        # retried on every later verification.
+        await db.set_nudge_msg(tg_id, None)
+    except Exception:
+        logging.debug("nudge cleanup failed tg_id=%s", tg_id, exc_info=True)
+
 async def _run_verification(bot, tg_id, uid):
     """Run the panel check and show the verdict.
 
@@ -527,6 +552,7 @@ async def _run_verification(bot, tg_id, uid):
                      "ACCESS" if dep >= config.MIN_DEPOSIT else "NEED_DEPOSIT")
         if dep >= config.MIN_DEPOSIT:
             await db.set_verified(tg_id, dep)
+            await _clear_nudge(bot, tg_id)
             # Verified: drop the ack and hand the user the main menu.
             try:
                 await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
@@ -596,6 +622,7 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         # Deposit is recorded as 0 because nothing was actually checked.
         logging.warning("VERIFY_MODE=test: bypassing verification for tg_id=%s uid=%s", tg_id, uid)
         await db.set_verified(tg_id, Decimal(0))
+        await _clear_nudge(bot, tg_id)
         await _show_menu(bot, tg_id, test_mode=True)
         return
     granted = await _run_verification(bot, tg_id, uid)
@@ -624,6 +651,7 @@ async def retry_worker(bot):
                     dep = info.get("sum_deposits") or Decimal(0)
                     if dep >= config.MIN_DEPOSIT:
                         await db.set_verified(r["tg_id"], dep)
+                        await _clear_nudge(bot, r["tg_id"])
                         try:
                             await _show_menu(bot, r["tg_id"])
                         except Exception:

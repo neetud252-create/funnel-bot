@@ -61,6 +61,14 @@ E_BOLT  = "5895638385300606573"
 # restyled.
 E_SIG_CHART = "5451882707875276247"
 E_SIG_LENS  = "5188217332748527444"
+# Activation nudge (REGISTER_NUDGE) only. Swap these to change its emoji
+# without touching the copy. Both are rendered through pe(), which embeds the
+# plain-emoji fallback that clients without premium emoji show instead - an
+# invalid ID makes Telegram reject the whole message, so keep the fallbacks.
+E_NUDGE_WARN          = "5420323339723881652"
+E_NUDGE_ROCKET        = "5188481279963715781"
+NUDGE_WARN_FALLBACK   = "\U000026A0\U0000FE0F"   # warning sign
+NUDGE_ROCKET_FALLBACK = "\U0001F680"             # rocket
 E_SIG_GLASS = "5386367538735104399"
 
 def pe(emoji_id, fallback):
@@ -371,7 +379,11 @@ LIMIT_KB = [[("\U000000AB Back", "cb:go:menu")]]
 DEFAULT_PAIR = "AUD/CAD OTC"
 
 # Delayed follow-up sent a few seconds after the register screen opens (bot.py).
-REGISTER_NUDGE = "\U00002757 Only 2 Go+ activations left today.\n\nNo extensions. No second chance.\n\n\U0001F680 Activate Go+ now."
+REGISTER_NUDGE = (pe(E_NUDGE_WARN, NUDGE_WARN_FALLBACK)
+                  + " Only 2 Go+ activations left today."
+                  "\n\nNo extensions. No second chance.\n\n"
+                  + pe(E_NUDGE_ROCKET, NUDGE_ROCKET_FALLBACK)
+                  + " Activate Go+ now.")
 
 # --- Group F verification verdict messages (pe() style, factual, no scarcity) ---
 _MINDEP = str(int(MIN_DEPOSIT)) if MIN_DEPOSIT == MIN_DEPOSIT.to_integral_value() else str(MIN_DEPOSIT)

@@ -27,6 +27,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
 -- day" means midnight UTC for every user regardless of their own timezone.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS signals_used_today INT NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reset_date DATE;
+-- message_id of the activation nudge, so it can be deleted once the user
+-- verifies. Deliberately separate from ui_msg_id: the nudge is not a screen and
+-- must not be touched by render()/wipe(). Persisted rather than held in memory
+-- because the gap between the nudge and verification is often hours and spans
+-- redeploys.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS nudge_msg_id BIGINT;
 
 -- One Pocket Option uid may now be claimed by several telegram accounts: the
 -- panel decides access, not our uniqueness. Databases created before this
@@ -86,6 +92,11 @@ async def get_user(tg_id: int):
 async def set_ui_msg(tg_id: int, msg_id: int):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET ui_msg_id=$1 WHERE tg_id=$2", msg_id, tg_id)
+async def set_nudge_msg(tg_id: int, msg_id):
+    # msg_id None clears it, so a deleted (or undeletable) nudge is not retried.
+    async with pool.acquire() as c:
+        await c.execute("UPDATE users SET nudge_msg_id=$1 WHERE tg_id=$2", msg_id, tg_id)
+
 async def set_album(tg_id, ids):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET album_ids=$1 WHERE tg_id=$2", ids, tg_id)
