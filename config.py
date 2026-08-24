@@ -251,7 +251,9 @@ SCREENS = {
         "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "success")],
                [("\U0001F332 My level", "cb:menu:level", "primary")],
                [("\U0001F9D1 Support", "url:" + SUPPORT_URL)],
-               [("VIP team", "url:" + VIP_LINK)],
+               # Replaced the VIP team link, in the same row position. VIP_LINK
+               # is still read above, so restoring that button is one line.
+               [("\U0001F3C6 Unlock Premium", "cb:menu:premium", "primary")],
                [("Pocket Option", "url:" + REF_LINK)],
                [("\U00002708\U0000FE0F Telegram channel", "url:" + CHANNEL_URL)],
                [("\U000025B6\U0000FE0F YouTube channel", "url:" + YOUTUBE_URL)]],
@@ -421,10 +423,20 @@ PREMIUM_DAILY_SIGNALS = _int_env("PREMIUM_DAILY_SIGNALS", 70)
 # Start limit, which is what it meant before Premium existed.
 DAILY_SIGNAL_LIMIT = START_DAILY_SIGNALS
 
-LEVEL_LABELS = {
-    LEVEL_START:   "\U0001F7E2 Start",
-    LEVEL_PREMIUM: "\U0001F3C6 Premium",
+# Icon and name are kept apart because the two screens compose them
+# differently: the menu caption wants "\U0001F7E2 Start" as one label, while the
+# My level screen leads with the icon and ends with the name. LEVEL_LABELS is
+# derived from them rather than written out again, so a rename cannot leave the
+# two screens disagreeing about what a tier is called.
+LEVEL_ICONS = {
+    LEVEL_START:   "\U0001F7E2",
+    LEVEL_PREMIUM: "\U0001F3C6",
 }
+LEVEL_NAMES = {
+    LEVEL_START:   "Start",
+    LEVEL_PREMIUM: "Premium",
+}
+LEVEL_LABELS = {k: LEVEL_ICONS[k] + " " + LEVEL_NAMES[k] for k in LEVEL_NAMES}
 
 def level_of(is_premium):
     return LEVEL_PREMIUM if is_premium else LEVEL_START
@@ -437,16 +449,53 @@ def daily_limit(is_premium):
 def level_label(is_premium):
     return LEVEL_LABELS[level_of(is_premium)]
 
-# "My level" screen, opened from the menu. {level}, {limit}, {used} and {left}
-# are filled per user by menu_level in bot.py - exactly like the menu caption,
-# so the level is never a literal on either screen.
-MSG_LEVEL = ("\U0001F396\U0000FE0F <b>Your level:</b> {level}\n\n"
-             "\U0001F514 <b>Signals</b>\n"
-             "\U00002014 Available today: {limit} signals\n"
-             "\U00002014 Used: {used}\n"
-             "\U00002014 Left: {left}")
+def level_icon(is_premium):
+    return LEVEL_ICONS[level_of(is_premium)]
+
+def level_name(is_premium):
+    return LEVEL_NAMES[level_of(is_premium)]
+
+# "My level" screen, opened from the menu. Every field is filled per user by
+# menu_level in bot.py - the tier and the limit come from the same lookup the
+# enforcement uses, so this screen cannot advertise a number the server would
+# refuse to honour.
+MSG_LEVEL = ("{icon} <b>Your current level:</b> {name}\n"
+             "\U0001F4CA <b>Daily limit:</b> {limit} signals\n"
+             "\U0001F4C8 <b>Used today:</b> {used}\n"
+             "\U000026A1 <b>Remaining today:</b> {left}")
 
 LEVEL_KB = [[("\U000000AB Back", "cb:go:menu")]]
+
+# --- Unlock Premium screen --------------------------------------------------
+# Opened from the main menu, where it replaced the VIP team link. Informational:
+# it states the benefits, the configured Premium allowance and the viewer's own
+# current status. {premium_limit} is PREMIUM_DAILY_SIGNALS, so the number quoted
+# here is the same one the quota check enforces - it is never written out.
+#
+# There is deliberately no purchase flow here: Premium is assigned by an admin
+# (/premium <tg_id>). Nothing on this screen asks for a deposit - the trading
+# account balance gates verification, not the tier.
+MSG_PREMIUM = ("\U0001F3C6 <b>Premium Level</b>\n\n"
+               "<b>Premium benefits:</b>\n"
+               "\U00002014 {premium_limit} signals/day\n"
+               "\U00002014 Premium status\n\n"
+               "{status}")
+
+MSG_PREMIUM_ACTIVE = ("\U0001F3C6 <b>Your status:</b> Premium is active "
+                      "\U00002014 {limit} signals/day.")
+
+MSG_PREMIUM_INACTIVE = ("\U0001F7E2 <b>Your status:</b> Start "
+                        "\U00002014 {limit} signals/day.\n\n"
+                        "Premium is assigned by our team. Tap below to ask about it.")
+
+def premium_kb(is_premium):
+    # A user who already has Premium gets no request button - there is nothing
+    # for them to ask for, and offering it would read as though it had lapsed.
+    rows = []
+    if not is_premium:
+        rows.append([("\U0001F9D1 Ask about Premium", "url:" + SUPPORT_URL)])
+    rows.append([("\U000000AB Back", "cb:go:menu")])
+    return rows
 
 # --- Admin level commands ---------------------------------------------------
 # Replies to /premium and /startlevel. Admin-only (ADMIN_IDS); a non-admin gets

@@ -26,6 +26,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 
+# Screen copy is full of emoji, and a failure detail quotes it back. On a
+# Windows console (cp1252) that raises UnicodeEncodeError from inside the
+# reporting itself, which kills the run and hides the failure it was printing.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 # --- stub out everything bot.py imports but this test does not exercise ------
 
@@ -773,14 +781,85 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     fake_bot = FakeBot()
     await bot_mod.menu_level(FakeCB(pro, "menu:level", 700), fake_bot)
     last = fake_bot.calls[-1]
+    body = last["body"] or ""
     check("My level is a text-only screen", last["kind"] == "text", last["kind"])
-    check("My level names the tier", "\U0001F3C6 Premium" in (last["body"] or ""),
-          repr(last["body"]))
+    check("My level leads with the Premium icon and names the tier",
+          body.startswith("\U0001F3C6 <b>Your current level:</b> Premium"), repr(body))
     check("My level shows that tier's daily limit",
-          "Available today: 70 signals" in (last["body"] or ""), repr(last["body"]))
+          "\U0001F4CA <b>Daily limit:</b> 70 signals" in body, repr(body))
+    check("My level shows used today", "\U0001F4C8 <b>Used today:</b> 0" in body,
+          repr(body))
+    check("My level shows remaining today",
+          "\U000026A1 <b>Remaining today:</b> 70" in body, repr(body))
     check("My level keeps a way back", last["markup"] is not None)
-    check("My level no longer answers 'Coming soon'",
-          "Coming soon" not in (last["body"] or ""))
+    check("My level no longer answers 'Coming soon'", "Coming soon" not in body)
+    check("no unfilled placeholder is left on My level",
+          "{" not in body and "}" not in body, repr(body))
+
+    # The same screen for a Start user, in the four-line shape the spec gives.
+    _fresh_user(fake_db, tg_id)
+    fake_bot = FakeBot()
+    await bot_mod.menu_level(FakeCB(tg_id, "menu:level", 700), fake_bot)
+    body = fake_bot.calls[-1]["body"] or ""
+    check("My level shows Start for a Start user",
+          body.startswith("\U0001F7E2 <b>Your current level:</b> Start"), repr(body))
+    check("My level shows the Start limit, not the Premium one",
+          "\U0001F4CA <b>Daily limit:</b> 30 signals" in body
+          and "70" not in body, repr(body))
+    check("a Start user is never shown the Premium tier",
+          "Premium" not in body, repr(body))
+
+    # --- the Unlock Premium screen ------------------------------------------
+    print("\n[premium] the Unlock Premium screen")
+    menu_kb = config.SCREENS["menu"]["kb"]
+    labels = [b[0] for row in menu_kb for b in row]
+    actions = [b[1] for row in menu_kb for b in row]
+    check("the VIP team button is gone from the main menu",
+          not any("VIP" in l for l in labels), str(labels))
+    check("no menu button still points at VIP_LINK",
+          not any(config.VIP_LINK in a for a in actions), str(actions))
+    check("Unlock Premium appears in its place",
+          "\U0001F3C6 Unlock Premium" in labels, str(labels))
+    check("Unlock Premium sits where VIP team was (row 4)",
+          menu_kb[3][0][0] == "\U0001F3C6 Unlock Premium", str(menu_kb[3]))
+    check("Unlock Premium opens a screen rather than a link",
+          "cb:menu:premium" in actions, str(actions))
+    check("the rest of the menu is unchanged",
+          labels[0].endswith("Get a signal") and labels[1].endswith("My level")
+          and len(menu_kb) == 7, str(labels))
+
+    _fresh_user(fake_db, tg_id)
+    fake_bot = FakeBot()
+    await bot_mod.menu_premium(FakeCB(tg_id, "menu:premium", 700), fake_bot)
+    last = fake_bot.calls[-1]
+    body = last["body"] or ""
+    check("the Premium screen is text-only", last["kind"] == "text", last["kind"])
+    check("it is headed Premium Level",
+          body.startswith("\U0001F3C6 <b>Premium Level</b>"), repr(body))
+    check("it lists the benefits", "<b>Premium benefits:</b>" in body, repr(body))
+    check("it quotes the configured Premium allowance",
+          "\U00002014 70 signals/day" in body, repr(body))
+    check("it shows a Start viewer their own current status",
+          "<b>Your status:</b> Start" in body and "30 signals/day" in body,
+          repr(body))
+    check("it never asks for a deposit",
+          "deposit" not in body.lower(), repr(body))
+    check("a Start viewer is offered a way to ask about Premium",
+          last["markup"] is not None)
+    check("no unfilled placeholder on the Premium screen",
+          "{" not in body and "}" not in body, repr(body))
+
+    _fresh_user(fake_db, pro, premium=True)
+    fake_bot = FakeBot()
+    await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
+    body = fake_bot.calls[-1]["body"] or ""
+    check("a Premium viewer is told Premium is active",
+          "Premium is active" in body, repr(body))
+    check("and is not invited to request what they already have",
+          "Ask about Premium" not in str(fake_bot.calls[-1]["markup"]),
+          str(fake_bot.calls[-1]["markup"]))
+    check("the Premium screen quotes one number for both tiers' viewers",
+          "\U00002014 70 signals/day" in body, repr(body))
     check("menu:level is registered above the menu: catch-all",
           bot_src.index('F.data == "menu:level"')
           < bot_src.index('F.data.startswith("menu:")'))
@@ -812,6 +891,31 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         check("the cap alert still fires at 100",
               cb.answers and cb.answers[-1] == (config.MSG_DAILY_LIMIT, True),
               str(cb.answers))
+
+        # A Start user must not inherit any part of the Premium change: same
+        # day, same variable, still capped at 30.
+        _fresh_user(fake_db, tg_id, used=30)
+        calls, cb = await tap(bot_mod, FakeBot(), tg_id, "m:1", sleeps)
+        check("a Start user is still refused at 30 while Premium is 100",
+              not _delivered(calls), str(calls))
+        _fresh_user(fake_db, tg_id)
+        _, start_limit = await bot_mod._user_quota(tg_id)
+        check("a Start user never receives the Premium limit",
+              start_limit == 30, str(start_limit))
+
+        # Both Premium-facing screens follow the variable too, so the number a
+        # user is shown and the number enforced can never diverge.
+        _fresh_user(fake_db, pro, premium=True)
+        fake_bot = FakeBot()
+        await bot_mod.menu_level(FakeCB(pro, "menu:level", 700), fake_bot)
+        body = fake_bot.calls[-1]["body"] or ""
+        check("My level shows 100 after the variable change",
+              "\U0001F4CA <b>Daily limit:</b> 100 signals" in body, repr(body))
+        fake_bot = FakeBot()
+        await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
+        body = fake_bot.calls[-1]["body"] or ""
+        check("the Unlock Premium screen advertises 100, not 70",
+              "\U00002014 100 signals/day" in body and "70" not in body, repr(body))
 
         _fresh_user(fake_db, pro, premium=True)
         fake_bot = FakeBot()

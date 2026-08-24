@@ -790,12 +790,32 @@ async def menu_level(cb: CallbackQuery, bot: Bot):
     # None media key as deliberate rather than as a missing asset.
     await cb.answer()
     tg_id = cb.from_user.id
+    # One lookup feeds both the tier shown and the limit shown, and it is the
+    # same helper _start_signal and _run_signal enforce with - the screen cannot
+    # promise an allowance the server would refuse.
     premium, limit = await _user_quota(tg_id)
     used, left = await db.signal_state(tg_id, limit)
     await render(bot, tg_id, None,
-                 config.MSG_LEVEL.format(level=config.level_label(premium),
+                 config.MSG_LEVEL.format(icon=config.level_icon(premium),
+                                         name=config.level_name(premium),
                                          limit=limit, used=used, left=left),
                  config.LEVEL_KB)
+
+# Must stay above menu_action, same definition-order reason as menu_signal.
+@dp.callback_query(F.data == "menu:premium")
+async def menu_premium(cb: CallbackQuery, bot: Bot):
+    # The Unlock Premium screen that replaced the VIP team link. Text-only, and
+    # the quoted allowance is config.PREMIUM_DAILY_SIGNALS rather than a literal,
+    # so a Railway change moves this screen and the enforcement together.
+    await cb.answer()
+    tg_id = cb.from_user.id
+    premium, limit = await _user_quota(tg_id)
+    status = (config.MSG_PREMIUM_ACTIVE if premium
+              else config.MSG_PREMIUM_INACTIVE).format(limit=limit)
+    await render(bot, tg_id, None,
+                 config.MSG_PREMIUM.format(
+                     premium_limit=config.PREMIUM_DAILY_SIGNALS, status=status),
+                 config.premium_kb(premium))
 
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_action(cb: CallbackQuery):
