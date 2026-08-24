@@ -50,6 +50,12 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_uid_key;
 -- The unique index went with the constraint; uid lookups still want one.
 CREATE INDEX IF NOT EXISTS users_uid_idx ON users (uid);
 
+-- Access level. FALSE is Start, TRUE is Premium; the tier only selects which
+-- limit is passed to the quota helpers below, it does not change how the
+-- counter or the rollover work. Existing rows default to Start, so adding this
+-- column changes nothing for anyone already in the table.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE TABLE IF NOT EXISTS traders (
     trader_id  TEXT PRIMARY KEY,
     registered BOOLEAN DEFAULT TRUE,
@@ -219,6 +225,72 @@ async def unverify(tg_id: int):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET verified=FALSE, verified_at=NULL, "
                         "deposit=0, last_checked=NULL WHERE tg_id=$1", tg_id)
+
+# --- Access level -----------------------------------------------------------
+# The tier lives here rather than in an env list so a grant survives redeploys
+# and is visible in the database. Mapping tier -> limit is config's job (see
+# config.daily_limit), which is why nothing in this module reads config.
+
+async def set_premium(tg_id: int, flag: bool):
+    # Returns False when there is no such user, so the caller can say "unknown
+    # tg_id" instead of silently reporting success for a typo'd ID.
+    async with pool.acquire() as c:
+        row = await c.fetchrow(
+            "UPDATE users SET is_premium=$2 WHERE tg_id=$1 RETURNING is_premium",
+            tg_id, bool(flag))
+        return row is not None
+
+async def is_premium(tg_id: int):
+    async with pool.acquire() as c:
+        row = await c.fetchrow("SELECT is_premium FROM users WHERE tg_id=$1", tg_id)
+        return bool(row["is_premium"]) if row else False
+
+# --- Development reset ------------------------------------------------------
+# Puts ONE row back to the state a brand-new user's row is created in, so an
+# admin can walk the funnel from the top without a second Telegram account.
+#
+# This is strictly wider than unverify() above, and the two are not
+# interchangeable: unverify() undoes only the verification stamp and keeps the
+# uid so the same account id can be re-sent immediately, which is what you want
+# when re-testing the verification step alone. reset_user() additionally clears
+# the uid, the daily quota, the tier and every message-tracking id, which is
+# what you want when testing the funnel from the very first screen.
+
+# Deliberately a single statement: in Postgres that is its own transaction, so
+# the row can never be left half-reset (uid cleared but still verified, say) by
+# a crash or a dropped connection partway through. Every column named here is
+# set to the same value the SCHEMA defaults give a fresh row.
+#
+# last_checked and verified_at go with verified/deposit - set_verified writes
+# all four together, so leaving either timestamp behind would describe a check
+# this reset just undid. nudge_msg_id is cleared because the nudge it points at
+# belongs to the funnel run being discarded; the id would otherwise outlive its
+# message and the next verify would try to delete a stranger's message id.
+# attempts is untouched: it is declared in SCHEMA but read and written nowhere.
+_RESET_SQL = """
+    UPDATE users
+       SET verified           = FALSE,
+           verified_at        = NULL,
+           uid                = NULL,
+           deposit            = 0,
+           signals_used_today = 0,
+           last_reset_date    = NULL,
+           is_premium         = FALSE,
+           ui_msg_id          = NULL,
+           album_ids          = NULL,
+           nudge_msg_id       = NULL,
+           last_checked       = NULL
+     WHERE tg_id = $1
+    RETURNING tg_id
+"""
+
+async def reset_user(tg_id: int):
+    # The WHERE is what keeps this to a single row - no caller can widen it.
+    # Returns False when there is no such user, so a reset on an unknown tg_id
+    # is reported rather than silently looking like it worked.
+    async with pool.acquire() as c:
+        row = await c.fetchrow(_RESET_SQL, tg_id)
+        return row is not None
 
 # --- Daily signal quota -----------------------------------------------------
 # Both helpers below roll the counter over themselves when last_reset_date is

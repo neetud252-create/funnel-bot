@@ -272,6 +272,25 @@ async def is_subscribed(bot, tg_id):
         logging.warning("sub check failed: %s", e)
         return False
 
+def _row_field(row, name, default=None):
+    # asyncpg Records and the plain dicts the test harness hands back both
+    # index by column name, but only one of them tolerates a missing key.
+    try:
+        value = row[name]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+async def _user_quota(tg_id):
+    # (is_premium, that tier's daily limit). Resolved from the database on
+    # every call rather than cached, so a /premium grant - or a restart that
+    # picked up a new PREMIUM_DAILY_SIGNALS - applies to the very next tap.
+    # This is the ONLY place a limit is chosen; nothing downstream names a
+    # number of its own.
+    user = await db.get_user(tg_id)
+    premium = bool(_row_field(user, "is_premium", False)) if user else False
+    return premium, config.daily_limit(premium)
+
 async def wipe(bot, tg_id):
     user = await db.get_user(tg_id)
     if not user:
@@ -356,6 +375,96 @@ async def unverify_cmd(m: Message):
               else m.from_user.id)
     await db.unverify(target)
     await m.answer("Un-verified tg_id=%d. Send /start to re-run the flow." % target)
+
+def _is_admin(tg_id):
+    # ADMIN_IDS is empty unless it is set in Railway, so every admin command is
+    # inert until it is - the safe default for an unconfigured service.
+    return tg_id in config.ADMIN_IDS
+
+# --- Admin: development reset -----------------------------------------------
+# Walks the funnel from the top as if the sender had never used the bot, on the
+# sender's own row and nothing else. Same registration band as /unverify above
+# and the level commands below, for the same reason: above Reg.waiting_uid and
+# above the bare-digits handler, or an admin parked mid-funnel would have this
+# read as an account ID.
+#
+# Deliberately NOT a second /unverify. /unverify undoes the verification stamp
+# and keeps the uid, which is what you want to re-test the verification step on
+# its own. /devstart additionally clears the uid, the daily quota, the tier and
+# every message-tracking id, for testing the funnel from its first screen. The
+# split lives in db.py (unverify vs reset_user); neither command reimplements
+# the other.
+
+@dp.message(Command("devstart"))
+async def cmd_devstart(m: Message, bot: Bot, state: FSMContext):
+    # Silent for non-admins, and it returns before reading or writing anything
+    # at all - a non-admin cannot use this to touch even their own row.
+    tg_id = m.from_user.id
+    if not _is_admin(tg_id):
+        logging.warning("non-admin %s tried /devstart", tg_id)
+        return
+    # Order matters, twice over. wipe() reads ui_msg_id and album_ids and
+    # _clear_nudge() reads nudge_msg_id; both have to run BEFORE the reset nulls
+    # those columns, or the messages they point at are stranded in the chat with
+    # nothing left to identify them by.
+    await wipe(bot, tg_id)
+    await _clear_nudge(bot, tg_id)
+    if not await db.reset_user(tg_id):
+        # No row yet - nothing to reset, and start() below creates one via
+        # touch_user anyway, which is the state a reset would have produced.
+        logging.info("/devstart: no existing row for %s, starting clean", tg_id)
+    # In-memory session state for this user only. A countdown left running would
+    # deliver a signal onto the fresh gate screen and spend a quota the reset
+    # just cleared; a stale _uid_lookup_at would make the first account ID of
+    # the new run bounce off the per-user panel cooldown.
+    for tasks in (_signal_tasks, _nudge_tasks):
+        task = tasks.pop(tg_id, None)
+        if task:
+            task.cancel()
+    _pair_choice.pop(tg_id, None)
+    _expiry_choice.pop(tg_id, None)
+    _uid_lookup_at.pop(tg_id, None)
+    logging.info("/devstart: reset tg_id=%s to a new-user state", tg_id)
+    # Hand off to the real /start rather than repeating it. The row now reads
+    # unverified, so start() takes its gate branch - and if the entry screen
+    # ever changes again, /devstart follows it with no edit here.
+    await start(m, bot, state)
+
+# --- Admin level commands ---------------------------------------------------
+# Registered above the Reg.waiting_uid message handler on purpose: aiogram
+# dispatches in definition order, so an admin who happens to be parked on the
+# register screen still gets the command instead of having it read as a UID.
+
+async def _grant_level(m: Message, premium: bool):
+    # Silent for non-admins: no reply at all, so an ordinary user cannot learn
+    # the command exists, confirm who is Premium, or probe for valid tg_ids.
+    # ADMIN_IDS is empty unless it is set in Railway, which means nobody can
+    # change a tier until it is - the safe default.
+    if not _is_admin(m.from_user.id):
+        logging.warning("non-admin %s tried %r", m.from_user.id, (m.text or "")[:32])
+        return
+    parts = (m.text or "").split()
+    cmd = parts[0] if parts else "/premium"
+    if len(parts) != 2 or not parts[1].isdigit():
+        await m.answer(config.MSG_ADMIN_USAGE.format(cmd=cmd))
+        return
+    target = int(parts[1])
+    if not await db.set_premium(target, premium):
+        await m.answer(config.MSG_ADMIN_NO_USER.format(tg_id=target))
+        return
+    # The new limit is reported from the same helper the enforcement uses, so
+    # the confirmation cannot claim a number the user will not actually get.
+    await m.answer(config.MSG_ADMIN_DONE.format(
+        tg_id=target, level=config.level_label(premium),
+        limit=config.daily_limit(premium)))
+
+@dp.message(Command("premium"))
+async def cmd_premium(m: Message):
+    await _grant_level(m, True)
+
+@dp.message(Command("startlevel"))
+async def cmd_startlevel(m: Message):
+    await _grant_level(m, False)
 
 @dp.callback_query(F.data == "check_sub")
 async def check_sub(cb: CallbackQuery, bot: Bot):
@@ -561,7 +670,10 @@ async def _run_signal(bot, tg_id, msg_id, expiry):
         # The quota is spent here, at delivery, not at the tap: a countdown
         # that got cancelled or superseded never cost the user a signal, and
         # this single atomic UPDATE is what actually enforces the cap.
-        ok, used, left = await db.consume_signal(tg_id, config.DAILY_SIGNAL_LIMIT)
+        # The tier is re-read now rather than reused from the tap, so a grant
+        # that landed during the countdown is already in force.
+        _, limit = await _user_quota(tg_id)
+        ok, used, left = await db.consume_signal(tg_id, limit)
         if not ok:
             # Raced past the cap while this one was counting down. Text-only by
             # design: this screen used to pass "buy" as its media key and render
@@ -601,7 +713,8 @@ async def _start_signal(bot, cb, expiry):
     # limit alert or an empty ack) - callers must not answer first, or Telegram
     # discards the alert as a duplicate.
     tg_id = cb.from_user.id
-    used, left = await db.signal_state(tg_id, config.DAILY_SIGNAL_LIMIT)
+    _, limit = await _user_quota(tg_id)
+    used, left = await db.signal_state(tg_id, limit)
     if left <= 0:
         # Over the cap: no countdown is started and no message is touched, so
         # the user keeps whatever screen they were on.
@@ -635,7 +748,10 @@ async def new_signal(cb: CallbackQuery, bot: Bot):
         await cb.answer()
         return
     tg_id = cb.from_user.id
-    _, left = await db.signal_state(tg_id, config.DAILY_SIGNAL_LIMIT)
+    # Per-user, like the other two cap checks: reading the global Start limit
+    # here would hold a Premium user to 30 on this path alone.
+    _, limit = await _user_quota(tg_id)
+    _, left = await db.signal_state(tg_id, limit)
     if left <= 0:
         # Same contract as _start_signal: answer with the alert and touch no
         # message, so the user keeps the result screen they are on.
@@ -667,10 +783,24 @@ async def mode_action(cb: CallbackQuery):
     # ("mode:manual" is handled above and opens the market-type screen).
     await cb.answer("Coming soon \U0001F680", show_alert=True)
 
+# Must stay above menu_action, same definition-order reason as menu_signal.
+@dp.callback_query(F.data == "menu:level")
+async def menu_level(cb: CallbackQuery, bot: Bot):
+    # Text-only: there is no artwork for this screen, and render() treats a
+    # None media key as deliberate rather than as a missing asset.
+    await cb.answer()
+    tg_id = cb.from_user.id
+    premium, limit = await _user_quota(tg_id)
+    used, left = await db.signal_state(tg_id, limit)
+    await render(bot, tg_id, None,
+                 config.MSG_LEVEL.format(level=config.level_label(premium),
+                                         limit=limit, used=used, left=left),
+                 config.LEVEL_KB)
+
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_action(cb: CallbackQuery):
-    # TODO: real level logic; placeholder popup for now ("menu:signal" is handled
-    # above and opens the mode screen).
+    # "menu:signal" and "menu:level" are both handled above; this stays as the
+    # catch-all for any future menu callback that has no screen yet.
     await cb.answer("Coming soon \U0001F680", show_alert=True)
 
 @dp.callback_query(F.data.startswith("gallery:"))
@@ -706,9 +836,13 @@ async def _show_menu(bot, tg_id, test_mode=False):
     # the bypass is obvious on-screen. The signal counters are read fresh on
     # every render (signal_state also does the new-day rollover), so the numbers
     # are correct whenever the user lands here rather than only at login.
+    # The level and the limit come from the same lookup, so the caption can
+    # never show "Premium" next to the Start allowance.
     s = config.SCREENS["menu"]
-    used, left = await db.signal_state(tg_id, config.DAILY_SIGNAL_LIMIT)
-    text = s["text"].format(limit=config.DAILY_SIGNAL_LIMIT, used=used, left=left)
+    premium, limit = await _user_quota(tg_id)
+    used, left = await db.signal_state(tg_id, limit)
+    text = s["text"].format(limit=limit, used=used, left=left,
+                            level=config.level_label(premium))
     if test_mode:
         text = config.MSG_TEST_MODE + "\n\n" + text
     await render(bot, tg_id, s["photo"], text, s["kb"])

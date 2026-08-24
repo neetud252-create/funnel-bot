@@ -10,10 +10,10 @@ CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/apexxtraderz")
 # TODO: swap the three PLACEHOLDER links below for the real ones (set REF_LINK,
 # SUPPORT, VIP_LINK, YOUTUBE_URL in the Railway service variables).
 REF_LINK    = os.getenv("REF_LINK", "https://example.com/PLACEHOLDER_REF")
-SUPPORT     = os.getenv("SUPPORT", "@PLACEHOLDER_SUPPORT")   # TODO: real support handle (was @go_plus_supportbot)
+SUPPORT     = os.getenv("SUPPORT", "https://t.me/flashhher")   # TODO: real support handle (was @go_plus_supportbot)
 SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
 VIP_LINK    = os.getenv("VIP_LINK", "https://t.me/PLACEHOLDER_VIP")          # TODO: real VIP team invite
-YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/PLACEHOLDER_YT")  # TODO: real YouTube channel
+YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@pocketoption?si=gb2BpGjz2SzhMOH6s")  # TODO: real YouTube channel
 ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 
 # Group F verification thresholds.
@@ -243,10 +243,11 @@ SCREENS = {
     # {used} and {left} are filled per user by _show_menu in bot.py, which is
     # also why show() routes "menu" through it rather than rendering this text
     # directly (raw braces would leak onto the screen).
-    # TODO: the level is still static.
+    # {level} is filled the same way, from the user's is_premium column, so the
+    # level on this screen is per-user state rather than static text.
     "menu": {
         "photo": "menu",
-        "text": "\U0001F916 <b>Go+ main menu</b>\n\n\U0001F514 <b>Signals</b>\n\U00002014 Available today: {limit} signals\n\U00002014 Used: {used}\n\U00002014 Left: {left}\n\n\U0001FAAB <b>Your level:</b> Start",
+        "text": "\U0001F916 <b>Go+ main menu</b>\n\n\U0001F514 <b>Signals</b>\n\U00002014 Available today: {limit} signals\n\U00002014 Used: {used}\n\U00002014 Left: {left}\n\n\U0001FAAB <b>Your level:</b> {level}",
         "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "success")],
                [("\U0001F332 My level", "cb:menu:level", "primary")],
                [("\U0001F9D1 Support", "url:" + SUPPORT_URL)],
@@ -386,10 +387,73 @@ SIGNAL_DIRECTIONS = (("BUY \U0001F7E2\U0001F7E2 UP \U00002B06\U0000FE0F", "buy")
 
 SIGNAL_KB = [[("\U0001F680 New Signal", "cb:new_signal", "success")]]
 
-# --- Daily signal quota -----------------------------------------------------
+# --- Levels and the daily signal quota --------------------------------------
 # Per user, per day. Stored in users.signals_used_today / users.last_reset_date
-# (see db.py), so a restart does not hand anyone a fresh 30.
-DAILY_SIGNAL_LIMIT = int(os.getenv("DAILY_SIGNAL_LIMIT", "30"))
+# (see db.py), so a restart does not hand anyone a fresh allowance.
+#
+# Both tier limits come from Railway. The numbers below are only what applies
+# when the variable is unset - no tier size is hardcoded in the limit logic:
+# bot.py never names a number, it asks daily_limit(), and daily_limit() reads
+# the two module globals below. Changing PREMIUM_DAILY_SIGNALS in Railway and
+# restarting is therefore the whole procedure for changing the Premium cap.
+
+def _int_env(name, default):
+    # A typo'd variable falls back instead of taking the service down on boot -
+    # an unparseable limit must not cost every user their signals. Negative
+    # values are rejected for the same reason (they would read as "0 left").
+    raw = (os.getenv(name) or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+LEVEL_START   = "start"
+LEVEL_PREMIUM = "premium"
+
+# START_DAILY_SIGNALS falls back to the legacy DAILY_SIGNAL_LIMIT before the
+# built-in 30, so a service that still sets the old name keeps its value and
+# nothing regresses at deploy time. The old variable can be deleted afterwards.
+START_DAILY_SIGNALS   = _int_env("START_DAILY_SIGNALS", _int_env("DAILY_SIGNAL_LIMIT", 30))
+PREMIUM_DAILY_SIGNALS = _int_env("PREMIUM_DAILY_SIGNALS", 70)
+
+# Backward-compatible alias: anything still reading the old constant gets the
+# Start limit, which is what it meant before Premium existed.
+DAILY_SIGNAL_LIMIT = START_DAILY_SIGNALS
+
+LEVEL_LABELS = {
+    LEVEL_START:   "\U0001F7E2 Start",
+    LEVEL_PREMIUM: "\U0001F3C6 Premium",
+}
+
+def level_of(is_premium):
+    return LEVEL_PREMIUM if is_premium else LEVEL_START
+
+def daily_limit(is_premium):
+    # Reads the globals on every call rather than a precomputed table, so the
+    # limit a user is held to always matches what this module currently holds.
+    return PREMIUM_DAILY_SIGNALS if is_premium else START_DAILY_SIGNALS
+
+def level_label(is_premium):
+    return LEVEL_LABELS[level_of(is_premium)]
+
+# "My level" screen, opened from the menu. {level}, {limit}, {used} and {left}
+# are filled per user by menu_level in bot.py - exactly like the menu caption,
+# so the level is never a literal on either screen.
+MSG_LEVEL = ("\U0001F396\U0000FE0F <b>Your level:</b> {level}\n\n"
+             "\U0001F514 <b>Signals</b>\n"
+             "\U00002014 Available today: {limit} signals\n"
+             "\U00002014 Used: {used}\n"
+             "\U00002014 Left: {left}")
+
+LEVEL_KB = [[("\U000000AB Back", "cb:go:menu")]]
+
+# --- Admin level commands ---------------------------------------------------
+# Replies to /premium and /startlevel. Admin-only (ADMIN_IDS); a non-admin gets
+# no reply at all, so none of these strings ever reach an ordinary user.
+MSG_ADMIN_USAGE   = "Usage: {cmd} <tg_id>"
+MSG_ADMIN_NO_USER = "No user with tg_id {tg_id}. They must /start the bot first."
+MSG_ADMIN_DONE    = "tg_id {tg_id} is now {level} \U00002014 {limit} signals/day."
 
 # Shown both as the popup on a tap that is over the cap and as the screen text
 # if the cap is reached while a signal is already being prepared. Plain text

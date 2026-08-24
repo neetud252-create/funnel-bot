@@ -32,9 +32,23 @@ sys.path.insert(0, ROOT)
 def _install_stub_modules():
     db = types.ModuleType("db")
     db._users = {}
+    # Stand-in for Postgres CURRENT_DATE. Tests advance it to cross midnight.
+    db._today = ["2026-08-25"]
+
+    # Mirrors the SCHEMA defaults, so a row created here looks exactly like a
+    # brand-new user's - including the columns upstream added (verified_at,
+    # nudge_msg_id) that /start and _clear_nudge now read.
+    def _fresh_row():
+        return {"ui_msg_id": None, "album_ids": None, "is_premium": False,
+                "signals_used_today": 0, "last_reset_date": None,
+                "verified": False, "verified_at": None, "uid": None,
+                "deposit": 0, "last_checked": None, "nudge_msg_id": None,
+                "username": None}
 
     def _u(tg_id):
-        return db._users.setdefault(tg_id, {"ui_msg_id": None, "album_ids": None})
+        return db._users.setdefault(tg_id, _fresh_row())
+
+    db._fresh_row = _fresh_row
 
     async def get_user(tg_id):
         return dict(_u(tg_id))
@@ -45,13 +59,96 @@ def _install_stub_modules():
     async def set_album(tg_id, ids):
         _u(tg_id)["album_ids"] = ids
 
+    # The quota columns are modelled rather than faked out, so the limit tests
+    # exercise the same accept/refuse decision the real SQL makes. db._today
+    # stands in for Postgres CURRENT_DATE; advancing it is what a new UTC day
+    # looks like from here.
+    def _rollover(row):
+        # Mirrors _ROLLOVER_SQL and the CASE inside _CONSUME_SQL: a stored date
+        # that is not today reads as 0 used and is rewritten on first touch.
+        if row.get("last_reset_date") != db._today[0]:
+            row["signals_used_today"] = 0
+            row["last_reset_date"] = db._today[0]
+        return row.get("signals_used_today", 0)
+
     async def signal_state(tg_id, limit):
-        return 0, limit
+        used = _rollover(_u(tg_id))
+        return used, max(0, limit - used)
 
     async def consume_signal(tg_id, limit):
-        return True, 1, limit - 1
+        # Mirrors _CONSUME_SQL's WHERE: at or over the cap nothing increments
+        # and the caller is told no.
+        row = _u(tg_id)
+        used = _rollover(row)
+        if used >= limit:
+            return False, used, max(0, limit - used)
+        row["signals_used_today"] = used + 1
+        return True, used + 1, max(0, limit - used - 1)
 
-    for fn in (get_user, set_ui_msg, set_album, signal_state, consume_signal):
+    async def set_premium(tg_id, flag):
+        if tg_id not in db._users:
+            return False
+        db._users[tg_id]["is_premium"] = bool(flag)
+        return True
+
+    async def is_premium(tg_id):
+        return bool(_u(tg_id).get("is_premium", False))
+
+    async def touch_user(tg_id, username=None):
+        row = _u(tg_id)
+        if username is not None:
+            row["username"] = username
+
+    # Mirrors _RESET_SQL: one row, every column back to its SCHEMA default,
+    # including the ones upstream added to the user lifecycle.
+    async def reset_user(tg_id):
+        if tg_id not in db._users:
+            return False
+        db._users[tg_id].update({
+            "verified": False, "verified_at": None, "uid": None, "deposit": 0,
+            "signals_used_today": 0, "last_reset_date": None,
+            "is_premium": False, "ui_msg_id": None, "album_ids": None,
+            "nudge_msg_id": None, "last_checked": None,
+        })
+        return True
+
+    # Upstream's narrower testing helper, kept distinct from reset_user: it
+    # leaves uid, the quota and the tier alone.
+    async def unverify(tg_id):
+        _u(tg_id).update({"verified": False, "verified_at": None,
+                          "deposit": 0, "last_checked": None})
+
+    async def set_nudge_msg(tg_id, msg_id):
+        _u(tg_id)["nudge_msg_id"] = msg_id
+
+    async def uid_owners(uid):
+        return [tg for tg, row in db._users.items() if row.get("uid") == uid]
+
+    async def save_uid_only(tg_id, uid):
+        _u(tg_id)["uid"] = uid
+
+    async def set_verified(tg_id, deposit):
+        _u(tg_id).update({"verified": True, "deposit": deposit,
+                          "verified_at": "now", "last_checked": "now"})
+
+    # Media cache: bot.py writes through to these whenever Telegram hands back a
+    # file_id. The fakes never produce one, so these exist to fail loudly if
+    # that ever changes rather than to be exercised.
+    async def load_media_cache():
+        return []
+
+    async def save_media_cache(asset_key, file_id, content_hash):
+        db._media_cache[asset_key] = (file_id, content_hash)
+
+    async def drop_media_cache(asset_key):
+        db._media_cache.pop(asset_key, None)
+
+    db._media_cache = {}
+
+    for fn in (get_user, set_ui_msg, set_album, signal_state, consume_signal,
+               set_premium, is_premium, touch_user, reset_user, unverify,
+               set_nudge_msg, uid_owners, save_uid_only, set_verified,
+               load_media_cache, save_media_cache, drop_media_cache):
         setattr(db, fn.__name__, fn)
     sys.modules["db"] = db
 
@@ -146,8 +243,9 @@ class FakeBot:
 
 
 class FakeUser:
-    def __init__(self, tg_id):
+    def __init__(self, tg_id, username=None):
         self.id = tg_id
+        self.username = username
 
 
 class FakeCB:
@@ -161,6 +259,36 @@ class FakeCB:
 
     async def answer(self, text=None, show_alert=False):
         self.answers.append((text, show_alert))
+
+
+class FakeMessage:
+    """Minimal Message: what the two admin level commands actually touch."""
+
+    def __init__(self, tg_id, text):
+        self.from_user = FakeUser(tg_id)
+        self.text = text
+        self.replies = []
+
+    async def answer(self, text=None, **kw):
+        self.replies.append(text)
+
+
+class FakeState:
+    """Minimal FSMContext: the three calls the entry points make."""
+
+    def __init__(self, state=None):
+        self.state = state
+        self.cleared = 0
+
+    async def clear(self):
+        self.state = None
+        self.cleared += 1
+
+    async def set_state(self, state):
+        self.state = state
+
+    async def get_state(self):
+        return self.state
 
 
 # --- harness ----------------------------------------------------------------
@@ -255,6 +383,558 @@ def assert_layout(label, calls, config, wait_label):
     check(label + ": every waiting message is cleaned up",
           all(i in deleted for i in waiting_ids),
           "left behind: " + str([i for i in waiting_ids if i not in deleted]))
+
+
+# --- levels, limits and the daily rollover ----------------------------------
+
+def _fresh_user(fake_db, tg_id, premium=False, used=0, day=None):
+    """Put one user in a known quota state and return their row."""
+    fake_db._users[tg_id] = {
+        "ui_msg_id": None, "album_ids": None, "is_premium": premium,
+        "signals_used_today": used,
+        "last_reset_date": day if day is not None else fake_db._today[0],
+    }
+    return fake_db._users[tg_id]
+
+
+async def tap(bot_mod, fake_bot, tg_id, data, sleeps, message_id=700):
+    """One signal tap, refusal included.
+
+    Unlike drive(), this tolerates a tap the cap refuses - that path starts no
+    task at all - and hands back the callback so the alert can be inspected.
+    """
+    cb = FakeCB(tg_id, data, message_id)
+    start = len(fake_bot.calls)
+    sleeps.clear()
+    if data.startswith("m:"):
+        await bot_mod.m_action(cb, fake_bot)
+    else:
+        await bot_mod.new_signal(cb, fake_bot)
+    task = bot_mod._signal_tasks.get(tg_id)
+    if task is not None:
+        await task
+    return fake_bot.calls[start:], cb
+
+
+def _delivered(calls):
+    return any("Currency pair" in (c["body"] or "") for c in calls)
+
+
+def _snapshot(fake_db):
+    """Deep-enough copy of every user row, for 'nothing else moved' checks."""
+    return {tg: dict(row) for tg, row in fake_db._users.items()}
+
+
+def _dirty_user(fake_db, tg_id):
+    """A user mid-funnel: verified, with a UID, Premium, and quota spent."""
+    fake_db._users[tg_id] = {
+        "ui_msg_id": 555, "album_ids": "601,602,603", "is_premium": True,
+        "signals_used_today": 12, "last_reset_date": fake_db._today[0],
+        "verified": True, "uid": "123456789", "deposit": 250,
+        "last_checked": "2026-08-25T10:00:00", "username": "tester",
+    }
+    return fake_db._users[tg_id]
+
+
+async def devstart_tests(bot_mod, fake_db, config):
+    print("\n[devstart] the reset is admin-only and scoped to one row")
+    bot_src = open(os.path.join(ROOT, "bot.py"), encoding="utf-8").read()
+    db_src = open(os.path.join(ROOT, "db.py"), encoding="utf-8").read()
+
+    admin, outsider, bystander = 7101, 7102, 7103
+    saved_admins = list(config.ADMIN_IDS)
+    config.ADMIN_IDS = [admin]
+    try:
+        # --- a non-admin gets nothing and changes nothing --------------------
+        _dirty_user(fake_db, outsider)
+        _dirty_user(fake_db, bystander)
+        before = _snapshot(fake_db)
+        fake_bot = FakeBot()
+        m = FakeMessage(outsider, "/devstart")
+        state = FakeState(state="Reg:waiting_uid")
+        await bot_mod.cmd_devstart(m, fake_bot, state)
+        check("non-admin /devstart sends nothing at all",
+              fake_bot.calls == [], str(fake_bot.calls))
+        check("non-admin /devstart writes no reply", m.replies == [], str(m.replies))
+        check("non-admin /devstart changes no database row",
+              _snapshot(fake_db) == before, "a row moved")
+        check("non-admin /devstart does not even reset its own sender",
+              fake_db._users[outsider]["verified"] is True
+              and fake_db._users[outsider]["uid"] == "123456789",
+              str(fake_db._users[outsider]))
+        check("non-admin /devstart leaves the FSM state alone",
+              state.state == "Reg:waiting_uid" and state.cleared == 0,
+              "%s / %s" % (state.state, state.cleared))
+
+        # --- an admin resets their own row, and only their own ---------------
+        row = _dirty_user(fake_db, admin)
+        _dirty_user(fake_db, bystander)
+        bystander_before = dict(fake_db._users[bystander])
+        # Every row in the fake DB, not just the bystander's: the reset has to
+        # be invisible to all of them, including the dozens the earlier
+        # sections left behind.
+        all_before = _snapshot(fake_db)
+        # In-memory session state that must not survive the reset.
+        bot_mod._pair_choice[admin] = "EUR/USD OTC"
+        bot_mod._expiry_choice[admin] = "M7"
+        bot_mod._pair_choice[bystander] = "GBP/JPY OTC"
+
+        fake_bot = FakeBot()
+        m = FakeMessage(admin, "/devstart")
+        state = FakeState(state="Reg:waiting_uid")
+        await bot_mod.cmd_devstart(m, fake_bot, state)
+        row = fake_db._users[admin]
+
+        check("verified becomes false", row["verified"] is False, str(row["verified"]))
+        check("uid is cleared", row["uid"] is None, repr(row["uid"]))
+        check("deposit is cleared", row["deposit"] == 0, str(row["deposit"]))
+        check("the signal counter is reset",
+              row["signals_used_today"] == 0, str(row["signals_used_today"]))
+        check("the rollover date is cleared",
+              row["last_reset_date"] is None, repr(row["last_reset_date"]))
+        check("is_premium becomes false",
+              row["is_premium"] is False, str(row["is_premium"]))
+        check("album_ids is cleared", row["album_ids"] is None, repr(row["album_ids"]))
+        check("last_checked is cleared alongside verified",
+              row["last_checked"] is None, repr(row["last_checked"]))
+
+        check("another user's row is untouched",
+              fake_db._users[bystander] == bystander_before,
+              str(fake_db._users[bystander]))
+        all_after = _snapshot(fake_db)
+        moved = [tg for tg in all_before
+                 if all_before[tg] != all_after.get(tg)]
+        check("no row other than the sender's was written",
+              moved == [admin], str(moved))
+        check("no new row was created", set(all_after) == set(all_before),
+              str(set(all_after) - set(all_before)))
+
+        check("the reset user is back on the Start limit",
+              (await bot_mod._user_quota(admin))[1] == config.START_DAILY_SIGNALS,
+              str(await bot_mod._user_quota(admin)))
+        used, left = await bot_mod.db.signal_state(admin, config.START_DAILY_SIGNALS)
+        check("the reset user has a full fresh allowance",
+              (used, left) == (0, config.START_DAILY_SIGNALS), str((used, left)))
+
+        # --- the old screen is torn down with the existing mechanism ---------
+        deleted = [c["id"] for c in fake_bot.calls if c["kind"] == "delete"]
+        check("the on-screen message is deleted", 555 in deleted, str(deleted))
+        check("the album left on screen is deleted too",
+              all(i in deleted for i in (601, 602, 603)), str(deleted))
+
+        # --- and the funnel restarts exactly as it does for a new user -------
+        sends = [c for c in fake_bot.calls if c["kind"] != "delete"]
+        check("/devstart sends exactly one screen", len(sends) == 1,
+              str([c["kind"] for c in sends]))
+        gate = config.SCREENS["gate"]
+        check("/devstart lands on the gate screen",
+              gate["text"] in (sends[-1]["body"] or ""), repr(sends[-1]["body"]))
+        check("/devstart shows the gate artwork",
+              (sends[-1]["asset"] or "").replace("\\", "/").endswith("assets/gate.jpg"),
+              repr(sends[-1]["asset"]))
+        check("the new gate message becomes the tracked screen",
+              row["ui_msg_id"] == sends[-1]["id"],
+              "%s vs %s" % (row["ui_msg_id"], sends[-1]["id"]))
+        check("/devstart clears the FSM state",
+              state.state is None and state.cleared == 1,
+              "%s / %s" % (state.state, state.cleared))
+        check("the sender's in-memory selections are dropped",
+              admin not in bot_mod._pair_choice and admin not in bot_mod._expiry_choice,
+              str((bot_mod._pair_choice.get(admin), bot_mod._expiry_choice.get(admin))))
+        check("another user's in-memory selection survives",
+              bot_mod._pair_choice.get(bystander) == "GBP/JPY OTC",
+              repr(bot_mod._pair_choice.get(bystander)))
+
+        # --- /devstart and /start produce the same opening screen ------------
+        fresh = 7104
+        start_bot = FakeBot()
+        await bot_mod.start(FakeMessage(fresh, "/start"), start_bot, FakeState())
+        start_sends = [(c["kind"], c["asset"], c["body"]) for c in start_bot.calls
+                       if c["kind"] != "delete"]
+        dev_sends = [(c["kind"], c["asset"], c["body"]) for c in sends]
+        check("/devstart opens the identical screen a new user gets",
+              start_sends == dev_sends,
+              str(start_sends) + " vs " + str(dev_sends))
+
+        # --- the production /start is unchanged ------------------------------
+        print("\n[devstart] /start still does not reset anything")
+        keeper = 7105
+        _dirty_user(fake_db, keeper)
+        before = dict(fake_db._users[keeper])
+        await bot_mod.start(FakeMessage(keeper, "/start"), FakeBot(), FakeState())
+        after = fake_db._users[keeper]
+        check("/start leaves verified alone", after["verified"] is True)
+        check("/start leaves the uid alone", after["uid"] == "123456789",
+              repr(after["uid"]))
+        check("/start leaves Premium alone", after["is_premium"] is True)
+        check("/start leaves the signal counter alone",
+              after["signals_used_today"] == 12, str(after["signals_used_today"]))
+        check("/start leaves the deposit alone", after["deposit"] == 250)
+        check("/start still only repoints the tracked screen",
+              {k: v for k, v in after.items() if k != "ui_msg_id"}
+              == {k: v for k, v in before.items() if k != "ui_msg_id"},
+              str(after))
+        check("/start itself is never gated on ADMIN_IDS",
+              not _is_admin_gated_start(bot_src),
+              "the /start handler grew an ADMIN_IDS check")
+
+        # A verified admin must still reach the menu through /start - /devstart
+        # is the only thing that sends them back down the funnel.
+        vip = 7106
+        _dirty_user(fake_db, vip)
+        menu_bot = FakeBot()
+        await bot_mod.start(FakeMessage(vip, "/start"), menu_bot, FakeState())
+        body = menu_bot.calls[-1]["body"] or ""
+        check("a verified user's /start goes straight to the menu",
+              "Go+ main menu" in body, repr(body[:60]))
+        check("that menu still shows their tier",
+              "\U0001F3C6 Premium" in body, repr(body))
+    finally:
+        config.ADMIN_IDS = saved_admins
+
+    # --- structural guarantees the fakes cannot prove ------------------------
+    print("\n[devstart] the reset statement itself")
+    check("the reset is a single UPDATE, so it cannot half-apply",
+          db_src.count("UPDATE users\n       SET verified") == 1
+          and "_RESET_SQL" in db_src)
+    check("the reset is scoped to one tg_id",
+          "WHERE tg_id = $1\n    RETURNING tg_id" in db_src)
+    check("every required column is in the reset",
+          all(col in db_src.split("_RESET_SQL")[1].split('"""')[1]
+              for col in ("verified", "uid", "deposit", "signals_used_today",
+                          "last_reset_date", "is_premium", "ui_msg_id",
+                          "album_ids")))
+    check("/devstart is registered above the UID capture handler",
+          bot_src.index('Command("devstart")') < bot_src.index("Reg.waiting_uid)"))
+    check("/devstart wipes the screen before nulling the ids it needs",
+          bot_src.index("await wipe(bot, tg_id)")
+          < bot_src.index("await db.reset_user(tg_id)"))
+    check("/devstart reuses the shared ADMIN_IDS gate",
+          "if not _is_admin(tg_id):" in bot_src
+          and "return tg_id in config.ADMIN_IDS" in bot_src)
+    # /start is upstream's, not ours: it branches verified users to the menu.
+    # These pin that shape so a later edit here cannot quietly revert it.
+    check("/start keeps upstream's verified shortcut",
+          'if user and user["verified"]:' in bot_src
+          and "await _show_menu(bot, tg_id)" in bot_src)
+    check("/start still opens the gate for everyone else",
+          'await show(bot, tg_id, "gate")' in bot_src)
+    check("/devstart delegates to /start rather than reimplementing it",
+          "await start(m, bot, state)" in bot_src)
+    check("/devstart clears the nudge before the reset nulls its id",
+          bot_src.index("await _clear_nudge(bot, tg_id)")
+          < bot_src.index("await db.reset_user(tg_id)"))
+    check("/devstart drops the per-user panel cooldown",
+          "_uid_lookup_at.pop(tg_id, None)" in bot_src)
+    check("upstream's /unverify survives alongside /devstart",
+          'Command("unverify")' in bot_src and "async def unverify(tg_id" in db_src)
+    # The narrow helper must not clear the uid (its comment mentions uid, so
+    # this looks at what the statement SETs, not at the prose around it).
+    _unverify_sql = db_src.split("async def unverify(")[1].split("async def")[0]
+    check("the two reset helpers stay distinct - unverify keeps the uid",
+          "uid=" not in _unverify_sql and "uid =" not in _unverify_sql,
+          "unverify started clearing the uid")
+    check("the wide helper does clear the uid",
+          "uid                = NULL" in db_src)
+    check("every daily-cap check is per-user",
+          "config.DAILY_SIGNAL_LIMIT" not in bot_src
+          and bot_src.count("await _user_quota(tg_id)") >= 4,
+          "a cap check still reads the global limit")
+
+
+def _is_admin_gated_start(bot_src):
+    # Only start()'s own body: stop at the next handler's decorator, or the
+    # admin commands registered just below it get read as part of /start.
+    body = bot_src.split("async def start(", 1)[1].split("\n@dp.", 1)[0]
+    return "_is_admin" in body or "ADMIN_IDS" in body
+
+
+async def level_tests(bot_mod, fake_db, config, sleeps):
+    import importlib
+
+    bot_src = open(os.path.join(ROOT, "bot.py"), encoding="utf-8").read()
+    db_src = open(os.path.join(ROOT, "db.py"), encoding="utf-8").read()
+    cfg_src = open(os.path.join(ROOT, "config.py"), encoding="utf-8").read()
+
+    # --- the two limits are configuration, not source constants --------------
+    print("\n[levels] both limits come from the environment")
+    check("START_DAILY_SIGNALS defaults to 30", config.START_DAILY_SIGNALS == 30,
+          str(config.START_DAILY_SIGNALS))
+    check("PREMIUM_DAILY_SIGNALS defaults to 70",
+          config.PREMIUM_DAILY_SIGNALS == 70, str(config.PREMIUM_DAILY_SIGNALS))
+    check("the legacy DAILY_SIGNAL_LIMIT still resolves to the Start limit",
+          config.DAILY_SIGNAL_LIMIT == config.START_DAILY_SIGNALS)
+    check("daily_limit(False) is the Start limit",
+          config.daily_limit(False) == config.START_DAILY_SIGNALS)
+    check("daily_limit(True) is the Premium limit",
+          config.daily_limit(True) == config.PREMIUM_DAILY_SIGNALS)
+    check("Start renders as the green label",
+          config.level_label(False) == "\U0001F7E2 Start",
+          repr(config.level_label(False)))
+    check("Premium renders as the trophy label",
+          config.level_label(True) == "\U0001F3C6 Premium",
+          repr(config.level_label(True)))
+    check("bot.py resolves every limit through config.daily_limit",
+          "config.daily_limit" in bot_src and "DAILY_SIGNAL_LIMIT" not in bot_src,
+          "bot.py still names a limit constant of its own")
+    # Scoped to the limit logic: elsewhere in config.py "70" and "30" turn up
+    # inside emoji IDs, \\U escapes and ad copy, none of which is a limit.
+    quota_block = cfg_src[cfg_src.index("# --- Levels and the daily signal quota"):
+                          cfg_src.index("MSG_DAILY_LIMIT")]
+    # Comments are allowed to mention the numbers; code is not, beyond the one
+    # os.getenv default each.
+    quota_code = "\n".join(l for l in quota_block.splitlines()
+                           if not l.lstrip().startswith("#"))
+    check("70 appears in the limit logic only as the PREMIUM_DAILY_SIGNALS default",
+          quota_code.count("70") == 1
+          and '_int_env("PREMIUM_DAILY_SIGNALS", 70)' in quota_code,
+          "a 70 is hardcoded in the limit logic")
+    check("30 appears in the limit logic only as the START_DAILY_SIGNALS default",
+          quota_code.count("30") == 1
+          and '_int_env("DAILY_SIGNAL_LIMIT", 30)' in quota_code,
+          "a 30 is hardcoded in the limit logic")
+
+    # --- a Start user gets exactly 30 ---------------------------------------
+    print("\n[limit] Start users get exactly %d signals" % config.START_DAILY_SIGNALS)
+    tg_id = 30001
+    _fresh_user(fake_db, tg_id)
+    premium, limit = await bot_mod._user_quota(tg_id)
+    check("an is_premium=FALSE user resolves to Start",
+          premium is False and limit == 30, "%s / %s" % (premium, limit))
+    delivered = 0
+    for _ in range(config.START_DAILY_SIGNALS):
+        calls, _cb = await tap(bot_mod, FakeBot(), tg_id, "m:1", sleeps)
+        delivered += 1 if _delivered(calls) else 0
+    check("all 30 Start signals are delivered", delivered == 30, str(delivered))
+    check("the counter stops at exactly 30",
+          fake_db._users[tg_id]["signals_used_today"] == 30,
+          str(fake_db._users[tg_id]["signals_used_today"]))
+
+    calls, cb = await tap(bot_mod, FakeBot(), tg_id, "m:1", sleeps)
+    check("signal 31 is refused", not _delivered(calls))
+    check("the refusal is an alert, not a screen",
+          cb.answers and cb.answers[-1] == (config.MSG_DAILY_LIMIT, True),
+          str(cb.answers))
+    check("a refused tap starts no countdown", not sleeps, str(sleeps))
+    check("a refused tap touches no message", calls == [], str(calls))
+    check("a refused tap does not increment the counter",
+          fake_db._users[tg_id]["signals_used_today"] == 30,
+          str(fake_db._users[tg_id]["signals_used_today"]))
+
+    # --- Premium users get the configured Premium limit ----------------------
+    print("\n[limit] Premium users get the configured Premium limit")
+    pro = 30002
+    _fresh_user(fake_db, pro, premium=True)
+    premium, limit = await bot_mod._user_quota(pro)
+    check("an is_premium=TRUE user resolves to Premium",
+          premium is True and limit == config.PREMIUM_DAILY_SIGNALS,
+          "%s / %s" % (premium, limit))
+    used, left = await bot_mod.db.signal_state(pro, limit)
+    check("a fresh Premium user has the full Premium allowance",
+          (used, left) == (0, 70), str((used, left)))
+
+    # A Start user's 31st tap is refused; a Premium user's is not - same code
+    # path, same day, only the tier differs.
+    _fresh_user(fake_db, pro, premium=True, used=30)
+    calls, _cb = await tap(bot_mod, FakeBot(), pro, "m:1", sleeps)
+    check("signal 31 IS delivered to a Premium user", _delivered(calls))
+    _fresh_user(fake_db, pro, premium=True, used=70)
+    calls, cb = await tap(bot_mod, FakeBot(), pro, "m:1", sleeps)
+    check("signal 71 is refused at the Premium cap", not _delivered(calls))
+    check("the Premium refusal is the same alert",
+          cb.answers and cb.answers[-1] == (config.MSG_DAILY_LIMIT, True),
+          str(cb.answers))
+
+    # --- the menu and My level show the user's own tier ----------------------
+    print("\n[ui] menu and My level are per-user, not static")
+    _fresh_user(fake_db, tg_id)
+    fake_bot = FakeBot()
+    await bot_mod._show_menu(fake_bot, tg_id)
+    body = fake_bot.calls[-1]["body"] or ""
+    check("Start menu names the Start level", "\U0001F7E2 Start" in body, repr(body))
+    check("Start menu shows 30 available",
+          "Available today: 30 signals" in body, repr(body))
+    check("Start menu shows 0 used and 30 left",
+          "Used: 0" in body and "Left: 30" in body, repr(body))
+    check("no unfilled placeholder is left on the menu caption",
+          "{" not in body and "}" not in body, repr(body))
+
+    _fresh_user(fake_db, pro, premium=True)
+    fake_bot = FakeBot()
+    await bot_mod._show_menu(fake_bot, pro)
+    body = fake_bot.calls[-1]["body"] or ""
+    check("Premium menu names the Premium level",
+          "\U0001F3C6 Premium" in body, repr(body))
+    check("Premium menu shows 70 available",
+          "Available today: 70 signals" in body, repr(body))
+    check("Premium menu never shows the Start label",
+          "\U0001F7E2 Start" not in body, repr(body))
+
+    fake_bot = FakeBot()
+    await bot_mod.menu_level(FakeCB(pro, "menu:level", 700), fake_bot)
+    last = fake_bot.calls[-1]
+    check("My level is a text-only screen", last["kind"] == "text", last["kind"])
+    check("My level names the tier", "\U0001F3C6 Premium" in (last["body"] or ""),
+          repr(last["body"]))
+    check("My level shows that tier's daily limit",
+          "Available today: 70 signals" in (last["body"] or ""), repr(last["body"]))
+    check("My level keeps a way back", last["markup"] is not None)
+    check("My level no longer answers 'Coming soon'",
+          "Coming soon" not in (last["body"] or ""))
+    check("menu:level is registered above the menu: catch-all",
+          bot_src.index('F.data == "menu:level"')
+          < bot_src.index('F.data.startswith("menu:")'))
+
+    # --- changing PREMIUM_DAILY_SIGNALS changes what is enforced -------------
+    print("\n[config] PREMIUM_DAILY_SIGNALS 70 -> 100 moves the enforced cap")
+    saved = os.environ.get("PREMIUM_DAILY_SIGNALS")
+    saved_admins = list(config.ADMIN_IDS)
+    try:
+        os.environ["PREMIUM_DAILY_SIGNALS"] = "100"
+        importlib.reload(config)
+        check("the new value is picked up on restart",
+              config.PREMIUM_DAILY_SIGNALS == 100, str(config.PREMIUM_DAILY_SIGNALS))
+        check("daily_limit(True) follows the variable",
+              config.daily_limit(True) == 100, str(config.daily_limit(True)))
+        check("the Start limit is untouched by the Premium change",
+              config.START_DAILY_SIGNALS == 30, str(config.START_DAILY_SIGNALS))
+
+        # The same user, the same day, the same 70 already spent: refused under
+        # 70, delivered under 100. This is the enforced limit moving, not the
+        # displayed one.
+        _fresh_user(fake_db, pro, premium=True, used=70)
+        calls, _cb = await tap(bot_mod, FakeBot(), pro, "m:1", sleeps)
+        check("signal 71 IS delivered once the variable says 100",
+              _delivered(calls))
+        _fresh_user(fake_db, pro, premium=True, used=100)
+        calls, cb = await tap(bot_mod, FakeBot(), pro, "m:1", sleeps)
+        check("signal 101 is refused at the new cap", not _delivered(calls))
+        check("the cap alert still fires at 100",
+              cb.answers and cb.answers[-1] == (config.MSG_DAILY_LIMIT, True),
+              str(cb.answers))
+
+        _fresh_user(fake_db, pro, premium=True)
+        fake_bot = FakeBot()
+        await bot_mod._show_menu(fake_bot, pro)
+        body = fake_bot.calls[-1]["body"] or ""
+        check("the menu shows 100 available without a code change",
+              "Available today: 100 signals" in body, repr(body))
+        check("the menu shows 100 left", "Left: 100" in body, repr(body))
+    finally:
+        if saved is None:
+            os.environ.pop("PREMIUM_DAILY_SIGNALS", None)
+        else:
+            os.environ["PREMIUM_DAILY_SIGNALS"] = saved
+        importlib.reload(config)
+        config.ADMIN_IDS = saved_admins
+    check("the Premium limit returns to 70 when the variable is unset",
+          config.PREMIUM_DAILY_SIGNALS == 70, str(config.PREMIUM_DAILY_SIGNALS))
+
+    # --- only admins can change a tier --------------------------------------
+    print("\n[admin] only ADMIN_IDS can change a tier")
+    admin, outsider, target = 4242, 9999, 30003
+    saved_admins = list(config.ADMIN_IDS)
+    config.ADMIN_IDS = [admin]
+    try:
+        _fresh_user(fake_db, target)
+        m = FakeMessage(outsider, "/premium %d" % target)
+        await bot_mod.cmd_premium(m)
+        check("a non-admin gets no reply at all", m.replies == [], str(m.replies))
+        check("a non-admin cannot grant Premium",
+              fake_db._users[target]["is_premium"] is False)
+        _, limit = await bot_mod._user_quota(target)
+        check("the target is still held to the Start limit", limit == 30, str(limit))
+
+        m = FakeMessage(outsider, "/startlevel %d" % admin)
+        _fresh_user(fake_db, admin, premium=True)
+        await bot_mod.cmd_startlevel(m)
+        check("a non-admin cannot revoke Premium either",
+              fake_db._users[admin]["is_premium"] is True and m.replies == [],
+              str(m.replies))
+
+        m = FakeMessage(admin, "/premium %d" % target)
+        await bot_mod.cmd_premium(m)
+        check("an admin can grant Premium",
+              fake_db._users[target]["is_premium"] is True)
+        check("the confirmation names the level and the configured limit",
+              m.replies and "\U0001F3C6 Premium" in m.replies[-1]
+              and "70" in m.replies[-1], str(m.replies))
+        _, limit = await bot_mod._user_quota(target)
+        check("the granted user is now held to the Premium limit",
+              limit == 70, str(limit))
+
+        m = FakeMessage(admin, "/startlevel %d" % target)
+        await bot_mod.cmd_startlevel(m)
+        check("an admin can move a user back to Start",
+              fake_db._users[target]["is_premium"] is False)
+        _, limit = await bot_mod._user_quota(target)
+        check("the demoted user is back on the Start limit", limit == 30, str(limit))
+
+        m = FakeMessage(admin, "/premium 987654321")
+        await bot_mod.cmd_premium(m)
+        check("an unknown tg_id is reported, not silently accepted",
+              m.replies and "987654321" in m.replies[-1]
+              and "No user" in m.replies[-1], str(m.replies))
+
+        m = FakeMessage(admin, "/premium")
+        await bot_mod.cmd_premium(m)
+        check("a malformed command answers with usage",
+              m.replies and m.replies[-1].startswith("Usage:"), str(m.replies))
+
+        m = FakeMessage(admin, "/premium notanid")
+        await bot_mod.cmd_premium(m)
+        check("a non-numeric tg_id answers with usage",
+              m.replies and m.replies[-1].startswith("Usage:"), str(m.replies))
+
+        check("ADMIN_IDS is empty by default, so nobody can change tiers unset",
+              config.ADMIN_IDS is not None and saved_admins == [], str(saved_admins))
+    finally:
+        config.ADMIN_IDS = saved_admins
+
+    # --- the daily rollover --------------------------------------------------
+    print("\n[quota] usage resets at the start of a new day")
+    roll = 30004
+    _fresh_user(fake_db, roll, used=config.START_DAILY_SIGNALS)
+    calls, cb = await tap(bot_mod, FakeBot(), roll, "m:1", sleeps)
+    check("a capped user is refused before the rollover", not _delivered(calls))
+
+    fake_db._today[0] = "2026-08-26"        # midnight UTC passes
+    used, left = await bot_mod.db.signal_state(roll, 30)
+    check("the new day reads as 0 used", used == 0, str(used))
+    check("the new day restores the full allowance", left == 30, str(left))
+    check("the stored counter itself was rewritten, not just the display",
+          fake_db._users[roll]["signals_used_today"] == 0
+          and fake_db._users[roll]["last_reset_date"] == "2026-08-26",
+          str(fake_db._users[roll]))
+    calls, _cb = await tap(bot_mod, FakeBot(), roll, "m:1", sleeps)
+    check("signals flow again on the new day", _delivered(calls))
+    check("the new day's first signal counts as 1",
+          fake_db._users[roll]["signals_used_today"] == 1,
+          str(fake_db._users[roll]["signals_used_today"]))
+
+    # A Premium user rolls over the same way and comes back to the Premium
+    # allowance, not the Start one.
+    _fresh_user(fake_db, pro, premium=True, used=70, day="2026-08-26")
+    fake_db._today[0] = "2026-08-27"
+    _, limit = await bot_mod._user_quota(pro)
+    used, left = await bot_mod.db.signal_state(pro, limit)
+    check("a Premium user rolls over to the Premium allowance",
+          (used, left) == (0, 70), str((used, left)))
+
+    # The stub above only mirrors the real statements; these keep the SQL that
+    # actually enforces and resets from drifting out from under it.
+    print("\n[sql] the statements the stub mirrors are still in db.py")
+    check("the reset is still keyed on the Postgres CURRENT_DATE",
+          "last_reset_date IS DISTINCT FROM CURRENT_DATE" in db_src)
+    check("the cap is still inside the atomic UPDATE's WHERE",
+          "signals_used_today < $2" in db_src)
+    check("the limit is still a parameter, never a literal, in db.py",
+          "30" not in db_src and "70" not in db_src, "db.py names a limit")
+    check("is_premium is added idempotently, defaulting existing rows to Start",
+          "ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT FALSE"
+          in db_src)
+    check("set_premium reports an unknown tg_id instead of succeeding",
+          "RETURNING is_premium" in db_src)
 
 
 async def main():
@@ -480,6 +1160,12 @@ async def main():
               first["kind"] == "delete" and first["id"] == 980, str(first))
         check("tapped screen deleted exactly once",
               len([c for c in calls if c["kind"] == "delete" and c["id"] == 980]) == 1)
+
+        # --- levels, limits and the daily rollover ---------------------------
+        await level_tests(bot_mod, fake_db, config, sleeps)
+
+        # --- the admin-only development reset --------------------------------
+        await devstart_tests(bot_mod, fake_db, config)
     finally:
         asyncio.sleep = real_sleep
 

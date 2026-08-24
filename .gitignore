@@ -9,3 +9,6 @@ session.txt
 s.txt
 *.session
 session_out.txt
+
+# local agent tool state - never commit
+.codewhale/
