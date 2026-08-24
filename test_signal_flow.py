@@ -819,9 +819,9 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("no menu button still points at VIP_LINK",
           not any(config.VIP_LINK in a for a in actions), str(actions))
     check("Unlock Premium appears in its place",
-          "Unlock Premium \U0001F451" in labels, str(labels))
+          "Unlock Premium" in labels, str(labels))
     check("Unlock Premium sits where VIP team was (row 4)",
-          menu_kb[3][0][0] == "Unlock Premium \U0001F451", str(menu_kb[3]))
+          menu_kb[3][0][0] == "Unlock Premium", str(menu_kb[3]))
     check("Unlock Premium opens a screen rather than a link",
           "cb:menu:premium" in actions, str(actions))
 
@@ -851,7 +851,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
 
     check("the six required buttons are present, in order",
           [l for l in labels] == ["Get a signal", "My level", "Support",
-                                  "Unlock Premium \U0001F451",
+                                  "Unlock Premium",
                                   "Telegram channel", "YouTube channel"],
           str(labels))
     check("the menu is now six rows", len(menu_kb) == 6, str(len(menu_kb)))
@@ -863,7 +863,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         "Get a signal":              "5188481279963715781",
         "My level":                  "5244837092042750681",
         "Support":                   "5443038326535759644",
-        "Unlock Premium \U0001F451": "5433758796289685818",
+        "Unlock Premium":            "5431684550424011313",
         "Telegram channel":          "5231489647946768652",
         "YouTube channel":           "5897969921182142023",
     }
@@ -885,26 +885,28 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     # the label, so leaving them would render two emoji per button.
     check("labels no longer carry their own leading emoji",
           all(l[0].isalpha() for l in labels), str(labels))
-    # The one exception, and it is trailing, not leading.
-    check("Unlock Premium keeps its trailing crown",
-          labels[3].endswith("\U0001F451"), repr(labels[3]))
-    check("the second Premium crown id is preserved even though it cannot bind",
-          config.E_MENU_PREMIUM_TRAILING == "5431684550424011313",
-          config.E_MENU_PREMIUM_TRAILING)
-    # Pins the reason it cannot bind, so a future reader does not "fix" it by
-    # inventing a field: one icon slot per button, and the label takes no
-    # entities. If Telegram ever adds a second slot, this check is what fails.
+    # Premium is no exception any more: its one crown is the custom emoji, so
+    # the label is bare text like every other button.
+    check("Unlock Premium carries exactly one crown, and it is the custom one",
+          labels[3] == "Unlock Premium"
+          and icons["Unlock Premium"] == "5431684550424011313",
+          "%r / %r" % (labels[3], icons.get("Unlock Premium")))
+    check("the second, right-hand crown is gone from the label",
+          "\U0001F451" not in labels[3], repr(labels[3]))
+    check("no unicode crown is left anywhere in the menu labels",
+          not any("\U0001F451" in l for l in labels), str(labels))
+    check("the superseded Premium emoji id is no longer referenced",
+          "5433758796289685818" not in open("config.py", encoding="utf-8").read(),
+          "the old Premium emoji id is still in config.py")
+    check("the trailing-crown constant is gone with the crown",
+          not hasattr(config, "E_MENU_PREMIUM_TRAILING"),
+          "E_MENU_PREMIUM_TRAILING outlived the button it described")
+    # One icon slot per button is what makes a single crown the only option.
     from aiogram.types import InlineKeyboardButton as _IKB2
     check("a button still has exactly one custom-emoji slot",
           [f for f in _IKB2.model_fields if "custom_emoji" in f]
           == ["icon_custom_emoji_id"],
           str([f for f in _IKB2.model_fields if "custom_emoji" in f]))
-    check("the left crown is the custom one, and it is unchanged",
-          icons["Unlock Premium \U0001F451"] == "5433758796289685818",
-          icons.get("Unlock Premium \U0001F451"))
-    check("the trailing crown is plain unicode, not a tg-emoji tag",
-          "tg-emoji" not in labels[3] and labels[3].endswith("\U0001F451"),
-          repr(labels[3]))
 
     # The URLs and callbacks the buttons carry must be untouched.
     wired = {b[0]: b[1] for row in menu_kb for b in row}
@@ -919,7 +921,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("My level still opens the level screen",
           wired["My level"] == "cb:menu:level")
     check("Unlock Premium still opens the premium screen",
-          wired["Unlock Premium \U0001F451"] == "cb:menu:premium")
+          wired["Unlock Premium"] == "cb:menu:premium")
 
     # build_kb must actually forward style/icon onto the outgoing button.
     built = bot_mod.build_kb(menu_kb)

@@ -105,23 +105,9 @@ E_EXP_DOWN  = "5406745015365943482"
 E_MENU_SIGNAL   = "5188481279963715781"
 E_MENU_LEVEL    = "5244837092042750681"
 E_MENU_SUPPORT  = "5443038326535759644"
-E_MENU_PREMIUM  = "5433758796289685818"
+E_MENU_PREMIUM  = "5431684550424011313"
 E_MENU_CHANNEL  = "5231489647946768652"
 E_YOUTUBE       = "5897969921182142023"
-
-# Supplied for the trailing crown on "Unlock Premium". It CANNOT be attached to
-# the button, and this is a Bot API limit rather than a gap in build_kb:
-#   * the button already spends its single icon_custom_emoji_id on
-#     E_MENU_PREMIUM, which Telegram always draws leading;
-#   * the trailing position lives in the label text, which is a plain string
-#     with no entities and no parse_mode;
-#   * splitting the crown into its own button is not a way round it - a button
-#     with empty text is rejected as BUTTON_TEXT_EMPTY, and a second button
-#     would be a second tap target.
-# The trailing crown is therefore plain unicode U+1F451, and the button renders
-# as "<custom crown> Unlock Premium 👑". This ID is recorded so it is not lost
-# if button text ever gains entity support.
-E_MENU_PREMIUM_TRAILING = "5431684550424011313"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -290,13 +276,12 @@ SCREENS = {
         # The leading unicode emoji are gone from the labels: each button now
         # carries its custom emoji in the 4th slot, and Telegram draws that
         # before the text, so keeping both would show two icons side by side.
-        # "Unlock Premium" keeps a plain unicode crown in its TRAILING position
-        # only - see E_MENU_PREMIUM_TRAILING above for why that one cannot be a
-        # custom emoji.
+        # That applies to "Unlock Premium" too - its single crown is the custom
+        # emoji, which is why the label is bare text like all the others.
         "kb": [[("Get a signal", "cb:menu:signal", "primary", E_MENU_SIGNAL)],
                [("My level", "cb:menu:level", "primary", E_MENU_LEVEL)],
                [("Support", "url:" + SUPPORT_URL, "primary", E_MENU_SUPPORT)],
-               [("Unlock Premium \U0001F451", "cb:menu:premium", "primary", E_MENU_PREMIUM)],
+               [("Unlock Premium", "cb:menu:premium", "primary", E_MENU_PREMIUM)],
                [("Telegram channel", "url:" + CHANNEL_URL, "primary", E_MENU_CHANNEL)],
                [("YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)]],
     },
