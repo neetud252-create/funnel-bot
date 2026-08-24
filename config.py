@@ -93,10 +93,27 @@ E_EXP_DOWN  = "5406745015365943482"
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
-# as InlineKeyboardButton.icon_custom_emoji_id. A button label keeps its plain
-# unicode emoji regardless, so a client that cannot show the custom icon still
-# gets a readable button.
-E_YOUTUBE = "5897969921182142023"
+# as InlineKeyboardButton.icon_custom_emoji_id - the emoji Telegram draws before
+# the button's label.
+#
+# TWO Bot API limits shape how these are used, and neither is ours to change:
+#   * icon_custom_emoji_id is a single string. ONE custom emoji per button.
+#   * InlineKeyboardButton.text is a plain label with no entities and no
+#     parse_mode, so a custom emoji cannot be placed inside the text itself -
+#     <tg-emoji> would render as literal markup. pe() is for message bodies only.
+# Between them, a button can carry exactly one custom emoji, always leading.
+E_MENU_SIGNAL   = "5188481279963715781"
+E_MENU_LEVEL    = "5244837092042750681"
+E_MENU_SUPPORT  = "5443038326535759644"
+E_MENU_PREMIUM  = "5433758796289685818"
+E_MENU_CHANNEL  = "5231489647946768652"
+E_YOUTUBE       = "5897969921182142023"
+
+# Supplied for the trailing crown on "Unlock Premium". It cannot be attached:
+# the button already spends its one icon slot on E_MENU_PREMIUM, and the second
+# position lives in the label text, which takes no entities. Kept here so the ID
+# is not lost if button text ever gains entity support.
+E_MENU_PREMIUM_TRAILING = "5895227687642861193"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
@@ -262,12 +279,18 @@ SCREENS = {
         # client's own default, which is what the unstyled rows used to do.
         # VIP_LINK and REF_LINK are still read above - REF_LINK is also used by
         # _register_btn() in bot.py, so it must not be removed with the button.
-        "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "primary")],
-               [("\U0001F3C6 My level", "cb:menu:level", "primary")],
-               [("\U0001F9D1\U0000200D\U0001F4BC Support", "url:" + SUPPORT_URL, "primary")],
-               [("\U00002B50 Unlock Premium", "cb:menu:premium", "primary")],
-               [("\U00002708\U0000FE0F Telegram channel", "url:" + CHANNEL_URL, "primary")],
-               [("\U000025B6\U0000FE0F YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)]],
+        # The leading unicode emoji are gone from the labels: each button now
+        # carries its custom emoji in the 4th slot, and Telegram draws that
+        # before the text, so keeping both would show two icons side by side.
+        # "Unlock Premium" keeps a plain unicode crown in its TRAILING position
+        # only - see E_MENU_PREMIUM_TRAILING above for why that one cannot be a
+        # custom emoji.
+        "kb": [[("Get a signal", "cb:menu:signal", "primary", E_MENU_SIGNAL)],
+               [("My level", "cb:menu:level", "primary", E_MENU_LEVEL)],
+               [("Support", "url:" + SUPPORT_URL, "primary", E_MENU_SUPPORT)],
+               [("Unlock Premium \U0001F451", "cb:menu:premium", "primary", E_MENU_PREMIUM)],
+               [("Telegram channel", "url:" + CHANNEL_URL, "primary", E_MENU_CHANNEL)],
+               [("YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)]],
     },
     # Trading-mode picker, opened from "Get a signal" on the menu. Both modes are
     # still placeholders - see mode_action in bot.py.

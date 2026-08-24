@@ -819,9 +819,9 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("no menu button still points at VIP_LINK",
           not any(config.VIP_LINK in a for a in actions), str(actions))
     check("Unlock Premium appears in its place",
-          "\U00002B50 Unlock Premium" in labels, str(labels))
+          "Unlock Premium \U0001F451" in labels, str(labels))
     check("Unlock Premium sits where VIP team was (row 4)",
-          menu_kb[3][0][0] == "\U00002B50 Unlock Premium", str(menu_kb[3]))
+          menu_kb[3][0][0] == "Unlock Premium \U0001F451", str(menu_kb[3]))
     check("Unlock Premium opens a screen rather than a link",
           "cb:menu:premium" in actions, str(actions))
 
@@ -850,35 +850,62 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           "icon_custom_emoji_id" in _IKB.model_fields)
 
     check("the six required buttons are present, in order",
-          [l for l in labels] == ["\U0001F680 Get a signal",
-                                  "\U0001F3C6 My level",
-                                  "\U0001F9D1\U0000200D\U0001F4BC Support",
-                                  "\U00002B50 Unlock Premium",
-                                  "\U00002708\U0000FE0F Telegram channel",
-                                  "\U000025B6\U0000FE0F YouTube channel"], str(labels))
+          [l for l in labels] == ["Get a signal", "My level", "Support",
+                                  "Unlock Premium \U0001F451",
+                                  "Telegram channel", "YouTube channel"],
+          str(labels))
     check("the menu is now six rows", len(menu_kb) == 6, str(len(menu_kb)))
 
-    # Custom emoji: only the one ID supplied for YouTube, used through the
-    # existing 4th-slot convention. Nothing else invents an ID.
+    # --- the supplied custom emoji IDs, one per button ----------------------
+    print("\n[emoji] every main-menu button carries its supplied custom emoji")
     icons = {b[0]: (b[3] if len(b) > 3 else None) for row in menu_kb for b in row}
-    check("YouTube carries the supplied custom emoji id",
-          icons["\U000025B6\U0000FE0F YouTube channel"] == "5897969921182142023",
-          str(icons))
-    check("no other menu button was given an invented emoji id",
-          all(v is None for k, v in icons.items() if "YouTube" not in k), str(icons))
+    SUPPLIED = {
+        "Get a signal":              "5188481279963715781",
+        "My level":                  "5244837092042750681",
+        "Support":                   "5443038326535759644",
+        "Unlock Premium \U0001F451": "5433758796289685818",
+        "Telegram channel":          "5231489647946768652",
+        "YouTube channel":           "5897969921182142023",
+    }
+    for label, want in SUPPLIED.items():
+        check("%s -> %s" % (label, want), icons.get(label) == want,
+              repr(icons.get(label)))
+    check("every button has an icon; none was left bare",
+          all(v for v in icons.values()), str(icons))
+    check("no two buttons share an icon id",
+          len(set(icons.values())) == 6, str(icons))
+    check("no emoji id outside the supplied set is used",
+          set(icons.values()) == set(SUPPLIED.values()), str(set(icons.values())))
+    # Every ID is a bare numeric string - a malformed one makes Telegram reject
+    # the whole message, taking the menu down.
+    check("every icon id is a plain numeric id",
+          all(v.isdigit() for v in icons.values()), str(icons))
+
+    # The leading unicode emoji had to go: Telegram draws the custom icon before
+    # the label, so leaving them would render two emoji per button.
+    check("labels no longer carry their own leading emoji",
+          all(l[0].isalpha() for l in labels), str(labels))
+    # The one exception, and it is trailing, not leading.
+    check("Unlock Premium keeps its trailing crown",
+          labels[3].endswith("\U0001F451"), repr(labels[3]))
+    check("the second Premium crown id is preserved even though it cannot bind",
+          config.E_MENU_PREMIUM_TRAILING == "5895227687642861193",
+          config.E_MENU_PREMIUM_TRAILING)
 
     # The URLs and callbacks the buttons carry must be untouched.
     wired = {b[0]: b[1] for row in menu_kb for b in row}
     check("Support still opens the support URL",
-          wired["\U0001F9D1\U0000200D\U0001F4BC Support"] == "url:" + config.SUPPORT_URL)
+          wired["Support"] == "url:" + config.SUPPORT_URL)
     check("Telegram channel still opens the channel URL",
-          wired["\U00002708\U0000FE0F Telegram channel"] == "url:" + config.CHANNEL_URL)
+          wired["Telegram channel"] == "url:" + config.CHANNEL_URL)
     check("YouTube still opens the YouTube URL",
-          wired["\U000025B6\U0000FE0F YouTube channel"] == "url:" + config.YOUTUBE_URL)
+          wired["YouTube channel"] == "url:" + config.YOUTUBE_URL)
     check("Get a signal still opens the mode picker",
-          wired["\U0001F680 Get a signal"] == "cb:menu:signal")
+          wired["Get a signal"] == "cb:menu:signal")
     check("My level still opens the level screen",
-          wired["\U0001F3C6 My level"] == "cb:menu:level")
+          wired["My level"] == "cb:menu:level")
+    check("Unlock Premium still opens the premium screen",
+          wired["Unlock Premium \U0001F451"] == "cb:menu:premium")
 
     # build_kb must actually forward style/icon onto the outgoing button.
     built = bot_mod.build_kb(menu_kb)
