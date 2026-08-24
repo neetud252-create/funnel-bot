@@ -889,8 +889,22 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("Unlock Premium keeps its trailing crown",
           labels[3].endswith("\U0001F451"), repr(labels[3]))
     check("the second Premium crown id is preserved even though it cannot bind",
-          config.E_MENU_PREMIUM_TRAILING == "5895227687642861193",
+          config.E_MENU_PREMIUM_TRAILING == "5431684550424011313",
           config.E_MENU_PREMIUM_TRAILING)
+    # Pins the reason it cannot bind, so a future reader does not "fix" it by
+    # inventing a field: one icon slot per button, and the label takes no
+    # entities. If Telegram ever adds a second slot, this check is what fails.
+    from aiogram.types import InlineKeyboardButton as _IKB2
+    check("a button still has exactly one custom-emoji slot",
+          [f for f in _IKB2.model_fields if "custom_emoji" in f]
+          == ["icon_custom_emoji_id"],
+          str([f for f in _IKB2.model_fields if "custom_emoji" in f]))
+    check("the left crown is the custom one, and it is unchanged",
+          icons["Unlock Premium \U0001F451"] == "5433758796289685818",
+          icons.get("Unlock Premium \U0001F451"))
+    check("the trailing crown is plain unicode, not a tg-emoji tag",
+          "tg-emoji" not in labels[3] and labels[3].endswith("\U0001F451"),
+          repr(labels[3]))
 
     # The URLs and callbacks the buttons carry must be untouched.
     wired = {b[0]: b[1] for row in menu_kb for b in row}

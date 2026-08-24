@@ -109,11 +109,19 @@ E_MENU_PREMIUM  = "5433758796289685818"
 E_MENU_CHANNEL  = "5231489647946768652"
 E_YOUTUBE       = "5897969921182142023"
 
-# Supplied for the trailing crown on "Unlock Premium". It cannot be attached:
-# the button already spends its one icon slot on E_MENU_PREMIUM, and the second
-# position lives in the label text, which takes no entities. Kept here so the ID
-# is not lost if button text ever gains entity support.
-E_MENU_PREMIUM_TRAILING = "5895227687642861193"
+# Supplied for the trailing crown on "Unlock Premium". It CANNOT be attached to
+# the button, and this is a Bot API limit rather than a gap in build_kb:
+#   * the button already spends its single icon_custom_emoji_id on
+#     E_MENU_PREMIUM, which Telegram always draws leading;
+#   * the trailing position lives in the label text, which is a plain string
+#     with no entities and no parse_mode;
+#   * splitting the crown into its own button is not a way round it - a button
+#     with empty text is rejected as BUTTON_TEXT_EMPTY, and a second button
+#     would be a second tap target.
+# The trailing crown is therefore plain unicode U+1F451, and the button renders
+# as "<custom crown> Unlock Premium 👑". This ID is recorded so it is not lost
+# if button text ever gains entity support.
+E_MENU_PREMIUM_TRAILING = "5431684550424011313"
 
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
