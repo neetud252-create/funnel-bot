@@ -676,8 +676,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           config.daily_limit(False) == config.START_DAILY_SIGNALS)
     check("daily_limit(True) is the Premium limit",
           config.daily_limit(True) == config.PREMIUM_DAILY_SIGNALS)
-    check("Start renders as the green label",
-          config.level_label(False) == "\U0001F7E2 Start",
+    check("Start renders as the star label",
+          config.level_label(False) == "\U00002B50 Start",
           repr(config.level_label(False)))
     check("Premium renders as the trophy label",
           config.level_label(True) == "\U0001F3C6 Premium",
@@ -759,7 +759,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     fake_bot = FakeBot()
     await bot_mod._show_menu(fake_bot, tg_id)
     body = fake_bot.calls[-1]["body"] or ""
-    check("Start menu names the Start level", "\U0001F7E2 Start" in body, repr(body))
+    check("Start menu names the Start level",
+          config.level_label_tg(False) in body, repr(body))
     check("Start menu shows 30 available",
           "Available today: 30 signals" in body, repr(body))
     check("Start menu shows 0 used and 30 left",
@@ -776,7 +777,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("Premium menu shows 70 available",
           "Available today: 70 signals" in body, repr(body))
     check("Premium menu never shows the Start label",
-          "\U0001F7E2 Start" not in body, repr(body))
+          "Start" not in body and config.E_LEVEL_START not in body, repr(body))
 
     fake_bot = FakeBot()
     await bot_mod.menu_level(FakeCB(pro, "menu:level", 700), fake_bot)
@@ -802,7 +803,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     await bot_mod.menu_level(FakeCB(tg_id, "menu:level", 700), fake_bot)
     body = fake_bot.calls[-1]["body"] or ""
     check("My level shows Start for a Start user",
-          body.startswith("\U0001F7E2 <b>Your current level:</b> Start"), repr(body))
+          body.startswith(config.level_icon_tg(False)
+                          + " <b>Your current level:</b> Start"), repr(body))
     check("My level shows the Start limit, not the Premium one",
           "\U0001F4CA <b>Daily limit:</b> 30 signals" in body
           and "70" not in body, repr(body))
@@ -855,6 +857,108 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
                                   "Telegram channel", "YouTube channel"],
           str(labels))
     check("the menu is now six rows", len(menu_kb) == 6, str(len(menu_kb)))
+
+    # --- message-text custom emoji entities ---------------------------------
+    # Not button icons: these live in the screen captions and only render
+    # because render() sends with parse_mode="HTML".
+    print("\n[entities] main menu and trading mode custom emoji")
+    import re as _re
+
+    def _entities(html):
+        """[(emoji_id, fallback_glyph)] in document order."""
+        return _re.findall(r'<tg-emoji emoji-id="(\d+)">(.*?)</tg-emoji>', html)
+
+    menu_text = config.SCREENS["menu"]["text"]
+    menu_ids = [i for i, _g in _entities(menu_text)]
+    for label, want, near in (
+            ("Go+ main menu robot", "5188678912883827293", "Go+ main menu"),
+            ("Signals bolt",        "5429633836684157942", "Signals"),
+            ("Your level battery",  "5370688996844249600", "Your level"),
+    ):
+        # The id must sit immediately before the text it belongs to, not merely
+        # somewhere in the caption - that is what "attached to the right entity"
+        # means here.
+        # near is literal text ("Go+ main menu" contains a regex quantifier).
+        pat = r'<tg-emoji emoji-id="%s">.*?</tg-emoji> <b>%s' % (want,
+                                                                 _re.escape(near))
+        check("menu: %s -> %s" % (label, want),
+              _re.search(pat, menu_text) is not None, repr(menu_text[:120]))
+    check("the Start tier icon is entity 5274026806477857971",
+          _entities(config.level_icon_tg(False)) == [("5274026806477857971",
+                                                      "\U00002B50")],
+          repr(config.level_icon_tg(False)))
+    check("Premium keeps a plain glyph - no id was supplied for it",
+          "tg-emoji" not in config.level_icon_tg(True),
+          repr(config.level_icon_tg(True)))
+    check("the menu caption's placeholders survived the rewrite",
+          all(p in menu_text for p in ("{limit}", "{used}", "{left}", "{level}")),
+          repr(menu_text))
+    check("the menu wording is unchanged",
+          all(s in menu_text for s in ("<b>Go+ main menu</b>", "<b>Signals</b>",
+                                       "Available today: {limit} signals",
+                                       "Used: {used}", "Left: {left}",
+                                       "<b>Your level:</b>")), repr(menu_text))
+
+    mode_text = config.SCREENS["mode"]["text"]
+    mode_ids = [i for i, _g in _entities(mode_text)]
+    check("trading mode: header -> 5231200819986047254",
+          _re.search(r'<tg-emoji emoji-id="5231200819986047254">.*?</tg-emoji>'
+                     r' <b>Select trading mode:</b>', mode_text) is not None,
+          repr(mode_text[:90]))
+    check("trading mode: Manual -> 5778373820930858379",
+          _re.search(r'<tg-emoji emoji-id="5778373820930858379">.*?</tg-emoji>'
+                     r' <b>Manual</b>', mode_text) is not None, repr(mode_text))
+    check("trading mode: Manual separator -> 5258011929993026890",
+          _re.search(r'<b>Manual</b> <tg-emoji emoji-id="5258011929993026890">',
+                     mode_text) is not None, repr(mode_text))
+    check("trading mode: Automatic -> 5778382698628256004",
+          _re.search(r'<tg-emoji emoji-id="5778382698628256004">.*?</tg-emoji>'
+                     r' <b>Automatic</b>', mode_text) is not None, repr(mode_text))
+    check("trading mode: Automatic separator -> 4943239162758169437",
+          _re.search(r'<b>Automatic</b> <tg-emoji emoji-id="4943239162758169437">',
+                     mode_text) is not None, repr(mode_text))
+    check("trading mode: Choose below -> 5447183459602669338",
+          _re.search(r'<tg-emoji emoji-id="5447183459602669338">.*?</tg-emoji>'
+                     r' <b>Choose below</b>', mode_text) is not None, repr(mode_text))
+    check("the trading-mode wording is unchanged",
+          all(s in mode_text for s in ("<b>Select trading mode:</b>",
+                                       "you choose asset &amp; time",
+                                       "bot chooses everything",
+                                       "<b>Choose below</b>")), repr(mode_text))
+    check("the trading-mode buttons are untouched",
+          [b[1] for row in config.SCREENS["mode"]["kb"] for b in row]
+          == ["cb:mode:manual", "cb:mode:auto", "cb:go:menu"],
+          str(config.SCREENS["mode"]["kb"]))
+
+    # Nothing invented, and every entity is well formed - a malformed tag or a
+    # bad id makes Telegram reject the whole message and blanks the screen.
+    ALL_SUPPLIED = {"5188678912883827293", "5429633836684157942",
+                    "5370688996844249600", "5274026806477857971",
+                    "5231200819986047254", "5778373820930858379",
+                    "5258011929993026890", "5778382698628256004",
+                    "4943239162758169437", "5447183459602669338"}
+    seen = set(menu_ids) | set(mode_ids) | {"5274026806477857971"}
+    check("every id on these two screens is one that was supplied",
+          seen <= ALL_SUPPLIED, str(seen - ALL_SUPPLIED))
+    check("all ten supplied ids are in use",
+          ALL_SUPPLIED <= seen, str(ALL_SUPPLIED - seen))
+    for html in (menu_text, mode_text, config.level_icon_tg(False)):
+        check("tags balance in %r..." % html[:24],
+              html.count("<tg-emoji") == html.count("</tg-emoji>"))
+    check("every entity id is a bare numeric id",
+          all(i.isdigit() for i in menu_ids + mode_ids), str(menu_ids + mode_ids))
+    check("every entity carries a unicode fallback glyph",
+          all(g and "<" not in g for _i, g in
+              _entities(menu_text) + _entities(mode_text)),
+          str(_entities(mode_text)))
+
+    # The /premium confirmation has no parse_mode, so it must stay plain text -
+    # an entity there would print as literal markup.
+    check("the admin confirmation uses the plain label, not an entity",
+          "tg-emoji" not in config.MSG_ADMIN_DONE.format(
+              tg_id=1, level=config.level_label(False), limit=30),
+          config.MSG_ADMIN_DONE.format(tg_id=1, level=config.level_label(False),
+                                       limit=30))
 
     # --- the supplied custom emoji IDs, one per button ----------------------
     print("\n[emoji] every main-menu button carries its supplied custom emoji")

@@ -91,6 +91,17 @@ E_EXP_CLOCK = "5382194935057372936"
 E_EXP_BULB  = "5258216851472654189"
 E_EXP_DOWN  = "5406745015365943482"
 
+# Main-menu and trading-mode MESSAGE emoji - the ones inside a screen's caption,
+# as opposed to the button icons further down. These go through pe() into
+# <tg-emoji> entities, so they render only on a message sent with
+# parse_mode="HTML"; render() always does.
+E_MENU_HEADER   = "5188678912883827293"   # the robot on "Go+ main menu"
+E_MENU_SIGNALS  = "5429633836684157942"   # the bolt on the "Signals" line
+E_MENU_LEVEL_HD = "5370688996844249600"   # the battery on "Your level:"
+E_LEVEL_START   = "5274026806477857971"   # the star on the Start tier itself
+E_MODE_MANUAL_SEP = "5258011929993026890" # separator after "Manual"
+E_MODE_AUTO_SEP   = "4943239162758169437" # separator after "Automatic"
+
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
 # as InlineKeyboardButton.icon_custom_emoji_id - the emoji Telegram draws before
@@ -137,6 +148,19 @@ T_SIG_LENS  = pe(E_SIG_LENS, "\U0001F50D")
 # it is still the one supplied for this slot - so premium clients see exactly
 # what they saw before; only the non-premium fallback character moved.
 T_SIG_GLASS = pe(E_SIG_GLASS, "\U0001F300")
+
+# Main-menu caption and trading-mode screen. The fallback glyph inside each tag
+# is what a client that cannot show custom emoji displays instead, so it is the
+# emoji the entity depicts, not a stand-in.
+T_MENU_HEADER   = pe(E_MENU_HEADER, "\U0001F916")      # robot
+T_MENU_SIGNALS  = pe(E_MENU_SIGNALS, "\U000026A1")     # high voltage
+T_MENU_LEVEL_HD = pe(E_MENU_LEVEL_HD, "\U0001FAAB")    # low battery
+T_LEVEL_START   = pe(E_LEVEL_START, "\U00002B50")      # star
+# E_CHART is reused deliberately: the supplied "Trading mode" id is byte for
+# byte the one already defined for it, so this is the same entity, not a new one.
+T_MODE_HEADER   = pe(E_CHART, "\U0001F4CA")            # bar chart
+T_MODE_MAN_SEP  = pe(E_MODE_MANUAL_SEP, "\U00002014")  # em dash separator
+T_MODE_AUTO_SEP = pe(E_MODE_AUTO_SEP, "\U00002014")    # em dash separator
 
 # --- Currency pairs ---------------------------------------------------------
 # Single source of truth for the OTC pair list: the keyboard, the pagination,
@@ -265,7 +289,14 @@ SCREENS = {
     # level on this screen is per-user state rather than static text.
     "menu": {
         "photo": "menu",
-        "text": "\U0001F916 <b>Go+ main menu</b>\n\n\U0001F514 <b>Signals</b>\n\U00002014 Available today: {limit} signals\n\U00002014 Used: {used}\n\U00002014 Left: {left}\n\n\U0001FAAB <b>Your level:</b> {level}",
+        # Wording, line breaks and the three {placeholders} are unchanged; only
+        # the three leading emoji became <tg-emoji> entities.
+        "text": (T_MENU_HEADER + " <b>Go+ main menu</b>\n\n"
+                 + T_MENU_SIGNALS + " <b>Signals</b>\n"
+                 "\U00002014 Available today: {limit} signals\n"
+                 "\U00002014 Used: {used}\n"
+                 "\U00002014 Left: {left}\n\n"
+                 + T_MENU_LEVEL_HD + " <b>Your level:</b> {level}"),
         # Every row carries style "primary", which the Bot API renders blue, so
         # the whole menu reads as one blue block instead of the mixed green /
         # blue / app-default it was. The only other styles Telegram accepts are
@@ -292,7 +323,15 @@ SCREENS = {
     # message. Swap in pe(E_SPEECH, ...) once a real ID is on hand.
     "mode": {
         "photo": "trading_mode",
-        "text": "\U0001F4AC <b>Select trading mode:</b>\n\n" + T_N1 + " <b>Manual</b> \U00002014 you choose asset &amp; time\n" + T_N2 + " <b>Automatic</b> \U00002014 bot chooses everything\n\n" + T_DOWN + " <b>Choose below</b>",
+        # T_N1 / T_N2 / T_DOWN already carried the supplied Manual, Automatic
+        # and "Choose below" ids, so they are untouched. What changed: the
+        # header emoji became the supplied Trading-mode entity (was a plain
+        # unicode speech balloon), and the two em-dash separators became their
+        # own entities.
+        "text": (T_MODE_HEADER + " <b>Select trading mode:</b>\n\n"
+                 + T_N1 + " <b>Manual</b> " + T_MODE_MAN_SEP + " you choose asset &amp; time\n"
+                 + T_N2 + " <b>Automatic</b> " + T_MODE_AUTO_SEP + " bot chooses everything\n\n"
+                 + T_DOWN + " <b>Choose below</b>"),
         "kb": [[("\U0000270B Manual", "cb:mode:manual", "success")],
                [("\U0001F513 Automatic", "cb:mode:auto", "primary")],
                [("\U000000AB Back", "cb:go:menu")]],
@@ -451,19 +490,37 @@ PREMIUM_DAILY_SIGNALS = _int_env("PREMIUM_DAILY_SIGNALS", 70)
 DAILY_SIGNAL_LIMIT = START_DAILY_SIGNALS
 
 # Icon and name are kept apart because the two screens compose them
-# differently: the menu caption wants "\U0001F7E2 Start" as one label, while the
-# My level screen leads with the icon and ends with the name. LEVEL_LABELS is
-# derived from them rather than written out again, so a rename cannot leave the
+# differently: the menu caption wants "<star> Start" as one label, while the My
+# level screen leads with the icon and ends with the name. The LEVEL_LABELS
+# tables are derived rather than written out again, so a rename cannot leave the
 # two screens disagreeing about what a tier is called.
+#
+# There are TWO icon tables on purpose, and they are not interchangeable.
+#
+# LEVEL_ICONS holds plain unicode. LEVEL_ICONS_TG wraps the same glyph in a
+# <tg-emoji> entity where an ID has been supplied for that tier. An entity only
+# renders on a message sent with parse_mode="HTML"; anywhere else the raw tag
+# would be printed verbatim, and MSG_ADMIN_DONE is exactly such a place - the
+# /premium confirmation goes out through m.answer() with no parse mode. So the
+# screens use the *_tg helpers and the admin reply uses the plain ones.
+#
+# Only Start has a supplied ID. Premium keeps its plain trophy rather than an
+# invented entity, which is why this table is built per tier instead of wrapping
+# both blindly.
 LEVEL_ICONS = {
-    LEVEL_START:   "\U0001F7E2",
+    LEVEL_START:   "\U00002B50",
     LEVEL_PREMIUM: "\U0001F3C6",
+}
+LEVEL_ICONS_TG = {
+    LEVEL_START:   T_LEVEL_START,
+    LEVEL_PREMIUM: LEVEL_ICONS[LEVEL_PREMIUM],
 }
 LEVEL_NAMES = {
     LEVEL_START:   "Start",
     LEVEL_PREMIUM: "Premium",
 }
-LEVEL_LABELS = {k: LEVEL_ICONS[k] + " " + LEVEL_NAMES[k] for k in LEVEL_NAMES}
+LEVEL_LABELS    = {k: LEVEL_ICONS[k] + " " + LEVEL_NAMES[k] for k in LEVEL_NAMES}
+LEVEL_LABELS_TG = {k: LEVEL_ICONS_TG[k] + " " + LEVEL_NAMES[k] for k in LEVEL_NAMES}
 
 def level_of(is_premium):
     return LEVEL_PREMIUM if is_premium else LEVEL_START
@@ -474,10 +531,18 @@ def daily_limit(is_premium):
     return PREMIUM_DAILY_SIGNALS if is_premium else START_DAILY_SIGNALS
 
 def level_label(is_premium):
+    # Plain unicode. Safe anywhere, including messages sent without parse_mode.
     return LEVEL_LABELS[level_of(is_premium)]
+
+def level_label_tg(is_premium):
+    # HTML only. Callers must send with parse_mode="HTML".
+    return LEVEL_LABELS_TG[level_of(is_premium)]
 
 def level_icon(is_premium):
     return LEVEL_ICONS[level_of(is_premium)]
+
+def level_icon_tg(is_premium):
+    return LEVEL_ICONS_TG[level_of(is_premium)]
 
 def level_name(is_premium):
     return LEVEL_NAMES[level_of(is_premium)]

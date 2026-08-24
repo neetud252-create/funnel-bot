@@ -796,7 +796,7 @@ async def menu_level(cb: CallbackQuery, bot: Bot):
     premium, limit = await _user_quota(tg_id)
     used, left = await db.signal_state(tg_id, limit)
     await render(bot, tg_id, None,
-                 config.MSG_LEVEL.format(icon=config.level_icon(premium),
+                 config.MSG_LEVEL.format(icon=config.level_icon_tg(premium),
                                          name=config.level_name(premium),
                                          limit=limit, used=used, left=left),
                  config.LEVEL_KB)
@@ -861,8 +861,11 @@ async def _show_menu(bot, tg_id, test_mode=False):
     s = config.SCREENS["menu"]
     premium, limit = await _user_quota(tg_id)
     used, left = await db.signal_state(tg_id, limit)
+    # _tg variant: this caption is sent with parse_mode="HTML" by render(), so
+    # the tier's custom-emoji entity resolves. The plain level_label() is for
+    # the admin confirmation, which has no parse mode.
     text = s["text"].format(limit=limit, used=used, left=left,
-                            level=config.level_label(premium))
+                            level=config.level_label_tg(premium))
     if test_mode:
         text = config.MSG_TEST_MODE + "\n\n" + text
     await render(bot, tg_id, s["photo"], text, s["kb"])
