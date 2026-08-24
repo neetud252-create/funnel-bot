@@ -91,6 +91,13 @@ E_EXP_CLOCK = "5382194935057372936"
 E_EXP_BULB  = "5258216851472654189"
 E_EXP_DOWN  = "5406745015365943482"
 
+# Main-menu button icons. Unlike the constants above these are NOT rendered
+# through pe(): they go in the 4th slot of a button tuple, which build_kb passes
+# as InlineKeyboardButton.icon_custom_emoji_id. A button label keeps its plain
+# unicode emoji regardless, so a client that cannot show the custom icon still
+# gets a readable button.
+E_YOUTUBE = "5897969921182142023"
+
 def pe(emoji_id, fallback):
     return '<tg-emoji emoji-id="' + emoji_id + '">' + fallback + '</tg-emoji>'
 
@@ -248,15 +255,19 @@ SCREENS = {
     "menu": {
         "photo": "menu",
         "text": "\U0001F916 <b>Go+ main menu</b>\n\n\U0001F514 <b>Signals</b>\n\U00002014 Available today: {limit} signals\n\U00002014 Used: {used}\n\U00002014 Left: {left}\n\n\U0001FAAB <b>Your level:</b> {level}",
-        "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "success")],
-               [("\U0001F332 My level", "cb:menu:level", "primary")],
-               [("\U0001F9D1 Support", "url:" + SUPPORT_URL)],
-               # Replaced the VIP team link, in the same row position. VIP_LINK
-               # is still read above, so restoring that button is one line.
-               [("\U0001F3C6 Unlock Premium", "cb:menu:premium", "primary")],
-               [("Pocket Option", "url:" + REF_LINK)],
-               [("\U00002708\U0000FE0F Telegram channel", "url:" + CHANNEL_URL)],
-               [("\U000025B6\U0000FE0F YouTube channel", "url:" + YOUTUBE_URL)]],
+        # Every row carries style "primary", which the Bot API renders blue, so
+        # the whole menu reads as one blue block instead of the mixed green /
+        # blue / app-default it was. The only other styles Telegram accepts are
+        # "success" (green) and "danger" (red); omitting it falls back to the
+        # client's own default, which is what the unstyled rows used to do.
+        # VIP_LINK and REF_LINK are still read above - REF_LINK is also used by
+        # _register_btn() in bot.py, so it must not be removed with the button.
+        "kb": [[("\U0001F680 Get a signal", "cb:menu:signal", "primary")],
+               [("\U0001F3C6 My level", "cb:menu:level", "primary")],
+               [("\U0001F9D1\U0000200D\U0001F4BC Support", "url:" + SUPPORT_URL, "primary")],
+               [("\U00002B50 Unlock Premium", "cb:menu:premium", "primary")],
+               [("\U00002708\U0000FE0F Telegram channel", "url:" + CHANNEL_URL, "primary")],
+               [("\U000025B6\U0000FE0F YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)]],
     },
     # Trading-mode picker, opened from "Get a signal" on the menu. Both modes are
     # still placeholders - see mode_action in bot.py.

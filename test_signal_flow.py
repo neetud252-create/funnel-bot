@@ -819,14 +819,75 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("no menu button still points at VIP_LINK",
           not any(config.VIP_LINK in a for a in actions), str(actions))
     check("Unlock Premium appears in its place",
-          "\U0001F3C6 Unlock Premium" in labels, str(labels))
+          "\U00002B50 Unlock Premium" in labels, str(labels))
     check("Unlock Premium sits where VIP team was (row 4)",
-          menu_kb[3][0][0] == "\U0001F3C6 Unlock Premium", str(menu_kb[3]))
+          menu_kb[3][0][0] == "\U00002B50 Unlock Premium", str(menu_kb[3]))
     check("Unlock Premium opens a screen rather than a link",
           "cb:menu:premium" in actions, str(actions))
-    check("the rest of the menu is unchanged",
-          labels[0].endswith("Get a signal") and labels[1].endswith("My level")
-          and len(menu_kb) == 7, str(labels))
+
+    # --- the blue main menu -------------------------------------------------
+    print("\n[menu] every button is blue and Pocket Option is gone")
+    check("the Pocket Option button is gone",
+          not any("Pocket Option" in l for l in labels), str(labels))
+    check("no menu button still points at REF_LINK",
+          not any(config.REF_LINK in a for a in actions), str(actions))
+    # REF_LINK has a second, unrelated user: the register button on the
+    # verification-failure screens. Removing the menu row must not break it.
+    reg = bot_mod._register_btn()
+    check("the register button still uses REF_LINK",
+          config.REF_LINK in reg[0][0][1], str(reg))
+
+    styles = [(b[0], b[2] if len(b) > 2 else None) for row in menu_kb for b in row]
+    check("every main-menu button is styled primary (blue)",
+          all(s == "primary" for _l, s in styles), str(styles))
+    check("no main-menu button is left green or unstyled",
+          not any(s in ("success", "danger", None) for _l, s in styles), str(styles))
+    # "primary" is the Bot API's blue; the field is real, not decoration.
+    from aiogram.types import InlineKeyboardButton as _IKB
+    check("style is a declared Bot API field, so blue actually renders",
+          "style" in _IKB.model_fields, "aiogram dropped InlineKeyboardButton.style")
+    check("icon_custom_emoji_id is a declared Bot API field too",
+          "icon_custom_emoji_id" in _IKB.model_fields)
+
+    check("the six required buttons are present, in order",
+          [l for l in labels] == ["\U0001F680 Get a signal",
+                                  "\U0001F3C6 My level",
+                                  "\U0001F9D1\U0000200D\U0001F4BC Support",
+                                  "\U00002B50 Unlock Premium",
+                                  "\U00002708\U0000FE0F Telegram channel",
+                                  "\U000025B6\U0000FE0F YouTube channel"], str(labels))
+    check("the menu is now six rows", len(menu_kb) == 6, str(len(menu_kb)))
+
+    # Custom emoji: only the one ID supplied for YouTube, used through the
+    # existing 4th-slot convention. Nothing else invents an ID.
+    icons = {b[0]: (b[3] if len(b) > 3 else None) for row in menu_kb for b in row}
+    check("YouTube carries the supplied custom emoji id",
+          icons["\U000025B6\U0000FE0F YouTube channel"] == "5897969921182142023",
+          str(icons))
+    check("no other menu button was given an invented emoji id",
+          all(v is None for k, v in icons.items() if "YouTube" not in k), str(icons))
+
+    # The URLs and callbacks the buttons carry must be untouched.
+    wired = {b[0]: b[1] for row in menu_kb for b in row}
+    check("Support still opens the support URL",
+          wired["\U0001F9D1\U0000200D\U0001F4BC Support"] == "url:" + config.SUPPORT_URL)
+    check("Telegram channel still opens the channel URL",
+          wired["\U00002708\U0000FE0F Telegram channel"] == "url:" + config.CHANNEL_URL)
+    check("YouTube still opens the YouTube URL",
+          wired["\U000025B6\U0000FE0F YouTube channel"] == "url:" + config.YOUTUBE_URL)
+    check("Get a signal still opens the mode picker",
+          wired["\U0001F680 Get a signal"] == "cb:menu:signal")
+    check("My level still opens the level screen",
+          wired["\U0001F3C6 My level"] == "cb:menu:level")
+
+    # build_kb must actually forward style/icon onto the outgoing button.
+    built = bot_mod.build_kb(menu_kb)
+    flat = [b for row in built.inline_keyboard for b in row]
+    check("build_kb forwards style onto every rendered button",
+          all(b.style == "primary" for b in flat), str([b.style for b in flat]))
+    check("build_kb forwards the YouTube icon id",
+          any(b.icon_custom_emoji_id == "5897969921182142023" for b in flat))
+    check("no button was dropped for a bad URL", len(flat) == 6, str(len(flat)))
 
     _fresh_user(fake_db, tg_id)
     fake_bot = FakeBot()
