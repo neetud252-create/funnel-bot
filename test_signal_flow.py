@@ -1035,17 +1035,25 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("Get a signal opens the trading-mode screen",
           sends and "Select trading mode" in (sends[-1]["body"] or ""),
           str([c["kind"] for c in fb.calls]))
-    check("the old menu is retired once the new screen is up",
+    check("the old menu is deleted as part of the transition",
           4500 in deletes, str(deletes))
-    check("the new screen is sent BEFORE the old one is deleted",
-          [c["kind"] for c in fb.calls].index("delete")
-          > [i for i, c in enumerate(fb.calls) if c["kind"] != "delete"][0],
-          str([c["kind"] for c in fb.calls]))
+    # The ORIGINAL ordering, restored on request: the old screen goes first so
+    # Telegram plays its removal animation, and only then does the new screen
+    # arrive. The two are never on screen together.
+    kinds = [c["kind"] for c in fb.calls]
+    check("the old message is DELETED BEFORE the new screen is sent",
+          kinds.index("delete") < next(i for i, k in enumerate(kinds)
+                                       if k != "delete"),
+          str(kinds))
+    check("the very first call of the transition is the delete",
+          kinds[0] == "delete" and fb.calls[0]["id"] == 4500, str(kinds))
     check("ui_msg_id now points at the new screen",
           fake_db._users[tg]["ui_msg_id"] == sends[-1]["id"],
           str(fake_db._users[tg]["ui_msg_id"]))
 
-    # 2. The bug itself: the send fails. The menu must survive.
+    # 2. A send that fails. With delete-first the old screen is already gone -
+    #    that is the accepted cost of this ordering - so the guarantee here is
+    #    narrower: the user must be TOLD, not left with a silent dead tap.
     tg, fb, cb, raised = await _drive_menu_signal(fail_on_send=True)
     deletes = [c["id"] for c in fb.calls if c["kind"] == "delete"]
     sends = [c for c in fb.calls if c["kind"] != "delete"]
@@ -1053,21 +1061,18 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           cb.answers != [], str(cb.answers))
     check("no exception escapes the handler when the screen fails",
           raised is None, repr(raised))
-    check("a failed screen does NOT delete the menu",
-          4500 not in deletes, str(deletes))
-    check("the chat is not left empty - the user gets an explanation",
+    check("the old screen is deleted first, as the restored ordering requires",
+          4500 in deletes, str(deletes))
+    check("a failed screen is never silent - the user gets an explanation",
           any(config.MSG_SCREEN_ERROR in (c["body"] or "") for c in sends),
           str([c["body"] for c in sends]))
     check("the error notice carries no markup that could fail too",
-          all("<" not in config.MSG_SCREEN_ERROR for _ in (0,)),
-          repr(config.MSG_SCREEN_ERROR))
-    check("ui_msg_id still points at the surviving menu",
+          "<" not in config.MSG_SCREEN_ERROR, repr(config.MSG_SCREEN_ERROR))
+    check("a failed render does not repoint ui_msg_id at a message that failed",
           fake_db._users[tg]["ui_msg_id"] == 4500,
           str(fake_db._users[tg]["ui_msg_id"]))
-    check("the handler did not raise - the tap is not left dead",
-          True)
 
-    # 3. Every screen goes through render(), so the guarantee is universal.
+    # 3. Every screen goes through render(), so both properties are universal.
     for name, key in (("mode", "mode"), ("type", "type"), ("pairs", "pairs")):
         tg2 = 45010 + len(name)
         _fresh_user(fake_db, tg2)
@@ -1078,9 +1083,24 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         fb2.send_photo = boom2
         await bot_mod.show(fb2, tg2, key)
         dels = [c["id"] for c in fb2.calls if c["kind"] == "delete"]
-        check("screen %r: a failed render keeps the previous screen" % name,
-              4600 not in dels and fake_db._users[tg2]["ui_msg_id"] == 4600,
-              str(dels))
+        told = any(config.MSG_SCREEN_ERROR in (c["body"] or "")
+                   for c in fb2.calls if c["kind"] != "delete")
+        check("screen %r: old message deleted first, failure reported" % name,
+              4600 in dels and told, "%s / told=%s" % (dels, told))
+
+    # Every successful render must follow delete-then-send, not just this one.
+    for name, key in (("mode", "mode"), ("type", "type")):
+        tg3 = 45020 + len(name)
+        _fresh_user(fake_db, tg3)
+        fake_db._users[tg3]["ui_msg_id"] = 4700
+        fb3 = FakeBot()
+        await bot_mod.show(fb3, tg3, key)
+        k3 = [c["kind"] for c in fb3.calls]
+        check("screen %r: delete precedes send on the happy path too" % name,
+              k3 and k3[0] == "delete"
+              and k3.index("delete") < next(i for i, k in enumerate(k3)
+                                            if k != "delete"),
+              str(k3))
 
     # 4. The entity that caused it can never come back: every custom emoji in
     #    every screen must wrap a real emoji, never punctuation.

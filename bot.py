@@ -313,15 +313,20 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
     msg_id = user["ui_msg_id"] if user else None
-    # ORDER IS THE WHOLE POINT: send the new screen FIRST, and retire the old
-    # one only once the new one is actually up. The reverse order - delete,
-    # then send - is what produced "tap a button, the menu vanishes, nothing
-    # arrives": any failure in the send left the user with an empty chat and no
-    # button to press. Every failure mode below does that, and none of them is
-    # hypothetical: a rejected custom-emoji entity (ENTITY_TEXT_INVALID), an
-    # asset that is not in the image, a malformed button URL, a stale file_id,
-    # a network blip. The cost of this ordering is that both screens are on
-    # screen for one round trip; that is strictly better than neither.
+    # Delete the current screen FIRST, then send its replacement. This is the
+    # original transition and it is deliberate: Telegram plays its normal
+    # message-removal animation on the old screen before the new one arrives,
+    # so the two never overlap on screen.
+    #
+    # The trade-off is real and accepted: between the delete and the send the
+    # chat is empty, so a send that fails leaves it that way. The try/except
+    # below is what keeps that from being silent - it does not change the
+    # ordering, it only makes a failed send say so instead of vanishing.
+    if msg_id:
+        try:
+            await bot.delete_message(chat_id=tg_id, message_id=msg_id)
+        except Exception as e:
+            logging.warning("delete screen failed: %s", e)
     try:
         if media_key is None:
             # Deliberately text-only, not a missing asset - nothing to warn about.
@@ -341,24 +346,20 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
             else:
                 await remember(media_key, m)
     except Exception:
-        # The old screen was never touched, so the user still has it and every
-        # button on it still works. Say something rather than leave the tap
-        # looking dead.
-        logging.exception("render failed for tg_id=%s screen=%r - the previous "
-                          "screen is being kept", tg_id, media_key)
+        # The old screen is already gone by now, so there is nothing left on
+        # screen to fall back to. Say something rather than leave the user with
+        # an empty chat and a tap that looks dead.
+        logging.exception("render failed for tg_id=%s screen=%r after the "
+                          "previous screen was removed", tg_id, media_key)
         await _screen_error(bot, tg_id)
         return
-    if msg_id:
-        try:
-            await bot.delete_message(chat_id=tg_id, message_id=msg_id)
-        except Exception as e:
-            logging.warning("delete screen failed: %s", e)
     await db.set_ui_msg(tg_id, m.message_id)
 
 async def _screen_error(bot, tg_id):
     # Plain text: no HTML, no entities, no keyboard. Whatever broke the screen
     # must not be able to break the message that reports it - that is exactly
-    # how one bad entity turned into a chat with nothing in it.
+    # how one bad entity turned into a chat with nothing in it. Sent only when
+    # a render has already failed; it never appears on a successful screen.
     try:
         await bot.send_message(tg_id, config.MSG_SCREEN_ERROR)
     except Exception:
