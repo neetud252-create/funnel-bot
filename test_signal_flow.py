@@ -428,6 +428,18 @@ def _delivered(calls):
     return any("Currency pair" in (c["body"] or "") for c in calls)
 
 
+def last_screen(fake_bot):
+    """The last message actually sent.
+
+    render() now sends the new screen BEFORE deleting the old one, so the final
+    recorded call is the delete, not the send. Reading calls[-1] would inspect
+    the teardown instead of the screen.
+    """
+    sends = [c for c in fake_bot.calls if c["kind"] != "delete"]
+    return sends[-1] if sends else {"kind": None, "body": "", "markup": None,
+                                    "asset": None, "id": None}
+
+
 def _snapshot(fake_db):
     """Deep-enough copy of every user row, for 'nothing else moved' checks."""
     return {tg: dict(row) for tg, row in fake_db._users.items()}
@@ -592,7 +604,7 @@ async def devstart_tests(bot_mod, fake_db, config):
         _dirty_user(fake_db, vip)
         menu_bot = FakeBot()
         await bot_mod.start(FakeMessage(vip, "/start"), menu_bot, FakeState())
-        body = menu_bot.calls[-1]["body"] or ""
+        body = last_screen(menu_bot)["body"] or ""
         check("a verified user's /start goes straight to the menu",
               "Go+ main menu" in body, repr(body[:60]))
         check("that menu still shows their tier",
@@ -758,7 +770,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     _fresh_user(fake_db, tg_id)
     fake_bot = FakeBot()
     await bot_mod._show_menu(fake_bot, tg_id)
-    body = fake_bot.calls[-1]["body"] or ""
+    body = last_screen(fake_bot)["body"] or ""
     check("Start menu names the Start level",
           config.level_label_tg(False) in body, repr(body))
     check("Start menu shows 30 available",
@@ -771,7 +783,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     _fresh_user(fake_db, pro, premium=True)
     fake_bot = FakeBot()
     await bot_mod._show_menu(fake_bot, pro)
-    body = fake_bot.calls[-1]["body"] or ""
+    body = last_screen(fake_bot)["body"] or ""
     check("Premium menu names the Premium level",
           "\U0001F3C6 Premium" in body, repr(body))
     check("Premium menu shows 70 available",
@@ -781,7 +793,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
 
     fake_bot = FakeBot()
     await bot_mod.menu_level(FakeCB(pro, "menu:level", 700), fake_bot)
-    last = fake_bot.calls[-1]
+    last = last_screen(fake_bot)
     body = last["body"] or ""
     check("My level is a text-only screen", last["kind"] == "text", last["kind"])
     check("My level leads with the Premium icon and names the tier",
@@ -801,7 +813,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     _fresh_user(fake_db, tg_id)
     fake_bot = FakeBot()
     await bot_mod.menu_level(FakeCB(tg_id, "menu:level", 700), fake_bot)
-    body = fake_bot.calls[-1]["body"] or ""
+    body = last_screen(fake_bot)["body"] or ""
     check("My level shows Start for a Start user",
           body.startswith(config.level_icon_tg(False)
                           + " <b>Your current level:</b> Start"), repr(body))
@@ -908,13 +920,13 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("trading mode: Manual -> 5778373820930858379",
           _re.search(r'<tg-emoji emoji-id="5778373820930858379">.*?</tg-emoji>'
                      r' <b>Manual</b>', mode_text) is not None, repr(mode_text))
-    check("trading mode: Manual separator -> 5258011929993026890",
+    check("trading mode: Manual person -> 5258011929993026890",
           _re.search(r'<b>Manual</b> <tg-emoji emoji-id="5258011929993026890">',
                      mode_text) is not None, repr(mode_text))
     check("trading mode: Automatic -> 5778382698628256004",
           _re.search(r'<tg-emoji emoji-id="5778382698628256004">.*?</tg-emoji>'
                      r' <b>Automatic</b>', mode_text) is not None, repr(mode_text))
-    check("trading mode: Automatic separator -> 4943239162758169437",
+    check("trading mode: Automatic star-struck -> 4943239162758169437",
           _re.search(r'<b>Automatic</b> <tg-emoji emoji-id="4943239162758169437">',
                      mode_text) is not None, repr(mode_text))
     check("trading mode: Choose below -> 5447183459602669338",
@@ -959,6 +971,148 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
               tg_id=1, level=config.level_label(False), limit=30),
           config.MSG_ADMIN_DONE.format(tg_id=1, level=config.level_label(False),
                                        limit=30))
+
+    # --- regression: "tap a button, the menu vanishes, nothing appears" -----
+    # The exact production failure: menu:signal -> show("mode") -> render(),
+    # where render() deleted the menu and THEN failed to send, because a
+    # <tg-emoji> wrapping an em dash is rejected as ENTITY_TEXT_INVALID.
+    print("\n[regression] a failed screen must never blank the chat")
+
+    class _Boom(Exception):
+        pass
+
+    async def _drive_menu_signal(fail_on_send):
+        """Tap Get a signal with the next send rigged to fail.
+
+        Returns (tg_id, fake_bot, cb, raised) - `raised` is the exception that
+        escaped the handler, or None. A handler that throws is a handler that
+        silently fails from the user's side: aiogram logs it and the tap dies.
+        """
+        tg = 45001
+        _fresh_user(fake_db, tg)
+        fake_db._users[tg]["ui_msg_id"] = 4500          # the menu on screen
+        fb = FakeBot()
+        if fail_on_send:
+            async def boom(*a, **k):
+                raise _Boom("Bad Request: ENTITY_TEXT_INVALID")
+            fb.send_photo = boom
+        cb = FakeCB(tg, "menu:signal", 4500)
+        raised = None
+        try:
+            await bot_mod.menu_signal(cb, fb)
+        except Exception as exc:                        # noqa: BLE001 - recorded
+            raised = exc
+        return tg, fb, cb, raised
+
+    # The dispatcher must actually route "menu:signal" here, and route it to
+    # this handler rather than the "menu:" catch-all that answers "Coming soon".
+    _src = open(os.path.join(ROOT, "bot.py"), encoding="utf-8").read()
+    check("a handler is registered for exactly callback_data 'menu:signal'",
+          'F.data == "menu:signal"' in _src)
+    check("it is registered above the 'menu:' catch-all",
+          _src.index('F.data == "menu:signal"')
+          < _src.index('F.data.startswith("menu:")'))
+    # Scoped to menu_signal's own body - "await cb.answer()" appears in many
+    # handlers, so a whole-file index would match a different one.
+    _body = _src.split("async def menu_signal", 1)[1].split("\n@dp.", 1)[0]
+    check("menu_signal acknowledges the callback BEFORE rendering",
+          "await cb.answer()" in _body
+          and _body.index("await cb.answer()")
+          < _body.index('await show(bot, cb.from_user.id, "mode")'),
+          "cb.answer() must not sit behind the render: " + repr(_body))
+
+    # 1. The happy path still works and still swaps the screen.
+    tg, fb, cb, raised = await _drive_menu_signal(fail_on_send=False)
+    sends = [c for c in fb.calls if c["kind"] != "delete"]
+    deletes = [c["id"] for c in fb.calls if c["kind"] == "delete"]
+    check("the menu:signal callback reaches the handler",
+          fb.calls != [], "menu_signal produced no Telegram traffic at all")
+    check("the callback is answered", cb.answers != [], str(cb.answers))
+    check("it is answered with a plain ack, not an alert",
+          cb.answers[0] == (None, False), str(cb.answers))
+    check("the handler does not raise on the happy path", raised is None,
+          repr(raised))
+    check("Get a signal opens the trading-mode screen",
+          sends and "Select trading mode" in (sends[-1]["body"] or ""),
+          str([c["kind"] for c in fb.calls]))
+    check("the old menu is retired once the new screen is up",
+          4500 in deletes, str(deletes))
+    check("the new screen is sent BEFORE the old one is deleted",
+          [c["kind"] for c in fb.calls].index("delete")
+          > [i for i, c in enumerate(fb.calls) if c["kind"] != "delete"][0],
+          str([c["kind"] for c in fb.calls]))
+    check("ui_msg_id now points at the new screen",
+          fake_db._users[tg]["ui_msg_id"] == sends[-1]["id"],
+          str(fake_db._users[tg]["ui_msg_id"]))
+
+    # 2. The bug itself: the send fails. The menu must survive.
+    tg, fb, cb, raised = await _drive_menu_signal(fail_on_send=True)
+    deletes = [c["id"] for c in fb.calls if c["kind"] == "delete"]
+    sends = [c for c in fb.calls if c["kind"] != "delete"]
+    check("the callback is answered even when the screen fails",
+          cb.answers != [], str(cb.answers))
+    check("no exception escapes the handler when the screen fails",
+          raised is None, repr(raised))
+    check("a failed screen does NOT delete the menu",
+          4500 not in deletes, str(deletes))
+    check("the chat is not left empty - the user gets an explanation",
+          any(config.MSG_SCREEN_ERROR in (c["body"] or "") for c in sends),
+          str([c["body"] for c in sends]))
+    check("the error notice carries no markup that could fail too",
+          all("<" not in config.MSG_SCREEN_ERROR for _ in (0,)),
+          repr(config.MSG_SCREEN_ERROR))
+    check("ui_msg_id still points at the surviving menu",
+          fake_db._users[tg]["ui_msg_id"] == 4500,
+          str(fake_db._users[tg]["ui_msg_id"]))
+    check("the handler did not raise - the tap is not left dead",
+          True)
+
+    # 3. Every screen goes through render(), so the guarantee is universal.
+    for name, key in (("mode", "mode"), ("type", "type"), ("pairs", "pairs")):
+        tg2 = 45010 + len(name)
+        _fresh_user(fake_db, tg2)
+        fake_db._users[tg2]["ui_msg_id"] = 4600
+        fb2 = FakeBot()
+        async def boom2(*a, **k):
+            raise _Boom("rigged")
+        fb2.send_photo = boom2
+        await bot_mod.show(fb2, tg2, key)
+        dels = [c["id"] for c in fb2.calls if c["kind"] == "delete"]
+        check("screen %r: a failed render keeps the previous screen" % name,
+              4600 not in dels and fake_db._users[tg2]["ui_msg_id"] == 4600,
+              str(dels))
+
+    # 4. The entity that caused it can never come back: every custom emoji in
+    #    every screen must wrap a real emoji, never punctuation.
+    import unicodedata as _ud
+
+    def _is_emoji(g):
+        # Telegram needs the covered text to be one emoji. A sequence counts if
+        # ANY codepoint is emoji-bearing: the pictographic planes, a variation
+        # selector or keycap (1-with-U+FE0F-U+20E3 is how keycap digits are
+        # built), or the symbol blocks that hold things like U+26A1 and U+23F0.
+        # General Punctuation - where the em dash U+2014 lives - qualifies under
+        # none of them, which is precisely why it was rejected.
+        return any(cp >= 0x1F000 or cp in (0xFE0F, 0x20E3)
+                   or 0x2190 <= cp <= 0x2BFF or 0x2300 <= cp <= 0x23FF
+                   for cp in map(ord, g))
+
+    bad = []
+    for skey, screen in config.SCREENS.items():
+        for eid, glyph in _entities(screen.get("text", "")):
+            if not _is_emoji(glyph):
+                bad.append((skey, eid, glyph))
+    for extra in (config.MSG_LEVEL, config.level_icon_tg(False),
+                  config.SIGNAL_CHART, config.SIGNAL_ANALYZING):
+        for eid, glyph in _entities(extra):
+            if not _is_emoji(glyph):
+                bad.append(("<message>", eid, glyph))
+    check("no custom-emoji entity wraps non-emoji text (ENTITY_TEXT_INVALID)",
+          not bad, str(bad))
+    check("the em dash is a plain separator again, not an entity",
+          '<tg-emoji emoji-id="5258011929993026890">\U00002014' not in mode_text
+          and '<tg-emoji emoji-id="4943239162758169437">\U00002014' not in mode_text,
+          repr(mode_text))
 
     # --- the supplied custom emoji IDs, one per button ----------------------
     print("\n[emoji] every main-menu button carries its supplied custom emoji")
@@ -1039,7 +1193,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     _fresh_user(fake_db, tg_id)
     fake_bot = FakeBot()
     await bot_mod.menu_premium(FakeCB(tg_id, "menu:premium", 700), fake_bot)
-    last = fake_bot.calls[-1]
+    last = last_screen(fake_bot)
     body = last["body"] or ""
     check("the Premium screen is text-only", last["kind"] == "text", last["kind"])
     check("it is headed Premium Level",
@@ -1060,12 +1214,12 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     _fresh_user(fake_db, pro, premium=True)
     fake_bot = FakeBot()
     await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
-    body = fake_bot.calls[-1]["body"] or ""
+    body = last_screen(fake_bot)["body"] or ""
     check("a Premium viewer is told Premium is active",
           "Premium is active" in body, repr(body))
     check("and is not invited to request what they already have",
-          "Ask about Premium" not in str(fake_bot.calls[-1]["markup"]),
-          str(fake_bot.calls[-1]["markup"]))
+          "Ask about Premium" not in str(last_screen(fake_bot)["markup"]),
+          str(last_screen(fake_bot)["markup"]))
     check("the Premium screen quotes one number for both tiers' viewers",
           "\U00002014 70 signals/day" in body, repr(body))
     check("menu:level is registered above the menu: catch-all",
@@ -1116,19 +1270,19 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         _fresh_user(fake_db, pro, premium=True)
         fake_bot = FakeBot()
         await bot_mod.menu_level(FakeCB(pro, "menu:level", 700), fake_bot)
-        body = fake_bot.calls[-1]["body"] or ""
+        body = last_screen(fake_bot)["body"] or ""
         check("My level shows 100 after the variable change",
               "\U0001F4CA <b>Daily limit:</b> 100 signals" in body, repr(body))
         fake_bot = FakeBot()
         await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
-        body = fake_bot.calls[-1]["body"] or ""
+        body = last_screen(fake_bot)["body"] or ""
         check("the Unlock Premium screen advertises 100, not 70",
               "\U00002014 100 signals/day" in body and "70" not in body, repr(body))
 
         _fresh_user(fake_db, pro, premium=True)
         fake_bot = FakeBot()
         await bot_mod._show_menu(fake_bot, pro)
-        body = fake_bot.calls[-1]["body"] or ""
+        body = last_screen(fake_bot)["body"] or ""
         check("the menu shows 100 available without a code change",
               "Available today: 100 signals" in body, repr(body))
         check("the menu shows 100 left", "Left: 100" in body, repr(body))

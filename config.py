@@ -99,8 +99,8 @@ E_MENU_HEADER   = "5188678912883827293"   # the robot on "Go+ main menu"
 E_MENU_SIGNALS  = "5429633836684157942"   # the bolt on the "Signals" line
 E_MENU_LEVEL_HD = "5370688996844249600"   # the battery on "Your level:"
 E_LEVEL_START   = "5274026806477857971"   # the star on the Start tier itself
-E_MODE_MANUAL_SEP = "5258011929993026890" # separator after "Manual"
-E_MODE_AUTO_SEP   = "4943239162758169437" # separator after "Automatic"
+E_MODE_MANUAL = "5258011929993026890"     # the person after "Manual"
+E_MODE_AUTO   = "4943239162758169437"     # the star-struck face after "Automatic"
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -159,8 +159,12 @@ T_LEVEL_START   = pe(E_LEVEL_START, "\U00002B50")      # star
 # E_CHART is reused deliberately: the supplied "Trading mode" id is byte for
 # byte the one already defined for it, so this is the same entity, not a new one.
 T_MODE_HEADER   = pe(E_CHART, "\U0001F4CA")            # bar chart
-T_MODE_MAN_SEP  = pe(E_MODE_MANUAL_SEP, "\U00002014")  # em dash separator
-T_MODE_AUTO_SEP = pe(E_MODE_AUTO_SEP, "\U00002014")    # em dash separator
+# The glyph inside a <tg-emoji> tag MUST be a single valid emoji: Telegram
+# rejects the whole message with "Bad Request: ENTITY_TEXT_INVALID" otherwise,
+# and an em dash is not an emoji. These two therefore carry the emoji their
+# sticker actually depicts (confirmed via getCustomEmojiStickers): 👤 and 🤩.
+T_MODE_MANUAL   = pe(E_MODE_MANUAL, "\U0001F464")      # bust in silhouette
+T_MODE_AUTO     = pe(E_MODE_AUTO, "\U0001F929")        # star-struck
 
 # --- Currency pairs ---------------------------------------------------------
 # Single source of truth for the OTC pair list: the keyboard, the pagination,
@@ -323,14 +327,15 @@ SCREENS = {
     # message. Swap in pe(E_SPEECH, ...) once a real ID is on hand.
     "mode": {
         "photo": "trading_mode",
-        # T_N1 / T_N2 / T_DOWN already carried the supplied Manual, Automatic
-        # and "Choose below" ids, so they are untouched. What changed: the
-        # header emoji became the supplied Trading-mode entity (was a plain
-        # unicode speech balloon), and the two em-dash separators became their
-        # own entities.
+        # T_N1 / T_N2 / T_DOWN already carried the supplied number, Automatic
+        # and "Choose below" ids, so they are untouched. The header emoji is the
+        # supplied Trading-mode entity (was a plain unicode speech balloon), and
+        # the Manual / Automatic entities sit where the em dash used to, each
+        # wrapping the emoji its own sticker depicts rather than the dash - a
+        # dash there is what produced ENTITY_TEXT_INVALID and blanked the chat.
         "text": (T_MODE_HEADER + " <b>Select trading mode:</b>\n\n"
-                 + T_N1 + " <b>Manual</b> " + T_MODE_MAN_SEP + " you choose asset &amp; time\n"
-                 + T_N2 + " <b>Automatic</b> " + T_MODE_AUTO_SEP + " bot chooses everything\n\n"
+                 + T_N1 + " <b>Manual</b> " + T_MODE_MANUAL + " you choose asset &amp; time\n"
+                 + T_N2 + " <b>Automatic</b> " + T_MODE_AUTO + " bot chooses everything\n\n"
                  + T_DOWN + " <b>Choose below</b>"),
         "kb": [[("\U0000270B Manual", "cb:mode:manual", "success")],
                [("\U0001F513 Automatic", "cb:mode:auto", "primary")],
@@ -595,6 +600,13 @@ def premium_kb(is_premium):
 MSG_ADMIN_USAGE   = "Usage: {cmd} <tg_id>"
 MSG_ADMIN_NO_USER = "No user with tg_id {tg_id}. They must /start the bot first."
 MSG_ADMIN_DONE    = "tg_id {tg_id} is now {level} \U00002014 {limit} signals/day."
+
+# Sent when a screen fails to render (see _screen_error in bot.py). Deliberately
+# plain: no HTML, no custom emoji, no buttons, so it cannot fail for the same
+# reason the screen did. The previous screen is left in place, so "try again"
+# means tapping the button that is still on it.
+MSG_SCREEN_ERROR = ("Something went wrong opening that screen. "
+                    "Please try again in a moment, or send /start.")
 
 # Shown both as the popup on a tap that is over the cap and as the screen text
 # if the cap is reached while a signal is already being prepared. Plain text
