@@ -15,13 +15,29 @@ screen, which is why config.py puts the emoji its sticker depicts in that slot
 rather than the dash it replaced. A test that checked only the ids would miss a
 regression that takes the screen down entirely.
 
-These are message-body entities, NOT button icons: an InlineKeyboardButton label
-is plain text with no entities, so the mode buttons carry plain unicode and are
-deliberately not asserted on here.
+The SAME two ids are also the buttons' icons, and that is a genuinely different
+mechanism which this file asserts separately:
+
+    A) <tg-emoji emoji-id="..."> inside the caption text, rendered by pe()
+    B) InlineKeyboardButton.icon_custom_emoji_id, the emoji Telegram draws
+       before a button's label
+
+An InlineKeyboardButton label is plain text with no entities and no parse_mode,
+so a custom emoji CANNOT be put inside the label - (B) is the only way to get
+one onto a button. The two were out of sync once: the caption carried the right
+ids while the buttons still showed plain unicode, and every caption-only check
+passed while the live buttons were wrong. So (B) is asserted against the real
+payload built by bot.build_kb, not against the config tuple it came from.
+
+Because icon_custom_emoji_id draws its emoji BEFORE the label, a leading unicode
+emoji in the label would render a second glyph next to it. The labels are
+therefore bare words, and that is asserted too.
 
 Run from the repo root:  python test_mode_emoji.py
 
-No network, no database and no stubs - config.py is pure data.
+No network and no database: db and panelbot are stubbed through the helpers in
+test_signal_flow, which are also what let bot.py be imported at all (it ends in
+asyncio.run(main())).
 """
 
 import os
@@ -33,6 +49,7 @@ os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 
 import config
+import test_signal_flow as _harness
 
 
 FAILURES = []
@@ -104,6 +121,82 @@ def main():
               not any(ch.isalpha() for ch in glyph), ascii(glyph))
         check("id %s wraps more than bare ASCII" % emoji_id,
               any(ord(ch) > 127 for ch in glyph), ascii(glyph))
+
+    # --- (B) the button icons, asserted on the real payload -----------------
+    # Built through bot.build_kb rather than read off the config tuple: the
+    # tuple is only the input, and it is build_kb that decides whether the 4th
+    # element becomes icon_custom_emoji_id at all (it drops a falsy icon, and
+    # it strips the "cb:" prefix off callback_data). Asserting the tuple would
+    # re-test the fixture; asserting the model tests what Telegram receives.
+    print("\n[mode] button payload as built by bot.build_kb")
+    _harness._install_stub_modules()
+    bot_mod = _harness._load_bot()
+    kb = bot_mod.build_kb(config.SCREENS["mode"]["kb"])
+    buttons = {}
+    for row in kb.inline_keyboard:
+        for button in row:
+            buttons[button.callback_data] = button
+
+    want_buttons = {
+        "mode:manual": ("Manual", "success", "5258011929993026890"),
+        "mode:auto":   ("Automatic", "primary", "4943239162758169437"),
+    }
+    for callback, (want_text, want_style, want_icon) in want_buttons.items():
+        button = buttons.get(callback)
+        check("%s: button exists" % callback,
+              button is not None, "callbacks: " + str(sorted(buttons)))
+        if button is None:
+            continue
+        payload = button.model_dump(exclude_none=True)
+
+        check("%s: text is %r" % (callback, want_text),
+              payload.get("text") == want_text, ascii(payload.get("text")))
+        check("%s: style is %r" % (callback, want_style),
+              payload.get("style") == want_style, ascii(payload.get("style")))
+        check("%s: callback_data is %r" % (callback, callback),
+              payload.get("callback_data") == callback,
+              ascii(payload.get("callback_data")))
+        # The check this file exists for. It was <ABSENT> on the live bot while
+        # every caption assertion passed.
+        check("%s: icon_custom_emoji_id is %s" % (callback, want_icon),
+              payload.get("icon_custom_emoji_id") == want_icon,
+              "got " + ascii(payload.get("icon_custom_emoji_id", "<ABSENT>")))
+
+        # icon_custom_emoji_id draws BEFORE the label, so a leading unicode
+        # emoji would show a second glyph beside the custom one. U+270B and
+        # U+1F513 are the two that used to be there.
+        label = payload.get("text") or ""
+        check("%s: label has no leading unicode emoji" % callback,
+              all(ord(ch) < 128 for ch in label), ascii(label))
+        check("%s: label free of the old U+270B / U+1F513" % callback,
+              "\U0000270B" not in label and "\U0001F513" not in label,
+              ascii(label))
+
+    # Same-id-on-both-buttons is a distinct failure from same-id-in-both-lines.
+    manual, auto = buttons.get("mode:manual"), buttons.get("mode:auto")
+    if manual is not None and auto is not None:
+        check("buttons carry different icon ids",
+              manual.icon_custom_emoji_id != auto.icon_custom_emoji_id,
+              ascii(manual.icon_custom_emoji_id))
+
+    # The Back button is deliberately untouched: no style, no icon.
+    back = buttons.get("go:menu")
+    check("Back button still present", back is not None)
+    if back is not None:
+        back_payload = back.model_dump(exclude_none=True)
+        check("Back button carries no icon",
+              "icon_custom_emoji_id" not in back_payload, str(back_payload))
+        check("Back button keeps its unicode label",
+              back_payload.get("text", "").startswith("\U000000AB"),
+              ascii(back_payload.get("text")))
+
+    check("mode screen still has exactly 3 rows of 1 button",
+          [len(r) for r in kb.inline_keyboard] == [1, 1, 1],
+          str([len(r) for r in kb.inline_keyboard]))
+    check("button order is Manual, Automatic, Back",
+          [b.callback_data for row in kb.inline_keyboard for b in row]
+          == ["mode:manual", "mode:auto", "go:menu"],
+          str([b.callback_data for row in kb.inline_keyboard for b in row]))
 
     print("\n%d checks, %d failed" % (CHECKS[0], len(FAILURES)))
     if FAILURES:

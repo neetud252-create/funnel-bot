@@ -342,8 +342,8 @@ SCREENS = {
                  + T_N1 + " <b>Manual</b> " + T_MODE_MANUAL + " you choose asset &amp; time\n"
                  + T_N2 + " <b>Automatic</b> " + T_MODE_AUTO + " bot chooses everything\n\n"
                  + T_DOWN + " <b>Choose below</b>"),
-        "kb": [[("\U0000270B Manual", "cb:mode:manual", "success")],
-               [("\U0001F513 Automatic", "cb:mode:auto", "primary")],
+        "kb": [[("Manual", "cb:mode:manual", "success", E_MODE_MANUAL)],
+               [("Automatic", "cb:mode:auto", "primary", E_MODE_AUTO)],
                [("\U000000AB Back", "cb:go:menu")]],
     },
     # Market-type picker, opened from "Manual" on the mode screen. Both types are
