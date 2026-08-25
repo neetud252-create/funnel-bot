@@ -851,14 +851,37 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("the register button still uses REF_LINK",
           config.REF_LINK in reg[0][0][1], str(reg))
 
-    styles = [(b[0], b[2] if len(b) > 2 else None) for row in menu_kb for b in row]
-    check("every main-menu button is styled primary (blue)",
-          all(s == "primary" for _l, s in styles), str(styles))
-    check("no main-menu button is left green or unstyled",
-          not any(s in ("success", "danger", None) for _l, s in styles), str(styles))
-    # "primary" is the Bot API's blue; the field is real, not decoration.
+    # The intended visual hierarchy: the primary action green, the secondary
+    # actions blue, the two outbound links on the client default so they read
+    # as links rather than actions.
+    styles = dict((b[0], b[2] if len(b) > 2 else None)
+                  for row in menu_kb for b in row)
+    WANT_STYLES = {
+        "Get a signal":     "success",
+        "My level":         "primary",
+        "Support":          "primary",
+        "Unlock Premium":   "primary",
+        "Telegram channel": None,
+        "YouTube channel":  None,
+    }
+    for label, want in WANT_STYLES.items():
+        check("style: %-17s -> %s" % (label, want or "default"),
+              styles.get(label) == want, repr(styles.get(label)))
+    check("exactly one button carries the green primary action",
+          [s for s in styles.values()].count("success") == 1, str(styles))
+    check("the two outbound links carry no explicit style",
+          styles["Telegram channel"] is None and styles["YouTube channel"] is None,
+          str(styles))
+    # Telegram accepts only these three; anything else - a hex colour, a name
+    # like "warning" - is not expressible and would be silently ignored.
+    check("no style outside Telegram's three is used",
+          all(s in ("success", "primary", "danger", None)
+              for s in styles.values()), str(styles))
+    check("no button attempts a hex colour or custom shade",
+          not any(isinstance(s, str) and s.startswith("#")
+                  for s in styles.values()), str(styles))
     from aiogram.types import InlineKeyboardButton as _IKB
-    check("style is a declared Bot API field, so blue actually renders",
+    check("style is a declared Bot API field, so these actually render",
           "style" in _IKB.model_fields, "aiogram dropped InlineKeyboardButton.style")
     check("icon_custom_emoji_id is a declared Bot API field too",
           "icon_custom_emoji_id" in _IKB.model_fields)
@@ -1204,8 +1227,14 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     # build_kb must actually forward style/icon onto the outgoing button.
     built = bot_mod.build_kb(menu_kb)
     flat = [b for row in built.inline_keyboard for b in row]
-    check("build_kb forwards style onto every rendered button",
-          all(b.style == "primary" for b in flat), str([b.style for b in flat]))
+    check("build_kb forwards each button's own style onto the rendered button",
+          [b.style for b in flat] == ["success", "primary", "primary",
+                                      "primary", None, None],
+          str([b.style for b in flat]))
+    check("a style of None is omitted, not sent as the string 'None'",
+          all(b.style is None or isinstance(b.style, str) for b in flat)
+          and "None" not in [b.style for b in flat],
+          str([b.style for b in flat]))
     check("build_kb forwards the YouTube icon id",
           any(b.icon_custom_emoji_id == "5897969921182142023" for b in flat))
     check("no button was dropped for a bad URL", len(flat) == 6, str(len(flat)))
