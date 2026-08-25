@@ -132,6 +132,17 @@ E_GATE_SOUND = "5247187233722607160"      # the speaker before the handle
 E_GATE_DOWN  = "5305522282695768654"      # the finger pointing at the buttons
 E_GATE_JOIN  = "5397916757333654639"      # Join Channel button icon
 E_GATE_CHECK = "5260463209562776385"      # Check Subscription button icon
+# Welcome screen (SCREENS["welcome"]) only. The first two are CAPTION entities
+# rendered through pe(); E_WELCOME_START is the Start BUTTON icon and rides on
+# the 4th tuple element, never inside the label.
+#
+# NOTE: two of these repeat ids already used elsewhere - E_WELCOME_DOWN matches
+# E_BACK / E_GATE_DOWN, and E_WELCOME_START matches E_NUDGE_ROCKET and
+# E_MENU_SIGNAL. Declared separately on purpose: restyling the menu's "Get a
+# signal" icon or the Back arrow must not silently change this screen.
+E_WELCOME_BOT   = "5924946082487341386"   # the robot on the headline
+E_WELCOME_DOWN  = "5305522282695768654"   # the finger pointing at Start
+E_WELCOME_START = "5188481279963715781"   # Start button icon
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -292,8 +303,16 @@ SCREENS = {
     },
     "welcome": {
         "photo": "welcome",
-        "text": "\U0001F590\uFE0F <b>Hello! I am Go+, your personal trading bot.</b>\n\n" + T_MONEY + " I help you approach trading with clear, data-driven insights - without stress and without complex analysis.",
-        "kb": [[("Start", "cb:go:how", "success", E_FLASH)]],
+        # Button label is the bare word "Start". Its rocket comes from the 4th
+        # tuple element, which build_kb passes as icon_custom_emoji_id and
+        # Telegram draws before the label - a unicode rocket in the text too
+        # would render a second glyph beside it. Callback, style and order are
+        # unchanged from the previous version of this screen.
+        "text": (pe(E_WELCOME_BOT, "\U0001F916") + " Welcome to Go+\n\n"
+                 "Your personal trading assistant \U00002014 clear, data-driven "
+                 "signals without the complex analysis.\n\n"
+                 + pe(E_WELCOME_DOWN, "\U0001F447") + " Tap Start to begin"),
+        "kb": [[("Start", "cb:go:how", "success", E_WELCOME_START)]],
     },
     "how": {
         "photo": "how",
