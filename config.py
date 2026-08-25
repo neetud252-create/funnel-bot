@@ -1,9 +1,27 @@
 import os
+import re
 from decimal import Decimal
 
 _ch = os.getenv("CHANNEL_ID", "@apexxtraderz")
 CHANNEL_ID  = int(_ch) if _ch.lstrip("-").isdigit() else _ch
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/apexxtraderz")
+
+def _channel_mention(url):
+    # "https://t.me/apexxtraderz" -> "@apexxtraderz", which Telegram auto-links
+    # as a mention with no markup needed. Derived from CHANNEL_URL rather than
+    # written out again, so the handle on the gate screen cannot drift from the
+    # channel the Join button actually opens.
+    #
+    # Anything that is not a public t.me handle - a private invite link
+    # (t.me/+hash), a joinchat URL, an override pointing elsewhere - falls back
+    # to the raw URL. That is what this screen displayed before, and it still
+    # auto-links, so an unusual CHANNEL_URL degrades instead of showing a
+    # mention that does not resolve.
+    m = re.match(r"https?://t\.me/([A-Za-z][A-Za-z0-9_]{3,31})/?$",
+                 (url or "").strip())
+    return "@" + m.group(1) if m else (url or "")
+
+CHANNEL_MENTION = _channel_mention(CHANNEL_URL)
 # Link defaults MUST stay valid http(s) URLs even when unset: Telegram rejects
 # the whole message if any inline button URL is malformed, which takes down the
 # entire screen (this is what broke the menu after verification).
@@ -101,6 +119,19 @@ E_MENU_LEVEL_HD = "5370688996844249600"   # the battery on "Your level:"
 E_LEVEL_START   = "5274026806477857971"   # the star on the Start tier itself
 E_MODE_MANUAL = "5258011929993026890"     # the person after "Manual"
 E_MODE_AUTO   = "4943239162758169437"     # the star-struck face after "Automatic"
+# Subscription gate (SCREENS["gate"]) only. The first four are CAPTION entities
+# rendered through pe(); the last two are BUTTON icons and ride on the 4th
+# tuple element (icon_custom_emoji_id), never inside the button label.
+#
+# NOTE: E_GATE_DOWN carries the same id as E_BACK above. It is declared
+# separately rather than aliased, so restyling the Back arrow cannot silently
+# change this screen, and vice versa.
+E_GATE_LOCK  = "5296369303661067030"      # the padlock on the headline
+E_GATE_MEGA  = "5983400750594658672"      # the megaphone before the handle
+E_GATE_SOUND = "5247187233722607160"      # the speaker before the handle
+E_GATE_DOWN  = "5305522282695768654"      # the finger pointing at the buttons
+E_GATE_JOIN  = "5397916757333654639"      # Join Channel button icon
+E_GATE_CHECK = "5260463209562776385"      # Check Subscription button icon
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -241,9 +272,23 @@ def pairs_kb(page=0):
 SCREENS = {
     "gate": {
         "photo": "gate",
-        "text": "To continue, subscribe to the best Telegram channel about trading:\n\n" + T_POINT + " " + CHANNEL_URL + "\n\n\U0001F464 Once subscribed, click the \u201cCheck Subscription\u201d button below \U0001F447",
-        "kb": [[("Subscribe to Channel", "url:" + CHANNEL_URL, "primary", E_POINT)],
-               [("Check Subscription", "cb:check_sub", "success", E_INFO)]],
+        # The handle is CHANNEL_MENTION, derived from CHANNEL_URL, so the text
+        # a user reads and the channel the Join button opens are the same one.
+        # No markup on it: Telegram auto-links a bare @handle as a mention.
+        #
+        # Button labels are bare words. Their emoji come from the 4th tuple
+        # element, which build_kb passes as icon_custom_emoji_id - Telegram
+        # draws that before the label, so a unicode emoji in the text too would
+        # render a second glyph beside it. Styles, URL, callback and order are
+        # unchanged from the previous version of this screen.
+        "text": (pe(E_GATE_LOCK, "\U0001F512") + "ONE STEP TO UNLOCK GO+\n\n"
+                 "Join our free trading channel to activate the bot:\n\n"
+                 + pe(E_GATE_MEGA, "\U0001F4E3") + pe(E_GATE_SOUND, "\U0001F50A")
+                 + CHANNEL_MENTION + "\n\n"
+                 "Then tap Check Subscription below "
+                 + pe(E_GATE_DOWN, "\U0001F447")),
+        "kb": [[("Join Channel", "url:" + CHANNEL_URL, "primary", E_GATE_JOIN)],
+               [("Check Subscription", "cb:check_sub", "success", E_GATE_CHECK)]],
     },
     "welcome": {
         "photo": "welcome",
