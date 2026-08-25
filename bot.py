@@ -930,9 +930,13 @@ async def gallery(cb: CallbackQuery, bot: Bot):
 async def noop(cb: CallbackQuery):
     await cb.answer()
 
-def _register_btn():
-    return [[("\U0001F511 Register & Get Access", "url:" + config.REF_LINK, "success",
-              "5307843983102204243")]]
+def _register_btn(label="\U0001F511 Register & Get Access",
+                  icon="5307843983102204243"):
+    # Shared by the two verification verdicts. The defaults are what the
+    # wrong-link verdict has always rendered and must not change; the deposit
+    # verdict passes its own label and icon so only that screen restyles.
+    # URL, style and position are the same for both and are not overridable.
+    return [[(label, "url:" + config.REF_LINK, "success", icon)]]
 
 async def _replace(bot, tg_id, old_msg_id, text, kb_rows=None):
     # Swap the transient "checking" message for the verdict; track as ui_msg.
@@ -1023,7 +1027,11 @@ async def _run_verification(bot, tg_id, uid):
             await _show_menu(bot, tg_id)
             return True
         else:
-            await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT, _register_btn())
+            # Per-screen override: bare label, its own icon. The wrong-link
+            # verdict below deliberately keeps the helper's defaults.
+            await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT,
+                           _register_btn(label="Register & Get Access",
+                                         icon=config.E_NEED_DEP_REG))
             return False
     else:
         # Not found, or a different campaign. record_found=False with a healthy

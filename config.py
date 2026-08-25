@@ -245,6 +245,13 @@ E_REG_DOWNARR = "5406745015365943482"     # down arrow closing that line
 E_REG_BTN_REG = "5836690092306992715"     # Register & Get Access button icon
 E_REG_BTN_HOW = "5222444124698853913"     # How to Register button icon
 E_REG_BTN_SUP = "5443038326535759644"     # Support button icon
+# "Almost there" deposit verdict (MSG_NEED_DEPOSIT) ONLY.
+#
+# _register_btn() in bot.py is shared: the wrong-link verdict renders the same
+# button. This id is passed as a per-screen override at that one call site, so
+# MSG_WRONG_LINK keeps the icon and label it already had. Do not fold this back
+# into the helper's default or both verdicts move together.
+E_NEED_DEP_REG = "5836690092306992715"
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
