@@ -499,6 +499,13 @@ PREMIUM_DAILY_SIGNALS = _int_env("PREMIUM_DAILY_SIGNALS", 70)
 # Start limit, which is what it meant before Premium existed.
 DAILY_SIGNAL_LIMIT = START_DAILY_SIGNALS
 
+# Price of the Premium unlock, in the bot's own fictional tokens. Read from
+# Railway like the two limits above, and passed to db.unlock_premium as the
+# amount to deduct, so the number quoted on the locked screen and the number
+# actually charged are always the same value. Not money: see the game_tokens
+# comment in db.py.
+PREMIUM_UNLOCK_COST = _int_env("PREMIUM_UNLOCK_COST", 100)
+
 # Icon and name are kept apart because the two screens compose them
 # differently: the menu caption wants "<star> Start" as one label, while the My
 # level screen leads with the icon and ends with the name. The LEVEL_LABELS
@@ -561,10 +568,13 @@ def level_name(is_premium):
 # menu_level in bot.py - the tier and the limit come from the same lookup the
 # enforcement uses, so this screen cannot advertise a number the server would
 # refuse to honour.
+# {tokens} is the in-game balance, appended rather than replacing the existing
+# lines: the used/remaining counters are what the screen was already for.
 MSG_LEVEL = ("{icon} <b>Your current level:</b> {name}\n"
              "\U0001F4CA <b>Daily limit:</b> {limit} signals\n"
              "\U0001F4C8 <b>Used today:</b> {used}\n"
-             "\U000026A1 <b>Remaining today:</b> {left}")
+             "\U000026A1 <b>Remaining today:</b> {left}\n"
+             "\U0001FA99 <b>Game tokens:</b> {tokens}")
 
 LEVEL_KB = [[("\U000000AB Back", "cb:go:menu")]]
 
@@ -599,12 +609,42 @@ def premium_kb(is_premium):
     rows.append([("\U000000AB Back", "cb:go:menu")])
     return rows
 
+# --- The in-game unlock -----------------------------------------------------
+# Shown after tapping Unlock Premium. {cost} is PREMIUM_UNLOCK_COST and {needed}
+# is what is still missing, both computed from the balance the atomic UPDATE
+# actually saw - so the screen cannot quote a shortfall the database disagrees
+# with. Tokens are fictional in-game credits: nothing on these screens asks for
+# money, a deposit or a trading account.
+MSG_PREMIUM_LOCKED = ("\U0001F451 <b>Premium Locked</b>\n\n"
+                      "You need {cost} game tokens to unlock Premium.\n\n"
+                      "Your balance: {balance}\n"
+                      "Still needed: {needed} tokens")
+
+MSG_PREMIUM_UNLOCKED = ("\U0001F451 <b>Premium Unlocked!</b>\n\n"
+                        "You now have {limit} signals per day.")
+
+# A second tap once Premium is held. The unlock statement refuses it (its WHERE
+# requires is_premium = FALSE), so nothing was deducted and this only says so.
+MSG_PREMIUM_ALREADY = ("\U0001F451 <b>Premium is already active</b>\n\n"
+                       "You have {limit} signals per day.\n\n"
+                       "Game tokens: {balance}")
+
+# The unlock screens keep the plain Back button and nothing else: there is no
+# purchase button because there is nothing to purchase.
+UNLOCK_KB = [[("\U000000AB Back", "cb:go:menu")]]
+
 # --- Admin level commands ---------------------------------------------------
 # Replies to /premium and /startlevel. Admin-only (ADMIN_IDS); a non-admin gets
 # no reply at all, so none of these strings ever reach an ordinary user.
 MSG_ADMIN_USAGE   = "Usage: {cmd} <tg_id>"
 MSG_ADMIN_NO_USER = "No user with tg_id {tg_id}. They must /start the bot first."
 MSG_ADMIN_DONE    = "tg_id {tg_id} is now {level} \U00002014 {limit} signals/day."
+
+# /tokens and /tokenset. Same admin-only rule as above: a non-admin gets no
+# reply at all, so these strings never reach an ordinary user and the commands
+# stay invisible to them.
+MSG_TOKENS_USAGE  = "Usage: {cmd} <tg_id> <amount>"
+MSG_TOKENS_DONE   = "tg_id {tg_id} now holds {balance} game tokens."
 
 # Sent when a screen fails to render (see _screen_error in bot.py). Deliberately
 # plain: no HTML, no custom emoji, no buttons, so it cannot fail for the same

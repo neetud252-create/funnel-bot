@@ -497,6 +497,44 @@ async def cmd_premium(m: Message):
 async def cmd_startlevel(m: Message):
     await _grant_level(m, False)
 
+# --- Admin token commands ---------------------------------------------------
+# Same rules as the level commands above: silent for non-admins, and registered
+# here so an admin parked on the register screen is not read as sending a UID.
+# These are the ONLY way a token balance is created - there is no earn path, no
+# purchase and no link to a deposit.
+
+async def _admin_tokens(m: Message, absolute: bool):
+    if not _is_admin(m.from_user.id):
+        logging.warning("non-admin %s tried %r", m.from_user.id, (m.text or "")[:32])
+        return
+    parts = (m.text or "").split()
+    cmd = parts[0] if parts else "/tokens"
+    # tg_id is unsigned; the amount may be negative for /tokens so an admin can
+    # correct a mistake (db.add_tokens floors the balance at 0). lstrip("-") is
+    # what lets isdigit() accept that sign.
+    if (len(parts) != 3 or not parts[1].isdigit()
+            or not parts[2].lstrip("-").isdigit()):
+        await m.answer(config.MSG_TOKENS_USAGE.format(cmd=cmd))
+        return
+    target, amount = int(parts[1]), int(parts[2])
+    balance = (await db.set_tokens(target, amount) if absolute
+               else await db.add_tokens(target, amount))
+    if balance is None:
+        await m.answer(config.MSG_ADMIN_NO_USER.format(tg_id=target))
+        return
+    logging.info("admin %s set tg_id=%s tokens to %s (%s %s)",
+                 m.from_user.id, target, balance,
+                 "set" if absolute else "add", amount)
+    await m.answer(config.MSG_TOKENS_DONE.format(tg_id=target, balance=balance))
+
+@dp.message(Command("tokens"))
+async def cmd_tokens(m: Message):
+    await _admin_tokens(m, absolute=False)
+
+@dp.message(Command("tokenset"))
+async def cmd_tokenset(m: Message):
+    await _admin_tokens(m, absolute=True)
+
 @dp.callback_query(F.data == "check_sub")
 async def check_sub(cb: CallbackQuery, bot: Bot):
     if await is_subscribed(bot, cb.from_user.id):
@@ -826,27 +864,42 @@ async def menu_level(cb: CallbackQuery, bot: Bot):
     # promise an allowance the server would refuse.
     premium, limit = await _user_quota(tg_id)
     used, left = await db.signal_state(tg_id, limit)
+    tokens = await db.game_tokens(tg_id)
     await render(bot, tg_id, None,
                  config.MSG_LEVEL.format(icon=config.level_icon_tg(premium),
                                          name=config.level_name(premium),
-                                         limit=limit, used=used, left=left),
+                                         limit=limit, used=used, left=left,
+                                         tokens=tokens),
                  config.LEVEL_KB)
 
 # Must stay above menu_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "menu:premium")
 async def menu_premium(cb: CallbackQuery, bot: Bot):
-    # The Unlock Premium screen that replaced the VIP team link. Text-only, and
-    # the quoted allowance is config.PREMIUM_DAILY_SIGNALS rather than a literal,
-    # so a Railway change moves this screen and the enforcement together.
+    # Unlock Premium, paid for in the bot's own fictional tokens. The button
+    # itself is untouched - only what happens after the tap.
+    #
+    # The tap goes STRAIGHT to db.unlock_premium: there is deliberately no
+    # "read the balance, decide, then write" here. Deciding in Python would
+    # reintroduce exactly the race the single UPDATE exists to prevent, because
+    # two taps could both read 100 and both proceed. The statement's WHERE is
+    # the only check, and its refusal is what this handler reports.
     await cb.answer()
     tg_id = cb.from_user.id
-    premium, limit = await _user_quota(tg_id)
-    status = (config.MSG_PREMIUM_ACTIVE if premium
-              else config.MSG_PREMIUM_INACTIVE).format(limit=limit)
-    await render(bot, tg_id, None,
-                 config.MSG_PREMIUM.format(
-                     premium_limit=config.PREMIUM_DAILY_SIGNALS, status=status),
-                 config.premium_kb(premium))
+    cost = config.PREMIUM_UNLOCK_COST
+    unlocked, balance, premium = await db.unlock_premium(tg_id, cost)
+    limit = config.daily_limit(premium)
+
+    if unlocked:
+        logging.info("premium unlocked by tg_id=%s for %s tokens, %s left",
+                     tg_id, cost, balance)
+        text = config.MSG_PREMIUM_UNLOCKED.format(limit=limit)
+    elif premium:
+        # Already Premium - the statement matched no row, so nothing was spent.
+        text = config.MSG_PREMIUM_ALREADY.format(limit=limit, balance=balance)
+    else:
+        text = config.MSG_PREMIUM_LOCKED.format(
+            cost=cost, balance=balance, needed=max(0, cost - balance))
+    await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_action(cb: CallbackQuery):

@@ -51,7 +51,7 @@ def _install_stub_modules():
                 "signals_used_today": 0, "last_reset_date": None,
                 "verified": False, "verified_at": None, "uid": None,
                 "deposit": 0, "last_checked": None, "nudge_msg_id": None,
-                "username": None}
+                "username": None, "game_tokens": 0}
 
     def _u(tg_id):
         return db._users.setdefault(tg_id, _fresh_row())
@@ -101,6 +101,41 @@ def _install_stub_modules():
 
     async def is_premium(tg_id):
         return bool(_u(tg_id).get("is_premium", False))
+
+    # Mirrors _UNLOCK_PREMIUM_SQL. The gate is expressed as ONE condition
+    # checked against the row as it stands at this instant, exactly like the
+    # statement's WHERE - not as a read, a decision and then a write, which is
+    # the shape the real SQL exists to avoid. Because the fake is synchronous
+    # between awaits, two interleaved callers see the same serialisation the
+    # single UPDATE gives them.
+    async def unlock_premium(tg_id, cost):
+        row = db._users.get(tg_id)
+        if row is None:
+            return False, 0, False
+        if not row.get("is_premium", False) and row.get("game_tokens", 0) >= cost:
+            row["game_tokens"] = row.get("game_tokens", 0) - cost
+            row["is_premium"] = True
+            return True, row["game_tokens"], True
+        return False, row.get("game_tokens", 0), bool(row.get("is_premium", False))
+
+    async def game_tokens(tg_id):
+        row = db._users.get(tg_id)
+        return row.get("game_tokens", 0) if row else 0
+
+    # GREATEST(0, ...) in the real statements, so the balance floors at 0.
+    async def add_tokens(tg_id, amount):
+        row = db._users.get(tg_id)
+        if row is None:
+            return None
+        row["game_tokens"] = max(0, row.get("game_tokens", 0) + amount)
+        return row["game_tokens"]
+
+    async def set_tokens(tg_id, amount):
+        row = db._users.get(tg_id)
+        if row is None:
+            return None
+        row["game_tokens"] = max(0, amount)
+        return row["game_tokens"]
 
     async def touch_user(tg_id, username=None):
         row = _u(tg_id)
@@ -156,7 +191,8 @@ def _install_stub_modules():
     for fn in (get_user, set_ui_msg, set_album, signal_state, consume_signal,
                set_premium, is_premium, touch_user, reset_user, unverify,
                set_nudge_msg, uid_owners, save_uid_only, set_verified,
-               load_media_cache, save_media_cache, drop_media_cache):
+               load_media_cache, save_media_cache, drop_media_cache,
+               unlock_premium, game_tokens, add_tokens, set_tokens):
         setattr(db, fn.__name__, fn)
     sys.modules["db"] = db
 
@@ -1239,33 +1275,42 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     await bot_mod.menu_premium(FakeCB(tg_id, "menu:premium", 700), fake_bot)
     last = last_screen(fake_bot)
     body = last["body"] or ""
+    # The tap now attempts the in-game unlock instead of showing the old
+    # informational screen. A fresh user holds 0 tokens, so it is refused and
+    # the locked screen states the shortfall. See test_premium_tokens.py for
+    # the balance matrix and the atomicity of the deduction.
     check("the Premium screen is text-only", last["kind"] == "text", last["kind"])
-    check("it is headed Premium Level",
-          body.startswith("\U0001F3C6 <b>Premium Level</b>"), repr(body))
-    check("it lists the benefits", "<b>Premium benefits:</b>" in body, repr(body))
-    check("it quotes the configured Premium allowance",
-          "\U00002014 70 signals/day" in body, repr(body))
-    check("it shows a Start viewer their own current status",
-          "<b>Your status:</b> Start" in body and "30 signals/day" in body,
+    check("it is headed Premium Locked",
+          body.startswith("\U0001F451 <b>Premium Locked</b>"), repr(body))
+    check("it quotes the configured unlock cost",
+          str(config.PREMIUM_UNLOCK_COST) in body, repr(body))
+    check("it shows a Start viewer their own balance and shortfall",
+          "Your balance: 0" in body and "Still needed: 100 tokens" in body,
           repr(body))
     check("it never asks for a deposit",
           "deposit" not in body.lower(), repr(body))
-    check("a Start viewer is offered a way to ask about Premium",
+    check("it asks only for game tokens, never money",
+          "game tokens" in body.lower()
+          and not any(w in body.lower() for w in ("$", "usd", "payment", "pay ")),
+          repr(body))
+    check("a refused unlock still offers a way back",
           last["markup"] is not None)
     check("no unfilled placeholder on the Premium screen",
           "{" not in body and "}" not in body, repr(body))
+    check("a refused unlock grants nothing",
+          not fake_db._users[tg_id]["is_premium"])
 
     _fresh_user(fake_db, pro, premium=True)
     fake_bot = FakeBot()
     await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
     body = last_screen(fake_bot)["body"] or ""
-    check("a Premium viewer is told Premium is active",
-          "Premium is active" in body, repr(body))
+    check("a Premium viewer is told Premium is already active",
+          "Premium is already active" in body, repr(body))
     check("and is not invited to request what they already have",
           "Ask about Premium" not in str(last_screen(fake_bot)["markup"]),
           str(last_screen(fake_bot)["markup"]))
-    check("the Premium screen quotes one number for both tiers' viewers",
-          "\U00002014 70 signals/day" in body, repr(body))
+    check("the already-active screen quotes the Premium allowance",
+          str(config.PREMIUM_DAILY_SIGNALS) + " signals per day" in body, repr(body))
     check("menu:level is registered above the menu: catch-all",
           bot_src.index('F.data == "menu:level"')
           < bot_src.index('F.data.startswith("menu:")'))
@@ -1321,7 +1366,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
         body = last_screen(fake_bot)["body"] or ""
         check("the Unlock Premium screen advertises 100, not 70",
-              "\U00002014 100 signals/day" in body and "70" not in body, repr(body))
+              "100 signals per day" in body and "70" not in body, repr(body))
 
         _fresh_user(fake_db, pro, premium=True)
         fake_bot = FakeBot()

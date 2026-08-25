@@ -56,6 +56,14 @@ CREATE INDEX IF NOT EXISTS users_uid_idx ON users (uid);
 -- column changes nothing for anyone already in the table.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- In-game token balance. These are fictional credits earned and spent inside
+-- the bot only: no money, no deposit and no affiliate event ever touches this
+-- column. users.deposit above is the real trading-account figure and is a
+-- separate thing entirely - nothing may move a value between the two.
+-- Existing rows default to 0, so adding this changes nothing for anyone
+-- already in the table.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS game_tokens INTEGER NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS traders (
     trader_id  TEXT PRIMARY KEY,
     registered BOOLEAN DEFAULT TRUE,
@@ -244,6 +252,74 @@ async def is_premium(tg_id: int):
     async with pool.acquire() as c:
         row = await c.fetchrow("SELECT is_premium FROM users WHERE tg_id=$1", tg_id)
         return bool(row["is_premium"]) if row else False
+
+# --- In-game tokens and the Premium unlock ----------------------------------
+# Fictional credits. Nothing here reads users.deposit, the traders table or any
+# postback: a token balance is created only by an admin command and spent only
+# by the unlock below.
+#
+# The unlock is ONE statement, which in Postgres is its own transaction. That is
+# the whole concurrency story: the WHERE is the gate, so two taps arriving
+# together cannot both see "100 tokens, not premium" and both spend it. The
+# second statement finds is_premium already TRUE (or the balance already short)
+# and matches no row, so it deducts nothing and returns None.
+#
+# A read-then-write pair - SELECT game_tokens, then UPDATE - would be the bug
+# this is written to avoid: both callers would read 100, both would pass their
+# own check, and the balance would go to -100 with one Premium granted twice.
+_UNLOCK_PREMIUM_SQL = """
+    UPDATE users
+       SET game_tokens = game_tokens - $2,
+           is_premium  = TRUE
+     WHERE tg_id       = $1
+       AND is_premium  = FALSE
+       AND game_tokens >= $2
+    RETURNING game_tokens
+"""
+
+async def unlock_premium(tg_id: int, cost: int):
+    """Spend `cost` tokens to grant Premium, atomically.
+
+    Returns (unlocked, balance, premium):
+      unlocked - True only when THIS call performed the deduction
+      balance  - the balance after the call, for the message to quote
+      premium  - the tier after the call, so the caller never re-reads it
+    """
+    async with pool.acquire() as c:
+        row = await c.fetchrow(_UNLOCK_PREMIUM_SQL, tg_id, cost)
+        if row is not None:
+            return True, row["game_tokens"], True
+        # Refused. Report why from the same connection, so the message quotes
+        # the balance that was actually in effect: either not enough tokens, or
+        # Premium was already held (a second tap, or a concurrent one that lost).
+        cur = await c.fetchrow(
+            "SELECT game_tokens, is_premium FROM users WHERE tg_id=$1", tg_id)
+        if cur is None:
+            return False, 0, False
+        return False, cur["game_tokens"], bool(cur["is_premium"])
+
+async def game_tokens(tg_id: int):
+    async with pool.acquire() as c:
+        row = await c.fetchrow("SELECT game_tokens FROM users WHERE tg_id=$1", tg_id)
+        return row["game_tokens"] if row else 0
+
+# GREATEST keeps a balance from going negative when an admin subtracts more
+# than the user holds. Single statement, so two grants cannot lose one another.
+async def add_tokens(tg_id: int, amount: int):
+    # Returns the new balance, or None when there is no such user - so the
+    # command can say "unknown tg_id" instead of reporting a phantom success.
+    async with pool.acquire() as c:
+        row = await c.fetchrow(
+            "UPDATE users SET game_tokens = GREATEST(0, game_tokens + $2) "
+            "WHERE tg_id=$1 RETURNING game_tokens", tg_id, amount)
+        return row["game_tokens"] if row else None
+
+async def set_tokens(tg_id: int, amount: int):
+    async with pool.acquire() as c:
+        row = await c.fetchrow(
+            "UPDATE users SET game_tokens = GREATEST(0, $2) "
+            "WHERE tg_id=$1 RETURNING game_tokens", tg_id, amount)
+        return row["game_tokens"] if row else None
 
 # --- Development reset ------------------------------------------------------
 # Puts ONE row back to the state a brand-new user's row is created in, so an
