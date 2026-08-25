@@ -319,9 +319,9 @@ SCREENS = {
         # omitting it falls back to the client's own default. Arbitrary colours
         # are not expressible here, so this is the full range available.
         "kb": [[("Get a signal", "cb:menu:signal", "primary", E_MENU_SIGNAL)],
+               [("Unlock Premium", "cb:menu:premium", "primary", E_MENU_PREMIUM)],
                [("My level", "cb:menu:level", "primary", E_MENU_LEVEL)],
                [("Support", "url:" + SUPPORT_URL, "primary", E_MENU_SUPPORT)],
-               [("Unlock Premium", "cb:menu:premium", "primary", E_MENU_PREMIUM)],
                [("Telegram channel", "url:" + CHANNEL_URL, "primary", E_MENU_CHANNEL)],
                [("YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)]],
     },

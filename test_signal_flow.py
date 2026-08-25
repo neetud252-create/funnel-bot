@@ -834,8 +834,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           not any(config.VIP_LINK in a for a in actions), str(actions))
     check("Unlock Premium appears in its place",
           "Unlock Premium" in labels, str(labels))
-    check("Unlock Premium sits where VIP team was (row 4)",
-          menu_kb[3][0][0] == "Unlock Premium", str(menu_kb[3]))
+    check("Unlock Premium sits second, directly under Get a signal",
+          menu_kb[1][0][0] == "Unlock Premium", str(menu_kb[1]))
     check("Unlock Premium opens a screen rather than a link",
           "cb:menu:premium" in actions, str(actions))
 
@@ -885,8 +885,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           "icon_custom_emoji_id" in _IKB.model_fields)
 
     check("the six required buttons are present, in order",
-          [l for l in labels] == ["Get a signal", "My level", "Support",
-                                  "Unlock Premium",
+          [l for l in labels] == ["Get a signal", "Unlock Premium", "My level",
+                                  "Support",
                                   "Telegram channel", "YouTube channel"],
           str(labels))
     check("the menu is now six rows", len(menu_kb) == 6, str(len(menu_kb)))
@@ -1186,12 +1186,14 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           all(l[0].isalpha() for l in labels), str(labels))
     # Premium is no exception any more: its one crown is the custom emoji, so
     # the label is bare text like every other button.
+    # Looked up by name, not by row index: the row order is a product decision
+    # that moves, and these assertions are about the crown, not the position.
+    _premium_label = next(l for l in labels if l == "Unlock Premium")
     check("Unlock Premium carries exactly one crown, and it is the custom one",
-          labels[3] == "Unlock Premium"
-          and icons["Unlock Premium"] == "5431684550424011313",
-          "%r / %r" % (labels[3], icons.get("Unlock Premium")))
+          icons["Unlock Premium"] == "5431684550424011313",
+          repr(icons.get("Unlock Premium")))
     check("the second, right-hand crown is gone from the label",
-          "\U0001F451" not in labels[3], repr(labels[3]))
+          "\U0001F451" not in _premium_label, repr(_premium_label))
     check("no unicode crown is left anywhere in the menu labels",
           not any("\U0001F451" in l for l in labels), str(labels))
     check("the superseded Premium emoji id is no longer referenced",
