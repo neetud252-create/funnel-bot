@@ -158,6 +158,24 @@ E_HOW_TARGET = "5461009483314517035"      # target, trading modes line
 E_HOW_BOLT   = "5992366958681527437"      # bolt, chart analysis line
 E_HOW_HOUR   = "5386367538735104399"      # hourglass, availability line
 E_HOW_DOWN   = "5305522282695768654"      # the finger pointing at the button
+# "It is simple" screen (SCREENS["tech"]) only - the step list reached from the
+# How Does It Work button. All nine are CAPTION entities rendered through pe();
+# this screen's BUTTON icon is E_GEAR and is not touched here.
+#
+# NOTE: seven repeat ids used elsewhere - the five keycaps match E_N1..E_N5
+# (also used by the mode, type and asset screens), E_TECH_GREEN matches
+# E_GREEN, and E_TECH_ROBOT matches E_MENU_HEADER. Declared separately on
+# purpose: restyling the numbered lists on another screen must not silently
+# renumber this one.
+E_TECH_CLIP  = "5352765106180610755"      # clipboard on the headline
+E_TECH_N1    = "5778373820930858379"
+E_TECH_N2    = "5778382698628256004"
+E_TECH_N3    = "5778338052443213984"
+E_TECH_N4    = "5778346006722646362"
+E_TECH_N5    = "5778205144680239810"
+E_TECH_GREEN = "5188234920639632382"      # the BUY circle
+E_TECH_RED   = "5411225014148014586"      # the SELL circle
+E_TECH_ROBOT = "5188678912883827293"      # robot on the closing line
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -349,7 +367,20 @@ SCREENS = {
     },
     "tech": {
         "photo": "tech",
-        "text": T_ROBOT + " <b>It is simple:</b>\n\n" + T_N1 + " Select an asset\n" + T_N2 + " Choose the expiration time\n" + T_N3 + " Get a signal: BUY " + T_GREEN + " / SELL " + T_DOWN + "\n" + T_N4 + " " + T_CLOCK + " Open a trade\n" + T_N5 + " Track the result\n\n" + T_SHAKE + " I take care of the market analysis for you - all you have to do is act.",
+        # Spacing is deliberate and not a typo: the clipboard and the five
+        # keycaps butt straight against their text, and on the signal line the
+        # space sits BEFORE the green circle only - "BUY 🟢or SELL🔴". Keep it
+        # that way; pe() adds no padding of its own. The button is untouched.
+        "text": (pe(E_TECH_CLIP, "\U0001F4CB") + "IT IS SIMPLE\n\n"
+                 + pe(E_TECH_N1, "1️⃣") + "Select an asset\n"
+                 + pe(E_TECH_N2, "2️⃣") + "Choose the expiration time\n"
+                 + pe(E_TECH_N3, "3️⃣") + "Get a signal \U00002014 BUY "
+                 + pe(E_TECH_GREEN, "\U0001F7E2") + "or SELL"
+                 + pe(E_TECH_RED, "\U0001F534") + "\n"
+                 + pe(E_TECH_N4, "4️⃣") + "Open a trade\n"
+                 + pe(E_TECH_N5, "5️⃣") + "Track the result\n\n"
+                 + pe(E_TECH_ROBOT, "\U0001F916")
+                 + " I handle the market analysis \U00002014 you decide when to act."),
         "kb": [[("See the technology", "cb:go:ai", "primary", E_GEAR)]],
     },
     "ai": {
