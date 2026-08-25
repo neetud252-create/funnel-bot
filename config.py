@@ -143,6 +143,21 @@ E_GATE_CHECK = "5260463209562776385"      # Check Subscription button icon
 E_WELCOME_BOT   = "5924946082487341386"   # the robot on the headline
 E_WELCOME_DOWN  = "5305522282695768654"   # the finger pointing at Start
 E_WELCOME_START = "5188481279963715781"   # Start button icon
+# "Why traders choose Go+" screen (SCREENS["how"]) only. All seven are CAPTION
+# entities rendered through pe(); this screen's BUTTON icon is E_QMARK above,
+# which already carries the required id and is used nowhere else.
+#
+# NOTE: three repeat ids used elsewhere - E_HOW_CHART matches E_CHART,
+# E_HOW_HOUR matches E_SIG_GLASS, and E_HOW_DOWN matches E_BACK /
+# E_GATE_DOWN / E_WELCOME_DOWN. Declared separately on purpose, so restyling
+# any of those cannot silently change this screen.
+E_HOW_SPARK  = "5325547803936572038"      # sparkles on the headline
+E_HOW_CHART  = "5231200819986047254"      # bar chart, assets line
+E_HOW_GLOBE  = "5447410659077661506"      # globe, OTC line
+E_HOW_TARGET = "5461009483314517035"      # target, trading modes line
+E_HOW_BOLT   = "5992366958681527437"      # bolt, chart analysis line
+E_HOW_HOUR   = "5386367538735104399"      # hourglass, availability line
+E_HOW_DOWN   = "5305522282695768654"      # the finger pointing at the button
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -316,7 +331,20 @@ SCREENS = {
     },
     "how": {
         "photo": "how",
-        "text": T_STAR + "<b>Why traders choose Go+:</b>\n\n100+ trading assets\nOTC and exchange trading\n2 trading modes for every style\nInstant chart analysis\nAvailable 24/7 and compatible with any device\n\n" + T_GEM + " <b>You get a tool that is always one step ahead of the market.</b>",
+        # Spacing is deliberate and not a typo: the headline, the assets line
+        # and the closing line put a space after their emoji, the four middle
+        # feature lines do not. Keep it that way - it is what the supplied copy
+        # specifies, and pe() emits the entity with no padding of its own.
+        #
+        # The button is unchanged: label already plain "How Does It Work" and
+        # E_QMARK already carries the required id, so nothing here restyles it.
+        "text": (pe(E_HOW_SPARK, "\U00002728") + " WHY TRADERS CHOOSE GO+\n\n"
+                 + pe(E_HOW_CHART, "\U0001F4CA") + " 100+ trading assets\n"
+                 + pe(E_HOW_GLOBE, "\U0001F310") + "OTC and exchange pairs\n"
+                 + pe(E_HOW_TARGET, "\U0001F3AF") + "2 trading modes\n"
+                 + pe(E_HOW_BOLT, "\U000026A1") + "Instant chart analysis\n"
+                 + pe(E_HOW_HOUR, "\U0000231B") + "Available 24/7, any device\n\n"
+                 + pe(E_HOW_DOWN, "\U0001F447") + " See how it works"),
         "kb": [[("How Does It Work", "cb:go:tech", "primary", E_QMARK)]],
     },
     "tech": {
