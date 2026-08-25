@@ -620,8 +620,50 @@ MSG_PREMIUM_LOCKED = ("\U0001F451 <b>Premium Locked</b>\n\n"
                       "Your balance: {balance}\n"
                       "Still needed: {needed} tokens")
 
+def tokens_needed(balance):
+    # The ONE shortfall calculation. Both the screens and the tests read it
+    # from here, so a message can never quote a number the unlock disagrees
+    # with. Floors at 0 so a balance above the cost never reads as negative.
+    return max(PREMIUM_UNLOCK_COST - int(balance or 0), 0)
+
+# --- Premium verification screens -------------------------------------------
+# Shown while the user is in the Premium unlock flow. Every one of these is
+# about GAME TOKENS and a GAME UID: there is no deposit, no payment, no real
+# currency and no trading account anywhere in this flow, and the tests assert
+# that none of those words can appear.
+#
+# {balance} is the balance the database actually returned and {needed} comes
+# from tokens_needed() above, so the two lines cannot contradict each other.
+MSG_PREMIUM_SHORT = ("\U0001F4B0 <b>Almost there.</b>\n\n"
+                     "Your current balance: <b>{balance} game tokens</b>\n\n"
+                     "To unlock Premium, you need <b>{needed} more game tokens</b>.\n\n"
+                     "Send your game UID here again to complete verification.")
+
+# Enough tokens already: the only thing left is the UID check.
+MSG_PREMIUM_READY = ("\U0001F4B0 <b>Almost there.</b>\n\n"
+                     "Your current balance: <b>{balance} game tokens</b>\n\n"
+                     "You have enough game tokens to unlock Premium.\n\n"
+                     "Send your game UID here to complete verification.")
+
+# A valid UID, but the balance is still short. Distinct from MSG_PREMIUM_SHORT
+# so the user can tell their UID was accepted and the tokens are what is
+# missing - the same screen for both would read as the UID having failed.
+MSG_PREMIUM_STILL_SHORT = ("\U0001F4B0 <b>Almost there.</b>\n\n"
+                           "Your current balance: <b>{balance} game tokens</b>\n\n"
+                           "You still need <b>{needed} game tokens</b> to unlock Premium.\n\n"
+                           "Once you have enough, send your game UID again to verify.")
+
 MSG_PREMIUM_UNLOCKED = ("\U0001F451 <b>Premium Unlocked!</b>\n\n"
-                        "You now have {limit} signals per day.")
+                        "Your game UID has been verified successfully.\n\n"
+                        "You now have <b>{limit} signals per day</b>.")
+
+# The UID did not pass the check. Says so and invites another attempt - there
+# is no attempt limit and no lockout, so the user can send it as often as they
+# like and each send is checked again.
+MSG_GAME_UID_INVALID = ("\U00002757 <b>That game UID is not valid.</b>\n\n"
+                        "A game UID is numbers only (5\U00002013" "15 digits). "
+                        "Example: <b>123456789</b>\n\n"
+                        "Send your game UID again to continue.")
 
 # A second tap once Premium is held. The unlock statement refuses it (its WHERE
 # requires is_premium = FALSE), so nothing was deducted and this only says so.

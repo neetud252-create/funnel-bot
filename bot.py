@@ -17,6 +17,14 @@ dp = Dispatcher()
 class Reg(StatesGroup):
     waiting_uid = State()
 
+# Deliberately a SEPARATE state from Reg.waiting_uid, not a flag on it. The
+# funnel's capture path short-circuits on users.verified (it must not re-query
+# the panel and risk a FloodWait); the Premium flow must do the opposite and
+# re-check every single time. Two states keep those two rules from having to
+# live in one handler, and leave the funnel's behaviour untouched.
+class Premium(StatesGroup):
+    waiting_uid = State()
+
 UID_RE = re.compile(r"\d{5,15}")
 
 OK_STATUS = ("creator", "administrator", "member")
@@ -874,31 +882,30 @@ async def menu_level(cb: CallbackQuery, bot: Bot):
 
 # Must stay above menu_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "menu:premium")
-async def menu_premium(cb: CallbackQuery, bot: Bot):
-    # Unlock Premium, paid for in the bot's own fictional tokens. The button
-    # itself is untouched - only what happens after the tap.
+async def menu_premium(cb: CallbackQuery, bot: Bot, state: FSMContext):
+    # Opens the Premium unlock flow. The button itself is untouched - text,
+    # style, callback and custom emoji are all as they were; only what happens
+    # after the tap changed.
     #
-    # The tap goes STRAIGHT to db.unlock_premium: there is deliberately no
-    # "read the balance, decide, then write" here. Deciding in Python would
-    # reintroduce exactly the race the single UPDATE exists to prevent, because
-    # two taps could both read 100 and both proceed. The statement's WHERE is
-    # the only check, and its refusal is what this handler reports.
+    # This screen never unlocks anything. It states the balance and the
+    # shortfall and arms Premium.waiting_uid, because the unlock is gated on a
+    # game UID check that has to happen on a message, not on this tap.
     await cb.answer()
     tg_id = cb.from_user.id
-    cost = config.PREMIUM_UNLOCK_COST
-    unlocked, balance, premium = await db.unlock_premium(tg_id, cost)
-    limit = config.daily_limit(premium)
+    premium = await db.is_premium(tg_id)
+    balance = await db.game_tokens(tg_id)
 
-    if unlocked:
-        logging.info("premium unlocked by tg_id=%s for %s tokens, %s left",
-                     tg_id, cost, balance)
-        text = config.MSG_PREMIUM_UNLOCKED.format(limit=limit)
-    elif premium:
-        # Already Premium - the statement matched no row, so nothing was spent.
-        text = config.MSG_PREMIUM_ALREADY.format(limit=limit, balance=balance)
+    if premium:
+        # Nothing to unlock, so no UID is asked for and no state is armed.
+        await state.clear()
+        text = config.MSG_PREMIUM_ALREADY.format(
+            limit=config.daily_limit(True), balance=balance)
     else:
-        text = config.MSG_PREMIUM_LOCKED.format(
-            cost=cost, balance=balance, needed=max(0, cost - balance))
+        needed = config.tokens_needed(balance)
+        template = (config.MSG_PREMIUM_READY if needed == 0
+                    else config.MSG_PREMIUM_SHORT)
+        text = template.format(balance=balance, needed=needed)
+        await state.set_state(Premium.waiting_uid)
     await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
 @dp.callback_query(F.data.startswith("menu:"))
@@ -1024,6 +1031,72 @@ async def _run_verification(bot, tg_id, uid):
                      info.get("campaign_id") if info else None, config.CAMPAIGN_ID)
         await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK, _register_btn())
     return False
+
+async def _verify_game_uid(tg_id, uid):
+    """Check one game UID. Returns True when it is valid.
+
+    This is the Premium flow's OWN check and it is intentionally self-contained:
+    it never calls panelbot, never reads users.verified, users.uid or
+    users.deposit, and has nothing to do with the trading-account verification
+    that gates the funnel. A game UID is a game UID.
+
+    It also holds no state of its own - no cache, no memo of the last uid, no
+    "already checked" flag. Every call does the full check from scratch, which
+    is what makes a repeated UID verify again instead of being waved through.
+    """
+    uid = (uid or "").strip()
+    ok = bool(UID_RE.fullmatch(uid))
+    logging.info("GAME UID CHECK tg_id=%s uid=%r -> %s", tg_id, uid[:16],
+                 "VALID" if ok else "INVALID")
+    return ok
+
+# MUST stay above the Reg.waiting_uid handler and uid_anytime below: aiogram
+# dispatches in definition order, and uid_anytime matches any bare number in
+# any state. Registered here, Premium.waiting_uid wins while it is armed, so a
+# UID sent during the unlock flow never reaches the funnel's capture path.
+@dp.message(Premium.waiting_uid)
+async def premium_uid(m: Message, bot: Bot, state: FSMContext):
+    tg_id = m.from_user.id
+    uid = (m.text or "").strip()
+    try:
+        await bot.delete_message(chat_id=tg_id, message_id=m.message_id)
+    except Exception:
+        pass
+
+    # Fresh verification on EVERY message, unconditionally. There is no check
+    # of users.verified, no comparison against the previously sent uid and no
+    # one-time flag anywhere on this path: the third send of the same UID runs
+    # exactly the same check as the first.
+    if not await _verify_game_uid(tg_id, uid):
+        # Re-armed, so resending is a working retry with no attempt limit.
+        await state.set_state(Premium.waiting_uid)
+        await render(bot, tg_id, None, config.MSG_GAME_UID_INVALID,
+                     config.UNLOCK_KB)
+        return
+
+    # UID accepted. The spend is still the single gated UPDATE - the check
+    # above decides whether we ATTEMPT it, never whether it succeeds, so the
+    # atomicity of the deduction is exactly what it was.
+    cost = config.PREMIUM_UNLOCK_COST
+    unlocked, balance, premium = await db.unlock_premium(tg_id, cost)
+
+    if unlocked:
+        logging.info("premium unlocked by tg_id=%s for %s tokens, %s left",
+                     tg_id, cost, balance)
+        await state.clear()
+        text = config.MSG_PREMIUM_UNLOCKED.format(limit=config.daily_limit(True))
+    elif premium:
+        # Already Premium - the statement matched no row, so nothing was spent.
+        await state.clear()
+        text = config.MSG_PREMIUM_ALREADY.format(
+            limit=config.daily_limit(True), balance=balance)
+    else:
+        # Valid UID, not enough tokens. Stay armed so the user can send the UID
+        # again once they have earned the rest, and check it again when they do.
+        await state.set_state(Premium.waiting_uid)
+        text = config.MSG_PREMIUM_STILL_SHORT.format(
+            balance=balance, needed=config.tokens_needed(balance))
+    await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
 @dp.message(Reg.waiting_uid)
 async def capture_uid(m: Message, bot: Bot, state: FSMContext):

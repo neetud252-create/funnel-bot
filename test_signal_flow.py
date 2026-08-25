@@ -306,11 +306,12 @@ class FakeCB:
 
 
 class FakeMessage:
-    """Minimal Message: what the two admin level commands actually touch."""
+    """Minimal Message: what the admin commands and the UID handlers touch."""
 
-    def __init__(self, tg_id, text):
+    def __init__(self, tg_id, text, message_id=900):
         self.from_user = FakeUser(tg_id)
         self.text = text
+        self.message_id = message_id
         self.replies = []
 
     async def answer(self, text=None, **kw):
@@ -1272,7 +1273,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
 
     _fresh_user(fake_db, tg_id)
     fake_bot = FakeBot()
-    await bot_mod.menu_premium(FakeCB(tg_id, "menu:premium", 700), fake_bot)
+    await bot_mod.menu_premium(FakeCB(tg_id, "menu:premium", 700), fake_bot, FakeState())
     last = last_screen(fake_bot)
     body = last["body"] or ""
     # The tap now attempts the in-game unlock instead of showing the old
@@ -1280,13 +1281,15 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     # the locked screen states the shortfall. See test_premium_tokens.py for
     # the balance matrix and the atomicity of the deduction.
     check("the Premium screen is text-only", last["kind"] == "text", last["kind"])
-    check("it is headed Premium Locked",
-          body.startswith("\U0001F451 <b>Premium Locked</b>"), repr(body))
+    check("it is headed 'Almost there.'",
+          body.startswith("\U0001F4B0 <b>Almost there.</b>"), repr(body))
     check("it quotes the configured unlock cost",
           str(config.PREMIUM_UNLOCK_COST) in body, repr(body))
     check("it shows a Start viewer their own balance and shortfall",
-          "Your balance: 0" in body and "Still needed: 100 tokens" in body,
-          repr(body))
+          "<b>0 game tokens</b>" in body
+          and "<b>100 more game tokens</b>" in body, repr(body))
+    check("it asks for the game UID rather than unlocking on the tap",
+          "game UID" in body, repr(body))
     check("it never asks for a deposit",
           "deposit" not in body.lower(), repr(body))
     check("it asks only for game tokens, never money",
@@ -1302,7 +1305,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
 
     _fresh_user(fake_db, pro, premium=True)
     fake_bot = FakeBot()
-    await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
+    await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot, FakeState())
     body = last_screen(fake_bot)["body"] or ""
     check("a Premium viewer is told Premium is already active",
           "Premium is already active" in body, repr(body))
@@ -1363,7 +1366,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         check("My level shows 100 after the variable change",
               "\U0001F4CA <b>Daily limit:</b> 100 signals" in body, repr(body))
         fake_bot = FakeBot()
-        await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot)
+        await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot, FakeState())
         body = last_screen(fake_bot)["body"] or ""
         check("the Unlock Premium screen advertises 100, not 70",
               "100 signals per day" in body and "70" not in body, repr(body))

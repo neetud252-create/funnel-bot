@@ -64,13 +64,51 @@ def _mkuser(fake_db, tg_id, tokens=0, premium=False, verified=True):
     return row
 
 
-async def tap_premium(bot_mod, fake_db, tg_id):
+async def tap_premium(bot_mod, fake_db, tg_id, state=None):
     """One tap of the Unlock Premium button, through the real handler."""
     fake_bot = H.FakeBot()
     cb = H.FakeCB(tg_id, "menu:premium", 500)
-    await bot_mod.menu_premium(cb, fake_bot)
+    await bot_mod.menu_premium(cb, fake_bot, state or H.FakeState())
     sent = [c for c in fake_bot.calls if c["kind"] != "delete"]
     return (sent[-1]["body"] if sent else ""), fake_bot
+
+
+async def send_uid(bot_mod, tg_id, uid, state):
+    """One game-UID message, through the real Premium handler."""
+    fake_bot = H.FakeBot()
+    m = H.FakeMessage(tg_id, uid)
+    await bot_mod.premium_uid(m, fake_bot, state)
+    sent = [c for c in fake_bot.calls if c["kind"] != "delete"]
+    return (sent[-1]["body"] if sent else ""), fake_bot
+
+
+# Every screen in this flow must be about game tokens and nothing else.
+# "pay" is banned as a bare substring rather than as " pay " with spaces: the
+# spaced form would let "prepay", "payout" or a sentence-final "pay." through,
+# and nothing in this flow's copy legitimately contains those three letters.
+BANNED = ("$", "usd", "eur", "deposit", "payment", "pay", "investment",
+          "invest", "money", "pocket option", "real currency", "invoice",
+          "credit card", "withdraw", "refund", "cash", "currency", "fiat",
+          "purchase", "buy ", "price")
+
+
+def _code_only(src):
+    """Strip docstrings and # comments, leaving executable lines.
+
+    The comments in this codebase name the things they promise NOT to do
+    ("never calls panelbot"), so a scan of the raw text would flag exactly the
+    lines that document the guarantee. Only real statements are of interest.
+    """
+    src = re.sub(r'""".*?"""', "", src, flags=re.S)
+    src = re.sub(r"'''.*?'''", "", src, flags=re.S)
+    return "\n".join(line.split("#", 1)[0] for line in src.splitlines())
+
+
+def assert_game_only(label, text):
+    low = (text or "").lower()
+    for word in BANNED:
+        check("%s: never says %r" % (label, word.strip()),
+              word not in low, repr(text))
 
 
 async def main():
@@ -85,66 +123,215 @@ async def main():
     COST = config.PREMIUM_UNLOCK_COST
     check("PREMIUM_UNLOCK_COST is 100 by default", COST == 100, str(COST))
 
+    # Cases 1-5: the shortfall itself, straight from the single calculation.
+    for tokens, want_needed in ((0, 100), (50, 50), (99, 1), (100, 0), (150, 0)):
+        check("%d tokens -> needed = %d" % (tokens, want_needed),
+              config.tokens_needed(tokens) == want_needed,
+              str(config.tokens_needed(tokens)))
+    check("needed never goes negative above the cost",
+          config.tokens_needed(10 ** 6) == 0)
+
+    # The screen the tap puts up, for each balance. The tap NEVER unlocks - it
+    # states the position and asks for a game UID.
     cases = [
-        # (tokens, expect_premium, expect_balance, expect_needed)
-        (0,   False, 0,   100),
-        (50,  False, 50,  50),
-        (99,  False, 99,  1),
-        (100, True,  0,   None),
-        (150, True,  50,  None),
+        # (tokens, expect_needed_line, expect_ready)
+        (0,   100, False),
+        (50,  50,  False),
+        (99,  1,   False),
+        (100, 0,   True),
+        (150, 0,   True),
     ]
-    for tokens, want_premium, want_balance, want_needed in cases:
+    for tokens, want_needed, ready in cases:
         tg_id = 70000 + tokens
         _mkuser(fake_db, tg_id, tokens=tokens)
         text, _ = await tap_premium(bot_mod, fake_db, tg_id)
         row = fake_db._users[tg_id]
 
-        check("%d tokens: is_premium is %s" % (tokens, want_premium),
-              bool(row["is_premium"]) is want_premium,
-              "is_premium=%r" % row["is_premium"])
-        check("%d tokens: balance is now %d" % (tokens, want_balance),
-              row["game_tokens"] == want_balance, str(row["game_tokens"]))
-
-        if want_premium:
-            check("%d tokens: screen says Premium Unlocked" % tokens,
-                  "Premium Unlocked" in text, repr(text[:80]))
-            check("%d tokens: screen quotes the Premium limit" % tokens,
-                  str(config.PREMIUM_DAILY_SIGNALS) in text, repr(text[:80]))
+        check("%d tokens: the tap alone never unlocks Premium" % tokens,
+              not row["is_premium"], "is_premium=%r" % row["is_premium"])
+        check("%d tokens: the tap alone deducts nothing" % tokens,
+              row["game_tokens"] == tokens, str(row["game_tokens"]))
+        check("%d tokens: heading is 'Almost there.'" % tokens,
+              text.startswith("\U0001F4B0 <b>Almost there.</b>"), repr(text[:40]))
+        check("%d tokens: states the balance in bold" % tokens,
+              ("<b>%d game tokens</b>" % tokens) in text, repr(text))
+        check("%d tokens: asks for the game UID" % tokens,
+              "game UID" in text, repr(text))
+        if ready:
+            check("%d tokens: says they have enough" % tokens,
+                  "enough game tokens" in text, repr(text))
         else:
-            check("%d tokens: screen says Premium Locked" % tokens,
-                  "Premium Locked" in text, repr(text[:80]))
-            check("%d tokens: reports balance %d" % (tokens, want_balance),
-                  ("Your balance: %d" % want_balance) in text, repr(text))
-            check("%d tokens: reports %d still needed" % (tokens, want_needed),
-                  ("Still needed: %d tokens" % want_needed) in text, repr(text))
-            check("%d tokens: nothing was deducted" % tokens,
+            check("%d tokens: states %d more needed" % (tokens, want_needed),
+                  ("<b>%d more game tokens</b>" % want_needed) in text, repr(text))
+        # Cases 6-10: no money wording anywhere on any of these screens.
+        assert_game_only("%d tokens" % tokens, text)
+
+    # --- cases 11-14: every UID message verifies again -----------------------
+    # The point of this block: no one-time flag, no memo, no "already verified"
+    # shortcut. The real _verify_game_uid is wrapped in a counter that calls
+    # through, so this counts REAL invocations rather than a stand-in.
+    print("\n[uid] every UID message triggers verification again")
+    calls = []
+    real_verify = bot_mod._verify_game_uid
+
+    async def counting_verify(tg_id, uid):
+        result = await real_verify(tg_id, uid)
+        calls.append((tg_id, uid, result))
+        return result
+
+    bot_mod._verify_game_uid = counting_verify
+    try:
+        tg_id = 76000
+        state = H.FakeState()
+        _mkuser(fake_db, tg_id, tokens=0)
+        await tap_premium(bot_mod, fake_db, tg_id, state)
+        check("the tap arms the Premium UID state",
+              state.state == bot_mod.Premium.waiting_uid, str(state.state))
+
+        # The SAME uid three times. Each send must verify again.
+        SAME = "123456789"
+        for attempt in (1, 2, 3):
+            before = len(calls)
+            text, _ = await send_uid(bot_mod, tg_id, SAME, state)
+            check("UID send #%d triggers a fresh verification" % attempt,
+                  len(calls) == before + 1,
+                  "%d verifications recorded" % (len(calls) - before))
+            check("UID send #%d verified the uid that was sent" % attempt,
+                  calls[-1][1] == SAME, str(calls[-1]))
+            check("UID send #%d is not waved through as already verified"
+                  % attempt, "already" not in text.lower(), repr(text[:60]))
+            check("UID send #%d stays armed for another send" % attempt,
+                  state.state == bot_mod.Premium.waiting_uid, str(state.state))
+        check("three sends produced three verifications, not one",
+              len(calls) == 3, str(len(calls)))
+
+        # A previously verified funnel user must NOT skip the check.
+        tg_id = 76001
+        state = H.FakeState()
+        _mkuser(fake_db, tg_id, tokens=0, verified=True)
+        fake_db._users[tg_id]["uid"] = SAME
+        await tap_premium(bot_mod, fake_db, tg_id, state)
+        before = len(calls)
+        await send_uid(bot_mod, tg_id, SAME, state)
+        check("an already-verified user's UID is still re-verified",
+              len(calls) == before + 1, str(len(calls) - before))
+
+        # Case 14: an invalid UID can be submitted again, as often as needed.
+        tg_id = 76002
+        state = H.FakeState()
+        _mkuser(fake_db, tg_id, tokens=200)
+        await tap_premium(bot_mod, fake_db, tg_id, state)
+        for bad in ("abc", "12", "not-a-uid", ""):
+            before = len(calls)
+            text, _ = await send_uid(bot_mod, tg_id, bad, state)
+            check("invalid UID %r is checked, not ignored" % bad,
+                  len(calls) == before + 1, str(len(calls) - before))
+            check("invalid UID %r is rejected" % bad,
+                  "not valid" in text.lower(), repr(text[:60]))
+            check("invalid UID %r leaves the state armed for a retry" % bad,
+                  state.state == bot_mod.Premium.waiting_uid, str(state.state))
+            check("invalid UID %r never unlocks Premium" % bad,
+                  not fake_db._users[tg_id]["is_premium"])
+            check("invalid UID %r deducts nothing" % bad,
+                  fake_db._users[tg_id]["game_tokens"] == 200,
+                  str(fake_db._users[tg_id]["game_tokens"]))
+            assert_game_only("invalid uid", text)
+        # ...and a good one still works afterwards.
+        text, _ = await send_uid(bot_mod, tg_id, SAME, state)
+        check("a valid UID after several invalid ones still unlocks",
+              fake_db._users[tg_id]["is_premium"], repr(text[:60]))
+
+        # --- case 15: valid UID, not enough tokens --------------------------
+        print("\n[uid] a valid UID does not unlock without the tokens")
+        for tokens, want_needed in ((0, 100), (50, 50), (99, 1)):
+            tg_id = 77000 + tokens
+            state = H.FakeState()
+            _mkuser(fake_db, tg_id, tokens=tokens)
+            await tap_premium(bot_mod, fake_db, tg_id, state)
+            text, _ = await send_uid(bot_mod, tg_id, SAME, state)
+            row = fake_db._users[tg_id]
+            check("%d tokens + valid UID: still not Premium" % tokens,
+                  not row["is_premium"], "is_premium=%r" % row["is_premium"])
+            check("%d tokens + valid UID: nothing deducted" % tokens,
                   row["game_tokens"] == tokens, str(row["game_tokens"]))
+            check("%d tokens + valid UID: says how many are still needed" % tokens,
+                  ("<b>%d game tokens</b>" % want_needed) in text, repr(text))
+            check("%d tokens + valid UID: states the current balance" % tokens,
+                  ("<b>%d game tokens</b>" % tokens) in text, repr(text))
+            check("%d tokens + valid UID: invites another UID send" % tokens,
+                  "send your game uid again" in text.lower(), repr(text))
+            check("%d tokens + valid UID: stays armed" % tokens,
+                  state.state == bot_mod.Premium.waiting_uid, str(state.state))
+            assert_game_only("%d tokens + valid uid" % tokens, text)
 
-    # --- case 6: no double unlock ------------------------------------------
-    print("\n[unlock] a second tap cannot spend a second time")
-    tg_id = 71000
-    _mkuser(fake_db, tg_id, tokens=250)
-    await tap_premium(bot_mod, fake_db, tg_id)
-    after_first = fake_db._users[tg_id]["game_tokens"]
-    text, _ = await tap_premium(bot_mod, fake_db, tg_id)
-    after_second = fake_db._users[tg_id]["game_tokens"]
-    check("first tap charged exactly the cost",
-          after_first == 250 - COST, str(after_first))
-    check("second tap charged nothing",
-          after_second == after_first, str(after_second))
-    check("second tap still reports Premium",
-          bool(fake_db._users[tg_id]["is_premium"]))
-    check("second tap does not claim a fresh unlock",
-          "Premium Unlocked" not in text, repr(text[:80]))
+        # --- cases 16/17: valid UID + enough tokens -------------------------
+        print("\n[uid] a valid UID with enough tokens unlocks, once")
+        for tokens in (100, 150, 250):
+            tg_id = 78000 + tokens
+            state = H.FakeState()
+            _mkuser(fake_db, tg_id, tokens=tokens)
+            await tap_premium(bot_mod, fake_db, tg_id, state)
+            text, _ = await send_uid(bot_mod, tg_id, SAME, state)
+            row = fake_db._users[tg_id]
+            check("%d tokens: Premium is unlocked" % tokens, row["is_premium"])
+            check("%d tokens: exactly the cost was deducted" % tokens,
+                  row["game_tokens"] == tokens - COST, str(row["game_tokens"]))
+            check("%d tokens: screen confirms the UID was verified" % tokens,
+                  "verified successfully" in text, repr(text))
+            check("%d tokens: screen quotes the Premium allowance" % tokens,
+                  ("<b>%d signals per day</b>" % config.PREMIUM_DAILY_SIGNALS)
+                  in text, repr(text))
+            check("%d tokens: the UID state is released" % tokens,
+                  state.state is None, str(state.state))
+            assert_game_only("%d tokens unlocked" % tokens, text)
 
-    # --- case 7: two simultaneous taps -------------------------------------
+            # Case 6 restated on this path: a second UID send cannot re-charge.
+            before_balance = row["game_tokens"]
+            text, _ = await send_uid(bot_mod, tg_id, SAME, H.FakeState(
+                bot_mod.Premium.waiting_uid))
+            check("%d tokens: a second UID send charges nothing" % tokens,
+                  row["game_tokens"] == before_balance, str(row["game_tokens"]))
+            check("%d tokens: a second send does not claim a fresh unlock" % tokens,
+                  "Premium Unlocked" not in text, repr(text[:60]))
+    finally:
+        bot_mod._verify_game_uid = real_verify
+
+    # --- an already-Premium user cannot unlock again ------------------------
+    # Distinct from the "second send" checks above: this user holds Premium
+    # before the flow is ever entered, so it covers the entry path too.
+    print("\n[unlock] an existing Premium user cannot unlock a second time")
+    tg_id = 79000
+    _mkuser(fake_db, tg_id, tokens=500, premium=True)
+    state = H.FakeState()
+    text, _ = await tap_premium(bot_mod, fake_db, tg_id, state)
+    row = fake_db._users[tg_id]
+    check("an existing Premium user is not asked for a UID",
+          state.state is None, str(state.state))
+    check("the tap deducts nothing from a Premium user",
+          row["game_tokens"] == 500, str(row["game_tokens"]))
+    check("the tap tells them Premium is already active",
+          "already active" in text, repr(text[:60]))
+    assert_game_only("already premium", text)
+
+    # ...and even if a UID reaches the handler, nothing is spent.
+    text, _ = await send_uid(bot_mod, tg_id, "123456789",
+                             H.FakeState(bot_mod.Premium.waiting_uid))
+    check("a UID from a Premium user deducts nothing",
+          fake_db._users[tg_id]["game_tokens"] == 500,
+          str(fake_db._users[tg_id]["game_tokens"]))
+    check("a UID from a Premium user does not re-unlock",
+          "Premium Unlocked" not in text, repr(text[:60]))
+    check("they are still Premium afterwards", row["is_premium"])
+
+    # --- case 18: two simultaneous unlocks ----------------------------------
     # Both coroutines are started before either is awaited, so they interleave
-    # at the same await points a real double-tap would.
-    print("\n[unlock] two simultaneous taps cannot spend 200")
+    # at the same await points a real double-send would.
+    print("\n[unlock] two simultaneous unlocks cannot spend 200")
     tg_id = 72000
     _mkuser(fake_db, tg_id, tokens=150)
-    await asyncio.gather(tap_premium(bot_mod, fake_db, tg_id),
-                         tap_premium(bot_mod, fake_db, tg_id))
+    await asyncio.gather(
+        send_uid(bot_mod, tg_id, "123456789", H.FakeState(bot_mod.Premium.waiting_uid)),
+        send_uid(bot_mod, tg_id, "123456789", H.FakeState(bot_mod.Premium.waiting_uid)))
     row = fake_db._users[tg_id]
     check("exactly one cost was deducted, not two",
           row["game_tokens"] == 150 - COST,
@@ -157,8 +344,9 @@ async def main():
     # A concurrent pair that can only afford ONE unlock must not overdraw.
     tg_id = 72001
     _mkuser(fake_db, tg_id, tokens=COST)
-    await asyncio.gather(tap_premium(bot_mod, fake_db, tg_id),
-                         tap_premium(bot_mod, fake_db, tg_id))
+    await asyncio.gather(
+        send_uid(bot_mod, tg_id, "123456789", H.FakeState(bot_mod.Premium.waiting_uid)),
+        send_uid(bot_mod, tg_id, "123456789", H.FakeState(bot_mod.Premium.waiting_uid)))
     row = fake_db._users[tg_id]
     check("exact-cost balance ends at 0, not negative",
           row["game_tokens"] == 0, str(row["game_tokens"]))
@@ -372,9 +560,63 @@ async def main():
     bot_src = open(os.path.join(ROOT, "bot.py"), encoding="utf-8").read()
     handler = bot_src[bot_src.index('F.data == "menu:premium"'):]
     handler = handler[:handler.index("@dp.callback_query", 10)]
-    for banned in ("deposit", "panelbot", "uid", "verify", "payment", "invoice"):
-        check("the unlock handler never mentions %r" % banned,
+    # "uid" and "verify" are EXPECTED here now - the flow is a game-UID check.
+    # What must stay out is the real-money machinery.
+    for banned in ("deposit", "panelbot", "payment", "invoice", "usd"):
+        check("the unlock screen handler never mentions %r" % banned,
               banned not in handler.lower(), banned)
+
+    # The Premium UID handler is the one that must never reach the affiliate
+    # panel: that is the trading-account check, and this flow is game-only.
+    #
+    # Scanned as CODE, not as prose: both of these carry comments that name
+    # panelbot and users.verified precisely to say they are not used, and a raw
+    # substring search would flag the comment that documents the guarantee.
+    uid_handler = _code_only(
+        bot_src[bot_src.index("async def premium_uid"):
+                bot_src.index("@dp.message(Reg.waiting_uid)")])
+    for banned in ("panelbot", "deposit", "lookup_trader", "set_verified",
+                   "campaign", "min_deposit", "payment", "verified"):
+        check("the Premium UID handler never touches %r" % banned,
+              banned not in uid_handler.lower(), uid_handler)
+
+    # The game-UID check itself must be self-contained for the same reason.
+    verify_fn = _code_only(
+        bot_src[bot_src.index("async def _verify_game_uid"):
+                bot_src.index("@dp.message(Premium.waiting_uid)")])
+    for banned in ("panelbot", "db.", "deposit", "verified"):
+        check("_verify_game_uid never touches %r" % banned,
+              banned not in verify_fn.lower(), verify_fn)
+
+    # Registration order is load-bearing: aiogram dispatches in definition
+    # order, and uid_anytime matches any bare number in ANY state. If the
+    # Premium handler were registered below it, a UID sent during the unlock
+    # flow would fall into the funnel's capture path - which short-circuits on
+    # users.verified and would silently skip the re-verification.
+    check("the Premium UID handler is registered above Reg.waiting_uid",
+          bot_src.index("@dp.message(Premium.waiting_uid)")
+          < bot_src.index("@dp.message(Reg.waiting_uid)"))
+    check("the Premium UID handler is registered above the bare-number catch-all",
+          bot_src.index("@dp.message(Premium.waiting_uid)")
+          < bot_src.index('@dp.message(F.text.regexp'))
+    check("Premium.waiting_uid is a state of its own, not a flag on Reg",
+          "class Premium(StatesGroup)" in bot_src)
+
+    # The funnel's own capture path must be untouched: it still short-circuits
+    # on users.verified, which is what keeps it from re-querying the panel.
+    capture = _code_only(
+        bot_src[bot_src.index("async def _capture_uid"):
+                bot_src.index("async def retry_worker")])
+    check("the funnel's capture path still short-circuits on verified",
+          'user["verified"]' in capture, capture[:200])
+    check("the funnel's capture path still reaches the panel",
+          "_run_verification" in capture, capture[:200])
+
+    # No one-time flag anywhere on the Premium path.
+    for flag in ("already_verified", "_verified_uids", "uid_verified",
+                 "verified_once", "seen_uid"):
+        check("no one-time verification flag named %r exists" % flag,
+              flag not in bot_src.lower(), flag)
 
     print("\n%d checks, %d failed" % (CHECKS[0], len(FAILURES)))
     if FAILURES:
