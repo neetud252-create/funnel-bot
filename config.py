@@ -313,20 +313,17 @@ SCREENS = {
         # before the text, so keeping both would show two icons side by side.
         # That applies to "Unlock Premium" too - its single crown is the custom
         # emoji, which is why the label is bare text like all the others.
-        # Style is a visual hierarchy, not decoration. Telegram accepts exactly
-        # three - "success" (green), "primary" (blue), "danger" (red) - and a
-        # style of None means the client's own default. There is no yellow or
-        # gold, so Unlock Premium stays on the highlighted blue rather than
-        # approximating one; arbitrary colours are not expressible here.
-        # The primary action is green, the two secondary actions and Unlock
-        # Premium are blue, and the two outbound links drop to the default so
-        # they read as links rather than actions.
-        "kb": [[("Get a signal", "cb:menu:signal", "success", E_MENU_SIGNAL)],
+        # Every row carries style "primary", which the Bot API renders blue, so
+        # the whole menu reads as one blue block. Telegram accepts exactly three
+        # styles - "success" (green), "primary" (blue), "danger" (red) - and
+        # omitting it falls back to the client's own default. Arbitrary colours
+        # are not expressible here, so this is the full range available.
+        "kb": [[("Get a signal", "cb:menu:signal", "primary", E_MENU_SIGNAL)],
                [("My level", "cb:menu:level", "primary", E_MENU_LEVEL)],
                [("Support", "url:" + SUPPORT_URL, "primary", E_MENU_SUPPORT)],
                [("Unlock Premium", "cb:menu:premium", "primary", E_MENU_PREMIUM)],
-               [("Telegram channel", "url:" + CHANNEL_URL, None, E_MENU_CHANNEL)],
-               [("YouTube channel", "url:" + YOUTUBE_URL, None, E_YOUTUBE)]],
+               [("Telegram channel", "url:" + CHANNEL_URL, "primary", E_MENU_CHANNEL)],
+               [("YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)]],
     },
     # Trading-mode picker, opened from "Get a signal" on the menu. Both modes are
     # still placeholders - see mode_action in bot.py.

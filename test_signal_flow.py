@@ -851,26 +851,24 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("the register button still uses REF_LINK",
           config.REF_LINK in reg[0][0][1], str(reg))
 
-    # The intended visual hierarchy: the primary action green, the secondary
-    # actions blue, the two outbound links on the client default so they read
-    # as links rather than actions.
+    # One uniform blue block: every button on the menu carries "primary".
     styles = dict((b[0], b[2] if len(b) > 2 else None)
                   for row in menu_kb for b in row)
     WANT_STYLES = {
-        "Get a signal":     "success",
+        "Get a signal":     "primary",
         "My level":         "primary",
         "Support":          "primary",
         "Unlock Premium":   "primary",
-        "Telegram channel": None,
-        "YouTube channel":  None,
+        "Telegram channel": "primary",
+        "YouTube channel":  "primary",
     }
     for label, want in WANT_STYLES.items():
-        check("style: %-17s -> %s" % (label, want or "default"),
+        check("style: %-17s -> %s" % (label, want),
               styles.get(label) == want, repr(styles.get(label)))
-    check("exactly one button carries the green primary action",
-          [s for s in styles.values()].count("success") == 1, str(styles))
-    check("the two outbound links carry no explicit style",
-          styles["Telegram channel"] is None and styles["YouTube channel"] is None,
+    check("all six main-menu buttons are primary (blue)",
+          all(s == "primary" for s in styles.values()), str(styles))
+    check("no button is left green, red or unstyled",
+          not any(s in ("success", "danger", None) for s in styles.values()),
           str(styles))
     # Telegram accepts only these three; anything else - a hex colour, a name
     # like "warning" - is not expressible and would be silently ignored.
@@ -1227,13 +1225,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     # build_kb must actually forward style/icon onto the outgoing button.
     built = bot_mod.build_kb(menu_kb)
     flat = [b for row in built.inline_keyboard for b in row]
-    check("build_kb forwards each button's own style onto the rendered button",
-          [b.style for b in flat] == ["success", "primary", "primary",
-                                      "primary", None, None],
-          str([b.style for b in flat]))
-    check("a style of None is omitted, not sent as the string 'None'",
-          all(b.style is None or isinstance(b.style, str) for b in flat)
-          and "None" not in [b.style for b in flat],
+    check("build_kb forwards style onto every rendered button",
+          [b.style for b in flat] == ["primary"] * 6,
           str([b.style for b in flat]))
     check("build_kb forwards the YouTube icon id",
           any(b.icon_custom_emoji_id == "5897969921182142023" for b in flat))
