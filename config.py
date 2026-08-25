@@ -206,6 +206,26 @@ E_RES_SHAKE = "5451876269719308814"       # handshake, channel line
 E_RES_POINT = "5415758949129404605"       # pointing finger, handle line
 E_RES_SOUND = "5247187233722607160"       # speaker before the handle
 E_RES_LOCK  = "5296369303661067030"       # Get access button icon
+# Activation screen (SCREENS["access"]) only - all CAPTION entities rendered
+# through pe(). This screen's button icon is inline in its tuple and is not
+# touched here.
+#
+# NOTE: three repeat ids used elsewhere - E_ACC_MONEY matches E_MONEY,
+# E_ACC_ROBOT matches E_MENU_HEADER / E_TECH_ROBOT, and E_ACC_DOWN matches
+# E_BACK and the gate/welcome/how/ai screens. Declared separately on purpose.
+# E_ACC_UP is NOT the same id as E_RES_UP on the results screen - different
+# stickers for the same-looking glyph, so do not merge them.
+E_ACC_SIREN = "5395695537687123235"       # siren on the headline
+E_ACC_MONEY = "5224257782013769471"       # money bag after the headline
+E_ACC_ROBOT = "5188678912883827293"       # robot before "Go Plus"
+E_ACC_CHECK = "5206607081334906820"       # check mark ending the signal line
+E_ACC_SPOCK = "5364297939478921851"       # raised hand, dream car line
+E_ACC_OK    = "5364237234411160303"       # ok hand, dream car line
+E_ACC_WATCH = "5240379491515126100"       # watch, dream watch line
+E_ACC_HOUSE = "5416041192905265756"       # house, dream life line
+E_ACC_UP    = "5019759554234156094"       # index finger, "All one click closer"
+E_ACC_BOLT  = "5303488362278050480"       # bolt, "Stop watching others win"
+E_ACC_DOWN  = "5305522282695768654"       # the fingers around the closing line
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -458,7 +478,27 @@ SCREENS = {
     },
     "access": {
         "video": "access",
-        "text": "\U0001F4A5 <b>I made $18,400 in an instant!</b>\n\nMany people try to learn sophisticated trading strategies to be able to buy themselves a brand new car, a rolex and a new house. I just follow the instructions from Go Plus and lock in profits right away.\n\n\U0001F916 <b>Go Plus tells you what to do \U00002014 and you just do what it tells you.</b>\n\n\U0001F4C8 <b>It couldn't be easier than that.</b>\n\n\U00002705 <b>Activate the bot right now and follow your dream \U0001F447</b>",
+        # Spacing is deliberate and uneven - see the per-emoji notes below.
+        # Only two spans are bold: the headline figure and "Go Plus". Every
+        # emoji goes through pe(), so none of them is a bare unicode literal.
+        "text": (pe(E_ACC_SIREN, "\U0001F6A8")
+                 + " <b>+$18,400 \U00002014 In One Trade.</b> "
+                 + pe(E_ACC_MONEY, "\U0001F4B0") + "\n"
+                 "No charts. No courses. No stress.\n\n"
+                 # robot butts straight against the bold name, no space
+                 + pe(E_ACC_ROBOT, "\U0001F916") + "<b>Go Plus</b>"
+                 " sends the signal \U00002192 you tap \U00002192 you profit. "
+                 + pe(E_ACC_CHECK, "✔️") + "\n\n"
+                 # the two hands sit together, then one space
+                 + pe(E_ACC_SPOCK, "\U0001F596") + pe(E_ACC_OK, "\U0001F44C")
+                 + " Dream car.\n"
+                 + pe(E_ACC_WATCH, "⌚️") + " Dream watch.\n"
+                 + pe(E_ACC_HOUSE, "\U0001F3E0") + " Dream life.\n\n"
+                 # no space after the index finger or the bolt
+                 + pe(E_ACC_UP, "☝") + "All one click closer.\n\n"
+                 + pe(E_ACC_BOLT, "⚡️") + "Stop watching others win.\n\n"
+                 + pe(E_ACC_DOWN, "\U0001F447") + " Activate the bot now "
+                 + pe(E_ACC_DOWN, "\U0001F447")),
         # Interim: routes into the UID-capture register flow (Group C adds full verification)
         "kb": [[("Activate Bot", "cb:go:register", "success", "6280525956771745921")]],
     },
