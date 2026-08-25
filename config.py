@@ -176,6 +176,23 @@ E_TECH_N5    = "5778205144680239810"
 E_TECH_GREEN = "5188234920639632382"      # the BUY circle
 E_TECH_RED   = "5411225014148014586"      # the SELL circle
 E_TECH_ROBOT = "5188678912883827293"      # robot on the closing line
+# "The technology behind Go+" screen (SCREENS["ai"]) only. The first six are
+# CAPTION entities rendered through pe(); E_AI_RESULTS is the BUTTON icon and
+# rides on the 4th tuple element, never inside the label.
+#
+# NOTE: four repeat ids used elsewhere - E_AI_GEAR matches E_GEAR (also this
+# screen's own previous caption emoji and the tech screen's button icon),
+# E_AI_CHART matches E_CHART / E_HOW_CHART, E_AI_DOWN matches E_BACK and the
+# gate/welcome/how screens, and E_AI_RESULTS matches E_MENU_LEVEL (the main
+# menu's "My level" icon). Declared separately on purpose, so restyling any of
+# those cannot silently change this screen.
+E_AI_GEAR    = "5341715473882955310"      # gear on the headline
+E_AI_CAT     = "5796185041717433060"      # cat, the AI line
+E_AI_CHART   = "5231200819986047254"      # bar chart, indicators line
+E_AI_LENS    = "5231012545799666522"      # magnifier, setups line
+E_AI_BOLT    = "5274182275704039686"      # bolt, calculations line
+E_AI_DOWN    = "5305522282695768654"      # the finger pointing at the button
+E_AI_RESULTS = "5244837092042750681"      # See real results button icon
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -385,8 +402,24 @@ SCREENS = {
     },
     "ai": {
         "photo": "ai",
-        "text": T_GEAR + "<b>I am powered by advanced AI,</b>\nwhich processes huge amounts of data in seconds.\n\n" + T_CHART + " <b>I analyze charts using hundreds of indicators, price patterns, and technical analysis tools.</b>\n\n" + T_LENS + " <b>I detect patterns that humans often miss.</b>\n\n" + T_BOLT + " <b>Every signal I generate is based on precise calculations - not guesswork.</b>",
-        "kb": [[("See real results", "cb:results", "primary")]],
+        # Spacing is deliberate: every emoji here takes one space after it
+        # EXCEPT the bar chart, which butts straight against "Hundreds".
+        #
+        # The button label stays the bare words "See real results"; its chart
+        # comes from the 4th tuple element, which build_kb passes as
+        # icon_custom_emoji_id. Callback, style and position are unchanged -
+        # only the icon is new, since this button carried none before.
+        "text": (pe(E_AI_GEAR, "⚙️") + " THE TECHNOLOGY BEHIND GO+\n\n"
+                 + pe(E_AI_CAT, "\U0001F63A")
+                 + " AI that processes market data in seconds\n"
+                 + pe(E_AI_CHART, "\U0001F4CA")
+                 + "Hundreds of indicators and price patterns\n"
+                 + pe(E_AI_LENS, "\U0001F50D")
+                 + " Spots setups that are easy to miss\n"
+                 + pe(E_AI_BOLT, "\U000026A1")
+                 + " Every signal comes from calculations, not guesswork\n\n"
+                 + pe(E_AI_DOWN, "\U0001F447") + " See it in action"),
+        "kb": [[("See real results", "cb:results", "primary", E_AI_RESULTS)]],
     },
     "results": {
         "photo": "welcome",
