@@ -226,6 +226,25 @@ E_ACC_HOUSE = "5416041192905265756"       # house, dream life line
 E_ACC_UP    = "5019759554234156094"       # index finger, "All one click closer"
 E_ACC_BOLT  = "5303488362278050480"       # bolt, "Stop watching others win"
 E_ACC_DOWN  = "5305522282695768654"       # the fingers around the closing line
+# Registration screen (SCREENS["register"]) only. The first six are CAPTION
+# entities rendered through pe(); the last three are BUTTON icons and ride on
+# the 4th tuple element, never inside the label.
+#
+# NOTE: E_REG_WARN and E_REG_DOWNARR carry the SAME id, as supplied. One
+# sticker cannot render as both a warning triangle and a down arrow, so the
+# two positions will show the same glyph - see the report for this change.
+# That id is also E_EXP_DOWN (the expiration screen's down arrow).
+# E_REG_DOWN repeats the id used by MSG_WRONG_LINK / MSG_UID_ERROR, and
+# E_REG_BTN_SUP repeats E_MENU_SUPPORT. Declared separately on purpose.
+E_REG_LOCK    = "5350619413533958825"     # padlock opening the caption
+E_REG_LINK    = "5271604874419647061"     # link before the URL
+E_REG_ARROW   = "5435955998479102657"     # arrow on the "once you register" line
+E_REG_DOWN    = "5447644880824181073"     # finger closing that line
+E_REG_WARN    = "5406745015365943482"     # warning on the "please note" line
+E_REG_DOWNARR = "5406745015365943482"     # down arrow closing that line
+E_REG_BTN_REG = "5836690092306992715"     # Register & Get Access button icon
+E_REG_BTN_HOW = "5222444124698853913"     # How to Register button icon
+E_REG_BTN_SUP = "5443038326535759644"     # Support button icon
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -504,10 +523,30 @@ SCREENS = {
     },
     "register": {
         "photo": "register",
-        "text": "\U0001F510 To access Go+, register for a new Pocket Option account using my link:\n\n\U0001F449 https://shorturl.at/2fu2t\n\n\U00002705 Once you register, send your new account ID in the text box below \U0001F447\n\n\U000026A0\U0000FE0F Please note: Your ID must contain numbers only \U00002014 no extra symbols \U00002757\n\nExample: 123456789",
-        "kb": [[("\U0001F511 Register & Get Access", "url:https://shorturl.at/2fu2t", "success", "5307843983102204243")],
-               [("\U0001F465 How to register", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary")],
-               [("\U0001F64B Support", "url:" + SUPPORT_URL)]],
+        # Spacing is deliberate: the padlock, arrow and warning butt straight
+        # against their text, while the link emoji and the two closing arrows
+        # take one space. The URL stays a bare link so it auto-links exactly as
+        # before - this is a photo caption, which has no link preview either
+        # way, so nothing is gained or lost by the bare form.
+        #
+        # Button labels are bare text; every icon rides on the 4th tuple
+        # element. Button 3 passes None for style on purpose: it had no style
+        # before, and build_kb skips a falsy one, so the payload keeps style
+        # absent while still carrying an icon.
+        "text": (pe(E_REG_LOCK, "\U0001F510")
+                 + "To access Go+, register for a new Pocket Option account "
+                 "using my link:\n\n"
+                 + pe(E_REG_LINK, "\U0001F517") + " https://shorturl.at/2fu2t\n\n"
+                 + pe(E_REG_ARROW, "➡️")
+                 + "Once you register, send your new account ID in the text "
+                 "box below " + pe(E_REG_DOWN, "\U0001F447") + "\n\n"
+                 + pe(E_REG_WARN, "⚠️")
+                 + "Please note: Your ID must contain numbers only "
+                 "\U00002014 no extra symbols " + pe(E_REG_DOWNARR, "⬇️") + "\n\n"
+                 "Example: 123456789"),
+        "kb": [[("Register & Get Access", "url:https://shorturl.at/2fu2t", "success", E_REG_BTN_REG)],
+               [("How to Register", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary", E_REG_BTN_HOW)],
+               [("Support", "url:" + SUPPORT_URL, None, E_REG_BTN_SUP)]],
     },
     # Post-verification home screen (shown once a UID passes the campaign +
     # deposit check). The signal counters are a format template - {limit},
