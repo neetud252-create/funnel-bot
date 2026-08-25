@@ -1281,20 +1281,17 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     # the locked screen states the shortfall. See test_premium_tokens.py for
     # the balance matrix and the atomicity of the deduction.
     check("the Premium screen is text-only", last["kind"] == "text", last["kind"])
-    check("it is headed 'Almost there.'",
-          body.startswith("\U0001F4B0 <b>Almost there.</b>"), repr(body))
+    check("it is headed 'Almost there.' behind the money emoji",
+          body.startswith(config.pe(config.E_MONEY, "\U0001F4B0")
+                          + " <b>Almost there.</b>"), repr(body))
     check("it quotes the configured unlock cost",
           str(config.PREMIUM_UNLOCK_COST) in body, repr(body))
-    check("it shows a Start viewer their own balance and shortfall",
-          "<b>0 game tokens</b>" in body
-          and "<b>100 more game tokens</b>" in body, repr(body))
-    check("it asks for the game UID rather than unlocking on the tap",
-          "game UID" in body, repr(body))
-    check("it never asks for a deposit",
-          "deposit" not in body.lower(), repr(body))
-    check("it asks only for game tokens, never money",
-          "game tokens" in body.lower()
-          and not any(w in body.lower() for w in ("$", "usd", "payment", "pay ")),
+    check("it states the threshold as a dollar figure",
+          "<b>$%d</b>" % config.PREMIUM_UNLOCK_COST in body, repr(body))
+    check("it asks for the account ID rather than unlocking on the tap",
+          "account ID" in body, repr(body))
+    check("no in-game phrasing is left on this screen",
+          not any(w in body.lower() for w in ("game token", "game uid")),
           repr(body))
     check("a refused unlock still offers a way back",
           last["markup"] is not None)

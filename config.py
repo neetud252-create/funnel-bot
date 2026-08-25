@@ -627,49 +627,62 @@ def tokens_needed(balance):
     return max(PREMIUM_UNLOCK_COST - int(balance or 0), 0)
 
 # --- Premium verification screens -------------------------------------------
-# Shown while the user is in the Premium unlock flow. Every one of these is
-# about GAME TOKENS and a GAME UID: there is no deposit, no payment, no real
-# currency and no trading account anywhere in this flow, and the tests assert
-# that none of those words can appear.
+# Shown while the user is in the Premium unlock flow.
 #
-# {balance} is the balance the database actually returned and {needed} comes
-# from tokens_needed() above, so the two lines cannot contradict each other.
-MSG_PREMIUM_SHORT = ("\U0001F4B0 <b>Almost there.</b>\n\n"
-                     "Your current balance: <b>{balance} game tokens</b>\n\n"
-                     "To unlock Premium, you need <b>{needed} more game tokens</b>.\n\n"
-                     "Send your game UID here again to complete verification.")
+# WORDING vs BEHAVIOUR - read before editing:
+# These screens are written in real-currency terms ($, balance, account ID) by
+# request. The code behind them is unchanged and still gates on game_tokens,
+# a column written only by the /tokens and /tokenset admin commands, and the
+# account-ID check is still format-only (5-15 digits, no panel lookup). So a
+# real top-up does NOT move what this screen is actually waiting on. Keep that
+# in mind before treating the copy as a description of the mechanism.
+#
+# The money emoji goes through pe(), which embeds the plain 💰 as the inner
+# glyph: clients without premium emoji render that literal rather than nothing.
+# E_MONEY is the supplied id and already existed above - not a new constant.
+T_PREM_MONEY = pe(E_MONEY, "\U0001F4B0")
 
-# Enough tokens already: the only thing left is the UID check.
-MSG_PREMIUM_READY = ("\U0001F4B0 <b>Almost there.</b>\n\n"
-                     "Your current balance: <b>{balance} game tokens</b>\n\n"
-                     "You have enough game tokens to unlock Premium.\n\n"
-                     "Send your game UID here to complete verification.")
+# {cost} is PREMIUM_UNLOCK_COST, so the figure quoted is the same one the
+# unlock enforces rather than a literal typed into the copy.
+MSG_PREMIUM_SHORT = (T_PREM_MONEY + " <b>Almost there.</b>\n\n"
+                     "Your account is registered through our link. To unlock "
+                     "access, top up your balance with <b>${cost}</b> or more "
+                     "\U00002014 then send your account ID here again to "
+                     "complete verification.")
 
-# A valid UID, but the balance is still short. Distinct from MSG_PREMIUM_SHORT
-# so the user can tell their UID was accepted and the tokens are what is
-# missing - the same screen for both would read as the UID having failed.
-MSG_PREMIUM_STILL_SHORT = ("\U0001F4B0 <b>Almost there.</b>\n\n"
-                           "Your current balance: <b>{balance} game tokens</b>\n\n"
-                           "You still need <b>{needed} game tokens</b> to unlock Premium.\n\n"
-                           "Once you have enough, send your game UID again to verify.")
+# Threshold already met: the only thing left is the account-ID check.
+MSG_PREMIUM_READY = (T_PREM_MONEY + " <b>Almost there.</b>\n\n"
+                     "Your account is registered through our link. Your balance "
+                     "meets the <b>${cost}</b> requirement \U00002014 send your "
+                     "account ID here to complete verification.")
+
+# The account ID was accepted but the threshold is still not met. Distinct from
+# MSG_PREMIUM_SHORT so the user can tell the ID passed and the balance is what
+# is outstanding - one screen for both would read as the ID having failed.
+MSG_PREMIUM_STILL_SHORT = (T_PREM_MONEY + " <b>Almost there.</b>\n\n"
+                           "Your account ID has been checked. Top up your balance "
+                           "with <b>${cost}</b> or more \U00002014 then send your "
+                           "account ID here again to complete verification.")
 
 MSG_PREMIUM_UNLOCKED = ("\U0001F451 <b>Premium Unlocked!</b>\n\n"
-                        "Your game UID has been verified successfully.\n\n"
+                        "Your account ID has been verified successfully.\n\n"
                         "You now have <b>{limit} signals per day</b>.")
 
-# The UID did not pass the check. Says so and invites another attempt - there
-# is no attempt limit and no lockout, so the user can send it as often as they
-# like and each send is checked again.
-MSG_GAME_UID_INVALID = ("\U00002757 <b>That game UID is not valid.</b>\n\n"
-                        "A game UID is numbers only (5\U00002013" "15 digits). "
-                        "Example: <b>123456789</b>\n\n"
-                        "Send your game UID again to continue.")
+# The account ID did not pass the check. Says so and invites another attempt -
+# there is no attempt limit and no lockout, so the user can send it as often as
+# they like and each send is checked again.
+MSG_ACCOUNT_ID_INVALID = ("\U00002757 <b>That account ID is not valid.</b>\n\n"
+                          "An account ID is numbers only (5\U0000201315 digits). "
+                          "Example: <b>123456789</b>\n\n"
+                          "Send your account ID again to continue.")
 
 # A second tap once Premium is held. The unlock statement refuses it (its WHERE
 # requires is_premium = FALSE), so nothing was deducted and this only says so.
+# The token balance line was dropped here: this screen now sits in a flow
+# written in real-currency terms, and showing a game-token count next to it
+# read as two different currencies on one screen.
 MSG_PREMIUM_ALREADY = ("\U0001F451 <b>Premium is already active</b>\n\n"
-                       "You have {limit} signals per day.\n\n"
-                       "Game tokens: {balance}")
+                       "You have <b>{limit} signals per day</b>.")
 
 # The unlock screens keep the plain Back button and nothing else: there is no
 # purchase button because there is nothing to purchase.

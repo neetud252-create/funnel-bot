@@ -82,14 +82,11 @@ async def send_uid(bot_mod, tg_id, uid, state):
     return (sent[-1]["body"] if sent else ""), fake_bot
 
 
-# Every screen in this flow must be about game tokens and nothing else.
-# "pay" is banned as a bare substring rather than as " pay " with spaces: the
-# spaced form would let "prepay", "payout" or a sentence-final "pay." through,
-# and nothing in this flow's copy legitimately contains those three letters.
-BANNED = ("$", "usd", "eur", "deposit", "payment", "pay", "investment",
-          "invest", "money", "pocket option", "real currency", "invoice",
-          "credit card", "withdraw", "refund", "cash", "currency", "fiat",
-          "purchase", "buy ", "price")
+# The Premium screens are written in real-currency terms by request, so the
+# in-game phrasing is what must NOT appear on them. This is the exact inverse
+# of the rule these tests carried before the copy was changed.
+BANNED = ("game token", "game tokens", "game uid", "virtual balance",
+          "in-game", "fictional", "credits")
 
 
 def _code_only(src):
@@ -105,6 +102,7 @@ def _code_only(src):
 
 
 def assert_game_only(label, text):
+    """No in-game phrasing on a Premium screen (the copy is real-currency)."""
     low = (text or "").lower()
     for word in BANNED:
         check("%s: never says %r" % (label, word.strip()),
@@ -132,7 +130,7 @@ async def main():
           config.tokens_needed(10 ** 6) == 0)
 
     # The screen the tap puts up, for each balance. The tap NEVER unlocks - it
-    # states the position and asks for a game UID.
+    # states the position and asks for an account ID.
     cases = [
         # (tokens, expect_needed_line, expect_ready)
         (0,   100, False),
@@ -151,35 +149,87 @@ async def main():
               not row["is_premium"], "is_premium=%r" % row["is_premium"])
         check("%d tokens: the tap alone deducts nothing" % tokens,
               row["game_tokens"] == tokens, str(row["game_tokens"]))
-        check("%d tokens: heading is 'Almost there.'" % tokens,
-              text.startswith("\U0001F4B0 <b>Almost there.</b>"), repr(text[:40]))
-        check("%d tokens: states the balance in bold" % tokens,
-              ("<b>%d game tokens</b>" % tokens) in text, repr(text))
-        check("%d tokens: asks for the game UID" % tokens,
-              "game UID" in text, repr(text))
+        check("%d tokens: leads with the money custom emoji" % tokens,
+              text.startswith(config.pe(config.E_MONEY, "\U0001F4B0")
+                              + " <b>Almost there.</b>"), repr(text[:80]))
+        check("%d tokens: quotes the threshold as $%d" % (tokens, COST),
+              ("<b>$%d</b>" % COST) in text, repr(text))
+        check("%d tokens: asks for the account ID" % tokens,
+              "account ID" in text, repr(text))
+        check("%d tokens: uses a real em dash, not a hyphen" % tokens,
+              "\U00002014" in text, repr(text))
         if ready:
-            check("%d tokens: says they have enough" % tokens,
-                  "enough game tokens" in text, repr(text))
+            check("%d tokens: says the threshold is met" % tokens,
+                  "meets the" in text, repr(text))
         else:
-            check("%d tokens: states %d more needed" % (tokens, want_needed),
-                  ("<b>%d more game tokens</b>" % want_needed) in text, repr(text))
-        # Cases 6-10: no money wording anywhere on any of these screens.
+            check("%d tokens: asks them to top up" % tokens,
+                  "top up your balance" in text, repr(text))
+            check("%d tokens: says 'registered through our link'" % tokens,
+                  "registered through our link" in text, repr(text))
+        # No in-game phrasing left on any Premium screen.
         assert_game_only("%d tokens" % tokens, text)
+
+    # --- the insufficient-balance screen, to the byte ------------------------
+    # Asserted as the rendered text plus its entity offsets, not just as a
+    # substring: the offsets are what Telegram uses, and they are measured in
+    # UTF-16 code units, so the emoji at the front counts as 2 rather than 1.
+    print("\n[copy] the insufficient-balance screen matches the spec exactly")
+    html = config.MSG_PREMIUM_SHORT.format(cost=COST)
+    plain, ents, pos = [], [], 0
+    kind = bstart = None
+    for tok in re.split(r"(<[^>]+>)", html):
+        if not tok:
+            continue
+        if tok.startswith("<"):
+            if tok.startswith("<tg-emoji"):
+                kind = (pos, re.search(r'emoji-id="(\d+)"', tok).group(1))
+            elif tok == "</tg-emoji>":
+                ents.append(("custom_emoji", kind[0], pos - kind[0], kind[1]))
+            elif tok == "<b>":
+                bstart = pos
+            elif tok == "</b>":
+                ents.append(("bold", bstart, pos - bstart, None))
+        else:
+            plain.append(tok)
+            pos += len(tok.encode("utf-16-le")) // 2
+    plain = "".join(plain)
+
+    EXPECT = ("\U0001F4B0 Almost there.\n\nYour account is registered through "
+              "our link. To unlock access, top up your balance with $100 or "
+              "more \U00002014 then send your account ID here again to "
+              "complete verification.")
+    check("rendered text matches the supplied string exactly",
+          plain == EXPECT, repr(plain))
+    check("entities are exactly the three specified",
+          sorted(ents, key=lambda e: e[1])
+          == [("custom_emoji", 0, 2, "5224257782013769471"),
+              ("bold", 3, 13, None), ("bold", 106, 4, None)], str(ents))
+    check("the money emoji uses the supplied id",
+          'emoji-id="5224257782013769471"' in html, html[:60])
+    check("the emoji falls back to a literal money bag, not nothing",
+          ">\U0001F4B0</tg-emoji>" in html, html[:60])
+    check("exactly two bold spans", html.count("<b>") == 2, str(html.count("<b>")))
+    check("em dash U+2014 present", "\U00002014" in plain)
+    check("no hyphen stands in for the em dash", "-" not in plain, repr(plain))
+    check("blank line between heading and paragraph",
+          plain.split("\n")[1] == "", repr(plain.split("\n")[:2]))
+    check("the threshold is rendered from PREMIUM_UNLOCK_COST, not hardcoded",
+          "{cost}" in config.MSG_PREMIUM_SHORT)
 
     # --- cases 11-14: every UID message verifies again -----------------------
     # The point of this block: no one-time flag, no memo, no "already verified"
-    # shortcut. The real _verify_game_uid is wrapped in a counter that calls
+    # shortcut. The real _verify_account_id is wrapped in a counter that calls
     # through, so this counts REAL invocations rather than a stand-in.
     print("\n[uid] every UID message triggers verification again")
     calls = []
-    real_verify = bot_mod._verify_game_uid
+    real_verify = bot_mod._verify_account_id
 
     async def counting_verify(tg_id, uid):
         result = await real_verify(tg_id, uid)
         calls.append((tg_id, uid, result))
         return result
 
-    bot_mod._verify_game_uid = counting_verify
+    bot_mod._verify_account_id = counting_verify
     try:
         tg_id = 76000
         state = H.FakeState()
@@ -254,12 +304,12 @@ async def main():
                   not row["is_premium"], "is_premium=%r" % row["is_premium"])
             check("%d tokens + valid UID: nothing deducted" % tokens,
                   row["game_tokens"] == tokens, str(row["game_tokens"]))
-            check("%d tokens + valid UID: says how many are still needed" % tokens,
-                  ("<b>%d game tokens</b>" % want_needed) in text, repr(text))
-            check("%d tokens + valid UID: states the current balance" % tokens,
-                  ("<b>%d game tokens</b>" % tokens) in text, repr(text))
-            check("%d tokens + valid UID: invites another UID send" % tokens,
-                  "send your game uid again" in text.lower(), repr(text))
+            check("%d tokens + valid UID: confirms the ID was checked" % tokens,
+                  "account ID has been checked" in text, repr(text))
+            check("%d tokens + valid UID: quotes the $%d threshold" % (tokens, COST),
+                  ("<b>$%d</b>" % COST) in text, repr(text))
+            check("%d tokens + valid UID: invites another ID send" % tokens,
+                  "send your account id here again" in text.lower(), repr(text))
             check("%d tokens + valid UID: stays armed" % tokens,
                   state.state == bot_mod.Premium.waiting_uid, str(state.state))
             assert_game_only("%d tokens + valid uid" % tokens, text)
@@ -294,7 +344,7 @@ async def main():
             check("%d tokens: a second send does not claim a fresh unlock" % tokens,
                   "Premium Unlocked" not in text, repr(text[:60]))
     finally:
-        bot_mod._verify_game_uid = real_verify
+        bot_mod._verify_account_id = real_verify
 
     # --- an already-Premium user cannot unlock again ------------------------
     # Distinct from the "second send" checks above: this user holds Premium
@@ -582,10 +632,10 @@ async def main():
 
     # The game-UID check itself must be self-contained for the same reason.
     verify_fn = _code_only(
-        bot_src[bot_src.index("async def _verify_game_uid"):
+        bot_src[bot_src.index("async def _verify_account_id"):
                 bot_src.index("@dp.message(Premium.waiting_uid)")])
     for banned in ("panelbot", "db.", "deposit", "verified"):
-        check("_verify_game_uid never touches %r" % banned,
+        check("_verify_account_id never touches %r" % banned,
               banned not in verify_fn.lower(), verify_fn)
 
     # Registration order is load-bearing: aiogram dispatches in definition
@@ -623,7 +673,7 @@ async def main():
         for f in FAILURES:
             print("  FAILED: " + f)
         return 1
-    print("PASS - Premium unlocks for game tokens only, atomically.")
+    print("PASS - Premium unlock flow verifies every ID and unlocks atomically.")
     return 0
 
 

@@ -896,15 +896,17 @@ async def menu_premium(cb: CallbackQuery, bot: Bot, state: FSMContext):
     balance = await db.game_tokens(tg_id)
 
     if premium:
-        # Nothing to unlock, so no UID is asked for and no state is armed.
+        # Nothing to unlock, so no ID is asked for and no state is armed.
         await state.clear()
-        text = config.MSG_PREMIUM_ALREADY.format(
-            limit=config.daily_limit(True), balance=balance)
+        text = config.MSG_PREMIUM_ALREADY.format(limit=config.daily_limit(True))
     else:
+        # tokens_needed() still decides WHICH screen is shown - the threshold
+        # calculation is unchanged. The copy no longer prints the shortfall, so
+        # only the configured threshold is rendered.
         needed = config.tokens_needed(balance)
         template = (config.MSG_PREMIUM_READY if needed == 0
                     else config.MSG_PREMIUM_SHORT)
-        text = template.format(balance=balance, needed=needed)
+        text = template.format(cost=config.PREMIUM_UNLOCK_COST)
         await state.set_state(Premium.waiting_uid)
     await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
@@ -1032,22 +1034,24 @@ async def _run_verification(bot, tg_id, uid):
         await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK, _register_btn())
     return False
 
-async def _verify_game_uid(tg_id, uid):
-    """Check one game UID. Returns True when it is valid.
+async def _verify_account_id(tg_id, account_id):
+    """Check one account ID. Returns True when it is valid.
 
-    This is the Premium flow's OWN check and it is intentionally self-contained:
-    it never calls panelbot, never reads users.verified, users.uid or
-    users.deposit, and has nothing to do with the trading-account verification
-    that gates the funnel. A game UID is a game UID.
+    Unchanged in behaviour - this is a FORMAT check (5-15 digits) and nothing
+    more. It is intentionally self-contained: it never calls panelbot, never
+    reads users.verified, users.uid or users.deposit, and has nothing to do
+    with the trading-account verification that gates the funnel. The Premium
+    screens describe this step in real-currency terms; what runs here is the
+    format rule, so do not read the copy as a description of this function.
 
-    It also holds no state of its own - no cache, no memo of the last uid, no
+    It also holds no state of its own - no cache, no memo of the last id, no
     "already checked" flag. Every call does the full check from scratch, which
-    is what makes a repeated UID verify again instead of being waved through.
+    is what makes a repeated ID verify again instead of being waved through.
     """
-    uid = (uid or "").strip()
-    ok = bool(UID_RE.fullmatch(uid))
-    logging.info("GAME UID CHECK tg_id=%s uid=%r -> %s", tg_id, uid[:16],
-                 "VALID" if ok else "INVALID")
+    account_id = (account_id or "").strip()
+    ok = bool(UID_RE.fullmatch(account_id))
+    logging.info("ACCOUNT ID CHECK tg_id=%s id=%r -> %s", tg_id,
+                 account_id[:16], "VALID" if ok else "INVALID")
     return ok
 
 # MUST stay above the Reg.waiting_uid handler and uid_anytime below: aiogram
@@ -1064,17 +1068,17 @@ async def premium_uid(m: Message, bot: Bot, state: FSMContext):
         pass
 
     # Fresh verification on EVERY message, unconditionally. There is no check
-    # of users.verified, no comparison against the previously sent uid and no
-    # one-time flag anywhere on this path: the third send of the same UID runs
+    # of users.verified, no comparison against the previously sent id and no
+    # one-time flag anywhere on this path: the third send of the same ID runs
     # exactly the same check as the first.
-    if not await _verify_game_uid(tg_id, uid):
+    if not await _verify_account_id(tg_id, uid):
         # Re-armed, so resending is a working retry with no attempt limit.
         await state.set_state(Premium.waiting_uid)
-        await render(bot, tg_id, None, config.MSG_GAME_UID_INVALID,
+        await render(bot, tg_id, None, config.MSG_ACCOUNT_ID_INVALID,
                      config.UNLOCK_KB)
         return
 
-    # UID accepted. The spend is still the single gated UPDATE - the check
+    # ID accepted. The spend is still the single gated UPDATE - the check
     # above decides whether we ATTEMPT it, never whether it succeeds, so the
     # atomicity of the deduction is exactly what it was.
     cost = config.PREMIUM_UNLOCK_COST
@@ -1088,14 +1092,13 @@ async def premium_uid(m: Message, bot: Bot, state: FSMContext):
     elif premium:
         # Already Premium - the statement matched no row, so nothing was spent.
         await state.clear()
-        text = config.MSG_PREMIUM_ALREADY.format(
-            limit=config.daily_limit(True), balance=balance)
+        text = config.MSG_PREMIUM_ALREADY.format(limit=config.daily_limit(True))
     else:
-        # Valid UID, not enough tokens. Stay armed so the user can send the UID
-        # again once they have earned the rest, and check it again when they do.
+        # Valid ID, threshold not met. Stay armed so the user can send the ID
+        # again, and check it again when they do.
         await state.set_state(Premium.waiting_uid)
         text = config.MSG_PREMIUM_STILL_SHORT.format(
-            balance=balance, needed=config.tokens_needed(balance))
+            cost=config.PREMIUM_UNLOCK_COST)
     await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
 @dp.message(Reg.waiting_uid)
