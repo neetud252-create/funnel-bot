@@ -164,20 +164,35 @@ def main():
           gate["photo"] == "gate", repr(gate.get("photo")))
 
     # --- nothing else moved --------------------------------------------------
-    # The gate's ids must not have leaked onto another screen, and the screens
-    # either side of it in the funnel must still be intact.
+    # The gate's ids must not have leaked onto another screen by accident, and
+    # the screens either side of it in the funnel must still be intact.
+    #
+    # DELIBERATE SHARING, allowlisted below rather than silently permitted: the
+    # results screen's "Get access" button was given the same padlock id on
+    # purpose. Listing it here keeps the check meaningful - any OTHER screen
+    # picking up a gate id still fails - while recording that this one pairing
+    # was a decision. Remove the entry if that button is ever restyled.
     print("\n[gate] no other screen or button changed")
     gate_ids = {i for _, i, _ in CAPTION_EMOJI} | {"5397916757333654639",
                                                   "5260463209562776385"}
+    ALLOWED_SHARING = {("results", "5296369303661067030")}
     for key, screen in config.SCREENS.items():
         if key == "gate":
             continue
         for row in (screen.get("kb") or []):
             for item in row:
                 icon = item[3] if len(item) > 3 else None
+                if (key, icon) in ALLOWED_SHARING:
+                    continue
                 check("screen %r button %r did not take a gate icon"
                       % (key, item[0][:18]),
                       icon not in gate_ids, str(icon))
+    # The allowlisted pairing must actually still exist - otherwise this
+    # exemption is dead weight hiding a future leak.
+    check("the allowlisted results/padlock sharing is still real",
+          any(len(b) > 3 and b[3] == "5296369303661067030"
+              for row in config.SCREENS["results"]["kb"] for b in row),
+          str(config.SCREENS["results"]["kb"]))
 
     check("the welcome screen still has its single Start button",
           [b[1] for row in config.SCREENS["welcome"]["kb"] for b in row]

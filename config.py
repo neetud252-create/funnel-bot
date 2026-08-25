@@ -193,6 +193,19 @@ E_AI_LENS    = "5231012545799666522"      # magnifier, setups line
 E_AI_BOLT    = "5274182275704039686"      # bolt, calculations line
 E_AI_DOWN    = "5305522282695768654"      # the finger pointing at the button
 E_AI_RESULTS = "5244837092042750681"      # See real results button icon
+# Results / real feedback screen (SCREENS["results"]) only. The first four are
+# CAPTION entities rendered through pe(); E_RES_LOCK is the first BUTTON's icon
+# and rides on the 4th tuple element, never inside the label.
+#
+# NOTE: three repeat ids used elsewhere - E_RES_POINT matches E_POINT,
+# E_RES_SOUND matches E_GATE_SOUND, and E_RES_LOCK matches E_GATE_LOCK (the
+# gate headline's padlock). Declared separately on purpose, so restyling the
+# gate cannot silently change this screen.
+E_RES_UP    = "5370740716840425754"       # index finger, screenshots line
+E_RES_SHAKE = "5451876269719308814"       # handshake, channel line
+E_RES_POINT = "5415758949129404605"       # pointing finger, handle line
+E_RES_SOUND = "5247187233722607160"       # speaker before the handle
+E_RES_LOCK  = "5296369303661067030"       # Get access button icon
 
 # Main-menu button icons. Unlike the constants above these are NOT rendered
 # through pe(): they go in the 4th slot of a button tuple, which build_kb passes
@@ -423,8 +436,24 @@ SCREENS = {
     },
     "results": {
         "photo": "welcome",
-        "text": "<b>Real feedback from active Go+ traders.</b>\n\n" + pe("5370740716840425754", "\u261d\ufe0f") + " The screenshots above are just a tiny fraction of the results.\n\n\U0001F49F More feedback is published on our trading channel:\n\n\U0001F449 " + CHANNEL_URL,
-        "kb": [[("Get access to Go+", "cb:go:access", "success", "5307843983102204243")],
+        # All four emoji now go through pe(); the two that were plain unicode
+        # literals before are entities like the rest. The handle is
+        # CHANNEL_MENTION, derived from CHANNEL_URL, so the text and the second
+        # button point at the same channel. It is a bare @mention, which
+        # Telegram auto-links - and this screen is a PHOTO caption, which has no
+        # link preview either way, so nothing is lost by dropping the raw URL.
+        #
+        # First button label is the bare words "Get access to Go +"; its padlock
+        # comes from the 4th tuple element. Callback and style are unchanged.
+        # The second button is untouched.
+        "text": ("<b>Real feedback from active Go+ traders.</b>\n\n"
+                 + pe(E_RES_UP, "\u261d\ufe0f")
+                 + " The screenshots above are just a tiny fraction of the results.\n\n"
+                 + pe(E_RES_SHAKE, "\U0001F91D")
+                 + " More feedback is published on our trading channel:\n\n"
+                 + pe(E_RES_POINT, "\U0001F449") + " "
+                 + pe(E_RES_SOUND, "\U0001F50A") + CHANNEL_MENTION),
+        "kb": [[("Get access to Go +", "cb:go:access", "success", E_RES_LOCK)],
                [("Open Telegram channel", "url:" + CHANNEL_URL, "primary", "5220069871072583573")]],
     },
     "access": {
