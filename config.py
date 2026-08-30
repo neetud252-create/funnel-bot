@@ -43,6 +43,33 @@ YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@pocketoption?si=gb2
 # absorbed without a code deploy.
 REF_SUB_PARAM = os.getenv("REF_SUB_PARAM", "click_id")
 
+# The one definition of a tracking-id's shape, used by BOTH halves: bot.py
+# validates the /start deep-link payload with it, and server.py validates the
+# /click endpoint's cid with it. They must agree - a cid the landing page can
+# POST but the bot would reject (or vice versa) is a click that can never be
+# joined to a user - so neither module gets its own copy.
+# 1-64 characters of A-Za-z0-9_- is exactly what Telegram itself will carry in
+# a deep-link payload, which is the tighter of the two constraints.
+REF_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+# --- /click endpoint (server.py) --------------------------------------------
+# Origins allowed to POST /click, comma-separated. The landing page is a
+# browser, so without its origin here the request never leaves it. Empty means
+# no browser may post - server-to-server callers are unaffected.
+CLICK_ORIGINS = [o.strip() for o in os.getenv("CLICK_ORIGIN", "").split(",")
+                 if o.strip()]
+# Per-IP fixed window. /click is public and unauthenticated, so this is the
+# only thing standing between it and an open write endpoint.
+CLICK_RATE_MAX = int(os.getenv("CLICK_RATE_MAX", "20"))
+CLICK_RATE_WINDOW = float(os.getenv("CLICK_RATE_WINDOW", "60"))
+# Ceiling on the in-memory rate-limit table, so rotating source IPs cannot grow
+# it without bound. Expired entries are pruned first; a full table then evicts
+# the oldest window rather than refusing traffic.
+CLICK_RATE_MAX_IPS = int(os.getenv("CLICK_RATE_MAX_IPS", "20000"))
+# Bytes. A beacon carrying the documented fields is a few hundred; this is the
+# point past which a body is not worth reading, let alone parsing.
+CLICK_MAX_BYTES = int(os.getenv("CLICK_MAX_BYTES", "4096"))
+
 
 def ref_url(sub_id, base=None):
     """REF_LINK with the sub-ID attached as REF_SUB_PARAM.

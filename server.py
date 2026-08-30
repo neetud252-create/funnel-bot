@@ -1,11 +1,32 @@
+import json
 import logging
 import os
+import time
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+import config
 import db
 
 app = FastAPI()
 log = logging.getLogger(__name__)
+
+# Browsers will not POST /click cross-origin without these headers. Added only
+# when an origin is configured: an empty list would otherwise register a
+# middleware that permits nothing, and the "not configured" case is worth a
+# line in the log rather than a silent no-op.
+if config.CLICK_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.CLICK_ORIGINS,
+        allow_methods=["POST", "OPTIONS"],
+        allow_headers=["content-type"],
+        max_age=600,
+    )
+else:
+    log.warning("CLICK_ORIGIN is not set - no browser origin may POST /click. "
+                "Set it to the landing page's origin to enable the endpoint.")
 
 # Read at IMPORT time, not per request. bot.py imports this module during
 # startup, so a missing value now stops the process at boot with the reason,
@@ -38,6 +59,90 @@ REG_EVENTS = {"reg", "registration", "signup", "lead"}
 # name (it must stay in step with config.REF_SUB_PARAM, the outbound half);
 # clickid is the one spelling variant worth tolerating.
 SUBID_KEYS = ("click_id", "clickid")
+
+# --- /click rate limiting ---------------------------------------------------
+# ip -> [window_start_monotonic, count]. In memory on purpose: this guards one
+# process, a restart handing out one fresh window is harmless, and a shared
+# store would be a dependency the endpoint does not otherwise need.
+_click_hits = {}
+
+
+def _client_ip(request):
+    """Best available client address for rate limiting.
+
+    Takes the RIGHTMOST X-Forwarded-For entry, not the leftmost. The leftmost
+    is whatever the client itself sent and is trivially forged - keying the
+    limiter on it would let one caller mint a fresh bucket per request. The
+    rightmost is the one the closest proxy appended, so with a single trusted
+    hop in front (Railway's edge) it is the real peer. Falls back to the socket
+    address when the header is absent, which is the direct-connection case.
+    """
+    xff = request.headers.get("x-forwarded-for", "")
+    parts = [p.strip() for p in xff.split(",") if p.strip()]
+    if parts:
+        return parts[-1]
+    client = getattr(request, "client", None)
+    return getattr(client, "host", None) or "unknown"
+
+
+def _rate_ok(ip, now):
+    entry = _click_hits.get(ip)
+    if entry is not None and now - entry[0] < config.CLICK_RATE_WINDOW:
+        entry[1] += 1
+        return entry[1] <= config.CLICK_RATE_MAX
+    if len(_click_hits) >= config.CLICK_RATE_MAX_IPS:
+        _prune_hits(now)
+    _click_hits[ip] = [now, 1]
+    return True
+
+
+def _prune_hits(now):
+    # Expired windows first. If every window is still live the table is under
+    # genuine load, so the oldest are evicted rather than turning a memory
+    # ceiling into a refusal to serve.
+    for k in [k for k, v in _click_hits.items()
+              if now - v[0] >= config.CLICK_RATE_WINDOW]:
+        _click_hits.pop(k, None)
+    if len(_click_hits) >= config.CLICK_RATE_MAX_IPS:
+        for k in sorted(_click_hits, key=lambda k: _click_hits[k][0])[
+                :len(_click_hits) // 4 or 1]:
+            _click_hits.pop(k, None)
+
+
+def _clip(v, limit):
+    # Strings only, truncated. Anything else (a nested object, a number, null)
+    # becomes None rather than being coerced: the columns are TEXT and a
+    # str(dict) would store something no one can parse back.
+    if not isinstance(v, str):
+        return None
+    v = v.strip()
+    return v[:limit] or None
+
+
+def _parse_ts(v):
+    """The landing page's own clock, or None if it did not send a usable one.
+
+    Accepts epoch seconds, epoch milliseconds, or an ISO-8601 string, because
+    which of those a page sends depends on how it was written. Anything else
+    is None rather than a guess - clicks.created_at is our own clock and is
+    what any report should actually trust.
+    """
+    if isinstance(v, bool) or v is None:
+        return None
+    try:
+        if isinstance(v, (int, float)):
+            seconds = float(v)
+            # Current epoch seconds are ~1.7e9 and milliseconds ~1.7e12, so
+            # anything past 1e11 is milliseconds by any reading.
+            if abs(seconds) > 1e11:
+                seconds /= 1000.0
+            return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        if isinstance(v, str):
+            parsed = datetime.fromisoformat(v.strip().replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return None
+    return None
 
 
 @app.get("/")
@@ -168,3 +273,83 @@ async def _probe_attribution(m, trader_id, event, amount):
                     "capture", sub_id)
     except Exception:
         log.exception("postback: attribution probe failed for sub_id=%r", sub_id)
+
+
+@app.post("/click")
+async def click(request: Request):
+    """Landing-page click beacon. Public, unauthenticated, write-only.
+
+    Answers 204 with an empty body in the success case because the caller is
+    sendBeacon, which discards the response either way. 400 and 429 are
+    returned rather than folded into 204 so the endpoint is observable from the
+    outside - the browser ignores them, but a person testing it does not.
+
+    NOTHING from the request is ever logged verbatim except the cid, and the
+    cid only after it has matched config.REF_CODE_RE. Everything else is
+    reported as a length or a count. This is unauthenticated input: it reaches
+    the log, and the log is read.
+    """
+    now = time.monotonic()
+    ip = _client_ip(request)
+    if not _rate_ok(ip, now):
+        # The IP is logged, the payload is not - the address is the only thing
+        # worth having here and it is not attacker-authored free text.
+        log.warning("/click rate limited ip=%s (over %s per %ss)",
+                    ip, config.CLICK_RATE_MAX, config.CLICK_RATE_WINDOW)
+        return Response(status_code=429)
+
+    # Read the body ourselves rather than declaring a JSON body parameter.
+    # sendBeacon sends a Blob whose type is usually text/plain (the only JSON
+    # it can send without a preflight it does not support), so a handler that
+    # required application/json would reject the real caller.
+    raw = await request.body()
+    if len(raw) > config.CLICK_MAX_BYTES:
+        log.warning("/click oversized body ip=%s bytes=%d limit=%d",
+                    ip, len(raw), config.CLICK_MAX_BYTES)
+        return Response(status_code=400)
+    try:
+        data = json.loads(raw or b"{}")
+    except (ValueError, UnicodeDecodeError):
+        log.warning("/click unparseable body ip=%s bytes=%d", ip, len(raw))
+        return Response(status_code=400)
+    if not isinstance(data, dict):
+        log.warning("/click body is %s, not an object, ip=%s",
+                    type(data).__name__, ip)
+        return Response(status_code=400)
+
+    cid = data.get("cid")
+    if not isinstance(cid, str) or not config.REF_CODE_RE.match(cid):
+        # Length and type only. An invalid cid is exactly the input that must
+        # not be echoed, since it is the field an attacker controls most
+        # directly and the one most likely to be crafted.
+        log.warning("/click rejected cid ip=%s type=%s len=%s", ip,
+                    type(cid).__name__,
+                    len(cid) if isinstance(cid, str) else "n/a")
+        return Response(status_code=400)
+
+    utm = data.get("utm")
+    if not isinstance(utm, dict):
+        utm = {}
+    try:
+        stored = await db.save_click(
+            cid,
+            event_id=_clip(data.get("event_id"), 128),
+            fbclid=_clip(data.get("fbclid"), 512),
+            fbp=_clip(data.get("fbp"), 128),
+            client_ts=_parse_ts(data.get("ts")),
+            referrer=_clip(data.get("referrer"), 1024),
+            utm_source=_clip(utm.get("source"), 128),
+            utm_campaign=_clip(utm.get("campaign"), 128),
+            utm_adset=_clip(utm.get("adset"), 128),
+            utm_ad=_clip(utm.get("ad"), 128),
+            raw=data,
+        )
+    except Exception:
+        # 204 even so. The landing page cannot act on a failure and a retry
+        # would only repeat it; the exception is on record for us instead.
+        log.exception("/click could not store cid=%s", cid)
+        return Response(status_code=204)
+
+    log.info("/click cid=%s ip=%s %s", cid, ip,
+             "stored" if stored else "duplicate, first write kept")
+    return Response(status_code=204)

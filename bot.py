@@ -32,7 +32,11 @@ UID_RE = re.compile(r"\d{5,15}")
 # come from a real deep link and is dropped rather than stored. Filtering at
 # the edge is also what keeps arbitrary user text out of the log line in
 # _capture_ref() - the payload is echoed there, and only a matched string is.
-REF_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+#
+# Shared with server.py's /click endpoint, which validates the landing page's
+# cid against the same pattern: a cid that one half accepts and the other
+# rejects is a click that can never be joined to a user.
+REF_RE = config.REF_CODE_RE
 
 OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}

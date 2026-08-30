@@ -96,6 +96,36 @@ CREATE TABLE IF NOT EXISTS postbacks (
     raw        JSONB,
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Landing-page clicks, posted to /click before the user ever opens Telegram.
+-- cid is the SAME value the landing page then puts in the deep link, so
+-- clicks.cid and users.ref_code are two sides of one join: this row is written
+-- first, and users.ref_code appears only if that person goes on to press start.
+-- No foreign key, deliberately - most clicks never become users, and a click
+-- must be storable with no users row in sight.
+-- The Meta fields (event_id/fbclid/fbp) are kept as sent, for a later
+-- Conversions API match; nothing reads them yet.
+-- client_ts is the LANDING PAGE's clock and may be wrong, absent or a lie.
+-- created_at is ours and is the one to trust when the two disagree.
+-- raw keeps the whole posted body, on the same reasoning as postbacks.raw
+-- above: the extracted columns are a guess at what matters, and the only way
+-- to correct that guess later is to still have the original.
+CREATE TABLE IF NOT EXISTS clicks (
+    cid          TEXT PRIMARY KEY,
+    event_id     TEXT,
+    fbclid       TEXT,
+    fbp          TEXT,
+    client_ts    TIMESTAMPTZ,
+    referrer     TEXT,
+    utm_source   TEXT,
+    utm_campaign TEXT,
+    utm_adset    TEXT,
+    utm_ad       TEXT,
+    raw          JSONB,
+    created_at   TIMESTAMPTZ DEFAULT now()
+);
+-- Reporting reads clicks by arrival, never by primary key alone.
+CREATE INDEX IF NOT EXISTS clicks_created_at_idx ON clicks (created_at);
 """
 
 async def connect():
@@ -138,6 +168,31 @@ async def save_ref_code(tg_id: int, code: str):
             RETURNING ref_code
         """, tg_id, code)
         return row is not None
+
+async def save_click(cid: str, *, event_id=None, fbclid=None, fbp=None,
+                     client_ts=None, referrer=None, utm_source=None,
+                     utm_campaign=None, utm_adset=None, utm_ad=None, raw=None):
+    # First write wins, and that is a security property, not just a tidiness
+    # one: /click is public and unauthenticated, so DO NOTHING is what stops
+    # anyone who learns a cid from overwriting the real click behind it with
+    # their own. It also makes the endpoint idempotent, which matters because
+    # sendBeacon can deliver the same beacon more than once.
+    # Returns True when this call is the one that stored the row.
+    async with pool.acquire() as c:
+        row = await c.fetchrow("""
+            INSERT INTO clicks (cid, event_id, fbclid, fbp, client_ts, referrer,
+                                utm_source, utm_campaign, utm_adset, utm_ad, raw)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+            ON CONFLICT (cid) DO NOTHING
+            RETURNING cid
+        """, cid, event_id, fbclid, fbp, client_ts, referrer,
+             utm_source, utm_campaign, utm_adset, utm_ad,
+             json.dumps(raw) if raw is not None else None)
+        return row is not None
+
+async def click_by_cid(cid: str):
+    async with pool.acquire() as c:
+        return await c.fetchrow("SELECT * FROM clicks WHERE cid=$1", cid)
 
 async def user_by_ref_code(code: str):
     # Reverse of save_ref_code, for the postback attribution probe in server.py.
