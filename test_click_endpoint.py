@@ -123,6 +123,22 @@ def _install_stub_modules():
         setattr(db, fn.__name__, fn)
     sys.modules["db"] = db
 
+    # server.py imports httpx for the Meta send. Nothing on the /click path
+    # uses it, so a stand-in is enough to import the module; a call through it
+    # here would be a bug and is made to say so.
+    try:
+        import httpx  # noqa: F401
+    except ImportError:
+        httpx = types.ModuleType("httpx")
+
+        class AsyncClient:
+            def __init__(self, *a, **k):
+                raise AssertionError(
+                    "/click must not make an outbound HTTP request")
+
+        httpx.AsyncClient = AsyncClient
+        sys.modules["httpx"] = httpx
+
     try:
         import fastapi  # noqa: F401
         real = True
@@ -218,12 +234,14 @@ BEACON = {
     "fbp": "fb.1.1690000000000.1234567890",
     "ts": 1756500000000,
     "referrer": "https://www.facebook.com/",
+    "page_url": "https://landing.example/go?utm_source=fb&fbclid=IwAR0abcdefghij",
     "utm": {"source": "fb", "campaign": "go-plus-aug",
             "adset": "lookalike-1", "ad": "video-a"},
 }
 
 OPTIONAL_COLUMNS = ("event_id", "fbclid", "fbp", "client_ts", "referrer",
-                    "utm_source", "utm_campaign", "utm_adset", "utm_ad")
+                    "page_url", "utm_source", "utm_campaign", "utm_adset",
+                    "utm_ad")
 
 
 async def main_async(server, config, db, records):
@@ -257,6 +275,9 @@ async def main_async(server, config, db, records):
               str(row))
         check("referrer is kept", row["referrer"] == "https://www.facebook.com/",
               str(row))
+        check("page_url is kept, and is not the referrer",
+              row["page_url"] == BEACON["page_url"]
+              and row["page_url"] != row["referrer"], str(row))
         check("all four utm fields land in their own columns",
               (row["utm_source"], row["utm_campaign"], row["utm_adset"],
                row["utm_ad"]) == ("fb", "go-plus-aug", "lookalike-1", "video-a"),

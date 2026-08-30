@@ -1,4 +1,6 @@
+import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -7,6 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
 import config
 import db
 
@@ -28,6 +31,17 @@ if config.CLICK_ORIGINS:
 else:
     log.warning("CLICK_ORIGIN is not set - no browser origin may POST /click. "
                 "Set it to the landing page's origin to enable the endpoint.")
+
+if not config.META_CAPI_TOKEN:
+    log.info("META_CAPI_TOKEN is not set - CompleteRegistration will not be "
+             "sent to Meta. Everything else is unaffected.")
+elif not config.META_EVENT_SOURCE_URL:
+    # Meta rejects a website event with no event_source_url, so this would fail
+    # on every send. Better said once at boot than once per registration.
+    log.warning("META_CAPI_TOKEN is set but META_EVENT_SOURCE_URL is not - Meta "
+                "requires event_source_url for action_source=website. Clicks "
+                "carrying their own page_url are fine; any that do not will be "
+                "rejected. Set it to the landing page URL.")
 
 # Read at IMPORT time, not per request. bot.py imports this module during
 # startup, so a missing value now stops the process at boot with the reason,
@@ -195,6 +209,9 @@ def _norm_amount(v):
 
 @app.api_route("/postback/{secret}", methods=["GET", "POST"])
 async def postback(secret: str, request: Request):
+    # Stamped before any parsing, so the Meta event_time is when the postback
+    # actually arrived rather than whenever the send task happened to start.
+    arrival = int(time.time())
     # Wrong secret: 200 so the affiliate system doesn't retry, but do nothing.
     if secret != POSTBACK_SECRET:
         return {"status": "forbidden"}
@@ -235,7 +252,7 @@ async def postback(secret: str, request: Request):
         if trader_id is not None:
             ev = str(event) if event is not None else None
             await db.upsert_trader(str(trader_id), ev, amount)
-        await _probe_attribution(m, trader_id, event, amount)
+        await _probe_attribution(m, trader_id, event, amount, arrival)
     except Exception:
         # The 200 is still unconditional, but the reason is now on record
         # rather than dropped - a wrong macro name used to look identical to a
@@ -245,14 +262,178 @@ async def postback(secret: str, request: Request):
     return {"status": "ok"}
 
 
-async def _probe_attribution(m, trader_id, event, amount):
-    """Report whether this postback's sub-ID resolves to a users row.
+# --- Meta Conversions API ---------------------------------------------------
+# Background sends in flight. asyncio holds only a WEAK reference to a bare
+# task, so a task nobody keeps can be collected mid-request and the event
+# silently never leaves; these references are what stop that.
+_capi_tasks = set()
 
-    READ ONLY, and deliberately so: nothing here writes, verifies, or grants
-    anything. It exists to prove the sub-ID survives the round trip from the
-    outbound REF_LINK to the panel and back before any behaviour is wired to
-    it. Its own failures are logged and swallowed - an attribution probe must
-    never be the reason a postback is not acknowledged.
+
+def _fire_and_forget(coro):
+    task = asyncio.create_task(coro)
+    _capi_tasks.add(task)
+    task.add_done_callback(_capi_tasks.discard)
+    return task
+
+
+def _row_get(row, name, default=None):
+    # asyncpg Records and the plain dicts the tests hand back both index by
+    # column name, but only one of them tolerates a missing key.
+    try:
+        value = row[name]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def _hashed_external_id(tg_id):
+    # Meta wants external_id hashed. The tg_id is normalised to a bare decimal
+    # string first, so the same user always hashes to the same value here and
+    # anywhere else this is ever computed.
+    return hashlib.sha256(str(tg_id).strip().encode("utf-8")).hexdigest()
+
+
+def _fbc(click):
+    """The fbc click identifier, or None when this click was organic.
+
+    fb.1.<creation time in ms>.<fbclid> is Meta's format. The timestamp is the
+    landing page's own clock where it sent a usable one, and our clock for the
+    row otherwise - a missing client_ts is common enough (the page may send a
+    malformed ts) that dropping the event over it would lose real conversions.
+    """
+    fbclid = _row_get(click, "fbclid")
+    if not fbclid:
+        return None
+    stamp = _row_get(click, "client_ts") or _row_get(click, "created_at")
+    try:
+        milliseconds = int(stamp.timestamp() * 1000)
+    except (AttributeError, TypeError, ValueError, OSError):
+        milliseconds = int(time.time() * 1000)
+    return "fb.1.%d.%s" % (milliseconds, fbclid)
+
+
+async def _send_capi_registration(cid, tg_id, event_time):
+    """Send one CompleteRegistration for a registration that joined to a click.
+
+    Runs as a background task: the affiliate system's 200 has already gone out
+    by the time this starts, so nothing Meta does can slow that down. Every
+    failure is logged and swallowed for the same reason - there is no caller
+    left to hand an exception to.
+    """
+    if not config.META_CAPI_TOKEN:
+        # Not configured. Said once per event at debug, not warned about: a
+        # deploy that does not use the integration is not misconfigured.
+        log.debug("CAPI: no META_CAPI_TOKEN, not sending for cid=%s", cid)
+        return
+    try:
+        click = await db.click_by_cid(cid)
+    except Exception:
+        log.exception("CAPI: could not read the click row for cid=%s", cid)
+        return
+    if click is None:
+        log.info("CAPI: cid=%s has no click row - the deep link was used "
+                 "without the landing page beacon ever arriving", cid)
+        return
+
+    fbc = _fbc(click)
+    if fbc is None:
+        # Organic traffic. The landing page saw no fbclid, so there is no ad
+        # click to attribute this to and Meta has nothing to match on. Not an
+        # error, and deliberately not a warning.
+        log.info("CAPI: cid=%s carried no fbclid, skipping (organic)", cid)
+        return
+
+    user_data = {"fbc": fbc, "external_id": _hashed_external_id(tg_id)}
+    fbp = _row_get(click, "fbp")
+    if fbp:
+        user_data["fbp"] = fbp
+
+    # The page the visitor was actually on, as the beacon reported it.
+    # META_EVENT_SOURCE_URL only covers the clicks that carry none: rows stored
+    # before the landing page started sending page_url, and beacons that omit
+    # it. Meta rejects a website event with neither.
+    event = {
+        "event_name": "CompleteRegistration",
+        "event_time": event_time,
+        "action_source": "website",
+        "event_source_url": (_row_get(click, "page_url")
+                             or config.META_EVENT_SOURCE_URL),
+        "user_data": user_data,
+    }
+    # The id the browser pixel used for the same click. Sending it is what lets
+    # Meta collapse the two into one event instead of counting the
+    # registration twice; without it there is nothing to deduplicate on.
+    event_id = _row_get(click, "event_id")
+    if event_id:
+        event["event_id"] = event_id
+
+    # The token travels in the BODY, not the query string: a URL reaches access
+    # logs and proxies, and this one would carry a system-user token.
+    payload = {"data": [event], "access_token": config.META_CAPI_TOKEN}
+    if config.META_TEST_EVENT_CODE:
+        payload["test_event_code"] = config.META_TEST_EVENT_CODE
+
+    url = "https://graph.facebook.com/%s/%s/events" % (
+        config.META_API_VERSION, config.META_DATASET_ID)
+    try:
+        async with httpx.AsyncClient(timeout=config.META_CAPI_TIMEOUT) as client:
+            response = await client.post(url, json=payload)
+    except Exception:
+        # Network, DNS, timeout. No payload in the message - it holds the token.
+        log.exception("CAPI: CompleteRegistration for cid=%s could not be sent",
+                      cid)
+        return
+    _log_capi_response(cid, response)
+
+
+def _log_capi_response(cid, response):
+    body = {}
+    try:
+        parsed = response.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:
+        body = {}
+    error = body.get("error") if isinstance(body.get("error"), dict) else {}
+    # fbtrace_id is what Meta support asks for, and it is present on both the
+    # success and the error shape - in different places.
+    trace = error.get("fbtrace_id") or body.get("fbtrace_id")
+    status = getattr(response, "status_code", None)
+    if status == 200 and not error:
+        log.info("CAPI CompleteRegistration OK cid=%s events_received=%s "
+                 "fbtrace_id=%s", cid, body.get("events_received"), trace)
+        return
+    log.error("CAPI CompleteRegistration FAILED cid=%s http=%s code=%s "
+              "subcode=%s type=%s fbtrace_id=%s message=%s",
+              cid, status, error.get("code"), error.get("error_subcode"),
+              error.get("type"), trace,
+              error.get("message") or _body_excerpt(response))
+
+
+def _body_excerpt(response):
+    # Only reached when Meta answered something that was not the documented
+    # error shape - a gateway error page, say. Bounded, because it is unknown
+    # text going into the log.
+    try:
+        return (response.text or "")[:200]
+    except Exception:
+        return "<unreadable>"
+
+
+async def _probe_attribution(m, trader_id, event, amount, arrival=None):
+    """Resolve this postback's sub-ID to a users row and report the outcome.
+
+    Writes NOTHING and still grants nothing: verification remains untouched.
+    The one side effect is outbound - a registration that resolves to a user we
+    hold a click for schedules a CompleteRegistration to Meta, as a background
+    task, so this function returns at the same speed it always did.
+
+    Only the JOIN OK case fires it. JOIN VIA TGID means the user had no
+    ref_code, so sub_id is a tg_id and there is no clicks row keyed by it;
+    there would be nothing to attribute even if it were tried.
+
+    Its own failures are logged and swallowed - an attribution probe must never
+    be the reason a postback is not acknowledged.
     """
     sub_id = _pick(m, SUBID_KEYS)
     if sub_id is None:
@@ -266,6 +447,13 @@ async def _probe_attribution(m, trader_id, event, amount):
         if user is not None:
             log.info("POSTBACK JOIN OK sub_id=%s -> tg_id=%s event=%s amount=%s",
                      sub_id, user["tg_id"], event, amount)
+            if event is not None and str(event).strip().lower() in REG_EVENTS:
+                # Fired, not awaited. Meta is a third party on the far side of
+                # the internet and the affiliate system is waiting on a 200
+                # that must not depend on it.
+                _fire_and_forget(_send_capi_registration(
+                    sub_id, user["tg_id"],
+                    arrival if arrival is not None else int(time.time())))
             return
         # bot.py falls back to the tg_id when a user has no ref_code, so an
         # all-digit sub-ID that matches no code is the expected second case,
@@ -366,6 +554,7 @@ async def _store_click(data, ip, transport):
             fbp=_clip(data.get("fbp"), 128),
             client_ts=_parse_ts(data.get("ts")),
             referrer=_clip(data.get("referrer"), 1024),
+            page_url=_clip(data.get("page_url"), 1024),
             utm_source=_clip(utm.get("source"), 128),
             utm_campaign=_clip(utm.get("campaign"), 128),
             utm_adset=_clip(utm.get("adset"), 128),

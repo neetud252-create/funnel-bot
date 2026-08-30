@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS clicks (
 );
 -- Reporting reads clicks by arrival, never by primary key alone.
 CREATE INDEX IF NOT EXISTS clicks_created_at_idx ON clicks (created_at);
+-- The landing page's OWN url (location.href), which is what Meta wants as
+-- event_source_url. Deliberately not the same thing as referrer above: that
+-- column is where the visitor came FROM, this is the page they arrived at.
+-- Added separately rather than folded into the CREATE above, so a database
+-- that already has the table gains the column instead of silently keeping the
+-- old shape. NULL for every click captured before the beacon started sending
+-- it, which is why the sender still falls back to META_EVENT_SOURCE_URL.
+ALTER TABLE clicks ADD COLUMN IF NOT EXISTS page_url TEXT;
 """
 
 async def connect():
@@ -170,8 +178,9 @@ async def save_ref_code(tg_id: int, code: str):
         return row is not None
 
 async def save_click(cid: str, *, event_id=None, fbclid=None, fbp=None,
-                     client_ts=None, referrer=None, utm_source=None,
-                     utm_campaign=None, utm_adset=None, utm_ad=None, raw=None):
+                     client_ts=None, referrer=None, page_url=None,
+                     utm_source=None, utm_campaign=None, utm_adset=None,
+                     utm_ad=None, raw=None):
     # First write wins, and that is a security property, not just a tidiness
     # one: /click is public and unauthenticated, so DO NOTHING is what stops
     # anyone who learns a cid from overwriting the real click behind it with
@@ -181,11 +190,12 @@ async def save_click(cid: str, *, event_id=None, fbclid=None, fbp=None,
     async with pool.acquire() as c:
         row = await c.fetchrow("""
             INSERT INTO clicks (cid, event_id, fbclid, fbp, client_ts, referrer,
-                                utm_source, utm_campaign, utm_adset, utm_ad, raw)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+                                page_url, utm_source, utm_campaign, utm_adset,
+                                utm_ad, raw)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
             ON CONFLICT (cid) DO NOTHING
             RETURNING cid
-        """, cid, event_id, fbclid, fbp, client_ts, referrer,
+        """, cid, event_id, fbclid, fbp, client_ts, referrer, page_url,
              utm_source, utm_campaign, utm_adset, utm_ad,
              json.dumps(raw) if raw is not None else None)
         return row is not None

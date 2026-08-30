@@ -70,6 +70,37 @@ CLICK_RATE_MAX_IPS = int(os.getenv("CLICK_RATE_MAX_IPS", "20000"))
 # point past which a body is not worth reading, let alone parsing.
 CLICK_MAX_BYTES = int(os.getenv("CLICK_MAX_BYTES", "4096"))
 
+# --- Meta Conversions API (server.py) ---------------------------------------
+# Server-side CompleteRegistration, sent when an affiliate registration
+# postback joins back to a user we have a click for. The browser-side pixel and
+# this share event_id so Meta deduplicates them into one event.
+#
+# The dataset is the Go+ pixel. The token is a system-user access token and is
+# the ONE secret in this feature: it is sent in the request body, never in a
+# URL, and never logged. Empty token means the integration is off - no event is
+# built and nothing is sent - which is the correct default for a deploy that
+# has not been given one.
+META_DATASET_ID = os.getenv("META_DATASET_ID", "2016650609225629")
+META_CAPI_TOKEN = os.getenv("META_CAPI_TOKEN", "").strip()
+# Graph API version. Pinned rather than left unversioned, because an
+# unversioned call silently follows Meta's rollouts; set it to whatever version
+# the app targets in Events Manager.
+META_API_VERSION = os.getenv("META_API_VERSION", "v21.0")
+# FALLBACK event_source_url. Meta requires one for action_source "website",
+# and the real value is per click: the landing page sends its own location.href
+# as page_url and it is stored on the clicks row, which is what the sender
+# prefers. This covers the clicks that have none - everything captured before
+# the beacon started sending it, and any beacon that omits it.
+# Note clicks.referrer is NOT a candidate: that column holds where the visitor
+# came FROM (facebook.com), not the page they landed on.
+META_EVENT_SOURCE_URL = (os.getenv("META_EVENT_SOURCE_URL", "").strip()
+                         or (CLICK_ORIGINS[0] if CLICK_ORIGINS else ""))
+# Seconds. The send is fired as a background task and never blocks the 200 to
+# the affiliate system, so this only bounds how long that task may linger.
+META_CAPI_TIMEOUT = float(os.getenv("META_CAPI_TIMEOUT", "10"))
+# Set while validating in Events Manager's Test Events tab; unset in production.
+META_TEST_EVENT_CODE = os.getenv("META_TEST_EVENT_CODE", "").strip()
+
 
 def ref_url(sub_id, base=None):
     """REF_LINK with the sub-ID attached as REF_SUB_PARAM.
