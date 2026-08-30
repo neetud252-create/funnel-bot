@@ -142,6 +142,16 @@ def _install_stub_modules():
         if username is not None:
             row["username"] = username
 
+    # Mirrors save_ref_code's first-touch WHERE: fills a NULL only, and reports
+    # whether this call is the one that stored the code.
+    async def save_ref_code(tg_id, code):
+        row = _u(tg_id)
+        if row.get("ref_code") is not None:
+            return False
+        row["ref_code"] = code
+        row["ref_code_at"] = "now"
+        return True
+
     # Mirrors _RESET_SQL: one row, every column back to its SCHEMA default,
     # including the ones upstream added to the user lifecycle.
     async def reset_user(tg_id):
@@ -152,6 +162,7 @@ def _install_stub_modules():
             "signals_used_today": 0, "last_reset_date": None,
             "is_premium": False, "ui_msg_id": None, "album_ids": None,
             "nudge_msg_id": None, "last_checked": None,
+            "ref_code": None, "ref_code_at": None,
         })
         return True
 
@@ -189,7 +200,8 @@ def _install_stub_modules():
     db._media_cache = {}
 
     for fn in (get_user, set_ui_msg, set_album, signal_state, consume_signal,
-               set_premium, is_premium, touch_user, reset_user, unverify,
+               set_premium, is_premium, touch_user, save_ref_code,
+               reset_user, unverify,
                set_nudge_msg, uid_owners, save_uid_only, set_verified,
                load_media_cache, save_media_cache, drop_media_cache,
                unlock_premium, game_tokens, add_tokens, set_tokens):
@@ -198,6 +210,15 @@ def _install_stub_modules():
 
     panelbot = types.ModuleType("panelbot")
     panelbot.PanelUnavailable = type("PanelUnavailable", (Exception,), {})
+
+    # The real external verification entry point. Tests that exercise the
+    # verification path replace this with their own (usually a counting proxy);
+    # the default mirrors a silent panel, which is what every other test in
+    # this suite expects if it somehow reaches here.
+    async def lookup_trader(uid):
+        raise panelbot.PanelUnavailable("disabled")
+
+    panelbot.lookup_trader = lookup_trader
     sys.modules["panelbot"] = panelbot
 
     server = types.ModuleType("server")

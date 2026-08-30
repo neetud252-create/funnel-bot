@@ -1,4 +1,5 @@
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import re
 from decimal import Decimal
 
@@ -28,10 +29,34 @@ CHANNEL_MENTION = _channel_mention(CHANNEL_URL)
 # TODO: swap the three PLACEHOLDER links below for the real ones (set REF_LINK,
 # SUPPORT, VIP_LINK, YOUTUBE_URL in the Railway service variables).
 REF_LINK    = os.getenv("REF_LINK", "https://example.com/PLACEHOLDER_REF")
+
 SUPPORT     = os.getenv("SUPPORT", "https://t.me/flashhher")   # TODO: real support handle (was @go_plus_supportbot)
 SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
 VIP_LINK    = os.getenv("VIP_LINK", "https://t.me/PLACEHOLDER_VIP")          # TODO: real VIP team invite
 YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@pocketoption?si=gb2BpGjz2SzhMOH6s")  # TODO: real YouTube channel
+
+# Query parameter the affiliate panel reads back as the sub-ID. server.py's
+# TRADER_KEYS/SUBID_KEYS are still best guesses, and this is the outbound half
+# of the same unknown: it MUST match the macro the panel actually echoes into
+# its postback, or the join in server.py will never find a row. Env-overridable
+# so the name can be corrected without a deploy of new code.
+REF_SUB_PARAM = os.getenv("REF_SUB_PARAM", "sub_id")
+
+
+def ref_url(sub_id, base=None):
+    """REF_LINK with the sub-ID attached as REF_SUB_PARAM.
+
+    Parsed rather than concatenated: REF_LINK may already carry a query string
+    (utm_*, campaign ids), so a bare "?" + param would corrupt it. Any existing
+    value for the same parameter is dropped rather than duplicated, which keeps
+    the function idempotent - passing an already-subbed URL back in returns the
+    same URL with the new sub-ID, not two of them.
+    """
+    parts = urlsplit(REF_LINK if base is None else base)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+             if k != REF_SUB_PARAM]
+    query.append((REF_SUB_PARAM, str(sub_id)))
+    return urlunsplit(parts._replace(query=urlencode(query)))
 ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 
 # Group F verification thresholds.
@@ -57,6 +82,41 @@ ENABLE_AUTO_RETRY = os.getenv("ENABLE_AUTO_RETRY", "").strip().lower() in ("1", 
 # account IDs can stack into a FloodWait that disables verification for
 # everyone. This throttles per user before the shared queue is ever touched.
 UID_LOOKUP_COOLDOWN = int(os.getenv("UID_LOOKUP_COOLDOWN", "20"))
+
+# Outer ceiling on ONE verification attempt, measured around the whole
+# _run_verification call. panelbot already caps the panel round-trip itself
+# (HARD_TIMEOUT), so this is the backstop for the part that timeout does not
+# cover: waiting for panelbot's shared lock when other lookups are queued
+# ahead. Without it a wedged holder would keep a user's in-flight entry alive
+# forever and block their next attempt. Generous on purpose - it must not fire
+# on a merely slow panel.
+UID_VERIFY_TIMEOUT = int(os.getenv("UID_VERIFY_TIMEOUT", "90"))
+
+# --- Verification outcomes --------------------------------------------------
+# _run_verification used to answer a bare True/False, which made "the panel is
+# unreachable" indistinguishable from "this account does not qualify". Only the
+# first of those is worth retrying; retrying the second would re-query the panel
+# on a settled answer. These four names are what keeps them apart.
+VERIFY_GRANTED      = "granted"        # campaign matched and the deposit clears
+VERIFY_NEED_DEPOSIT = "need_deposit"   # matched, deposit under MIN_DEPOSIT
+VERIFY_WRONG_LINK   = "wrong_link"     # not found, or a different campaign
+VERIFY_TEMPORARY    = "temporary"      # panel unavailable / timeout / flood etc
+
+# The two settled refusals. A settled answer is never retried: the panel has
+# told us something true about the account, and asking again cannot change it.
+VERIFY_NOT_ELIGIBLE = (VERIFY_NEED_DEPOSIT, VERIFY_WRONG_LINK)
+
+# Internal retry for VERIFY_TEMPORARY only, inside the one verification task.
+# The user never resends: retries happen behind the same in-flight entry, so a
+# transient panel problem costs them nothing.
+#
+# RETRIES is EXTRA attempts after the first, so 2 means at most 3 lookups.
+# Backoff doubles per attempt. "floodwait" gets its own, much longer floor:
+# that reason means the panel has ALREADY rate-limited us, and retrying it
+# quickly is what turns a short block into a long one.
+UID_VERIFY_RETRIES = int(os.getenv("UID_VERIFY_RETRIES", "2"))
+UID_VERIFY_BACKOFF = float(os.getenv("UID_VERIFY_BACKOFF", "3"))
+UID_VERIFY_FLOOD_BACKOFF = float(os.getenv("UID_VERIFY_FLOOD_BACKOFF", "30"))
 
 # Chat the boot-time media warm sends throwaway uploads to (and deletes again).
 # Telegram issues a file_id only in response to an actual send, so warming needs
@@ -543,7 +603,7 @@ SCREENS = {
         "text": (pe(E_REG_LOCK, "\U0001F510")
                  + "To access Go+, register for a new Pocket Option account "
                  "using my link:\n\n"
-                 + pe(E_REG_LINK, "\U0001F517") + " https://shorturl.at/2fu2t\n\n"
+                 + pe(E_REG_LINK, "\U0001F517") + " {ref}\n\n"
                  + pe(E_REG_ARROW, "➡️")
                  + "Once you register, send your new account ID in the text "
                  "box below " + pe(E_REG_DOWN, "\U0001F447") + "\n\n"
@@ -551,7 +611,15 @@ SCREENS = {
                  + "Please note: Your ID must contain numbers only "
                  "\U00002014 no extra symbols " + pe(E_REG_DOWNARR, "⬇️") + "\n\n"
                  "Example: 123456789"),
-        "kb": [[("Register & Get Access", "url:https://shorturl.at/2fu2t", "success", E_REG_BTN_REG)],
+        # {ref} in the CAPTION is filled per user by _show_register in bot.py,
+        # which is why show() routes this screen there the way it routes the
+        # menu. The BUTTON deliberately stores the plain REF_LINK instead of a
+        # placeholder: build_kb DROPS a button whose URL fails _URL_OK, so an
+        # unformatted "{ref}" here would silently delete the single most
+        # important button in the funnel. Storing the real link means the worst
+        # case is an untracked click, not a missing button - _show_register
+        # swaps in the sub-ID version on the way out.
+        "kb": [[("Register & Get Access", "url:" + REF_LINK, "success", E_REG_BTN_REG)],
                [("How to Register", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary", E_REG_BTN_HOW)],
                [("Support", "url:" + SUPPORT_URL, None, E_REG_BTN_SUP)]],
     },
@@ -1019,7 +1087,21 @@ MSG_TEST_MODE = ""
 MSG_DELAYED = T_CLOCK + " <b>Verification is taking a moment.</b>\n\nWe're still checking your account. You'll be notified here automatically as soon as it's confirmed \U00002014 or you can send your account ID again shortly."
 
 # Sent when a user re-sends their account ID inside UID_LOOKUP_COOLDOWN.
+#
+# This now fires only BETWEEN attempts. While a check is actually running, the
+# in-flight guard in bot.py answers first with MSG_UID_IN_FLIGHT, which does
+# not ask for a resend - that pairing was the loop users were stuck in.
 MSG_UID_COOLDOWN = T_CLOCK + " <b>One moment.</b>\n\nYour last check is still going through. Please wait about {seconds}s, then send your account ID again."
+
+# Sent when the SAME account ID arrives while its check is still running. The
+# point of the wording is that there is nothing for the user to do: no resend,
+# no waiting instruction, no second lookup. The verdict lands in this chat on
+# its own when the running check finishes.
+MSG_UID_IN_FLIGHT = T_CLOCK + " <b>Already checking.</b>\n\nWe are verifying <code>{uid}</code> right now \U00002014 no need to send it again. The result will appear here automatically."
+
+# Sent when a DIFFERENT account ID arrives mid-check. The running check stays
+# authoritative; nothing is cancelled and no second lookup is started.
+MSG_UID_OTHER_PENDING = T_CLOCK + " <b>One check at a time.</b>\n\nWe are still verifying <code>{uid}</code>. Wait for that result before sending a different account ID."
 
 # Last-resort reply when the UID handler itself fails (see capture_uid). Plain
 # text, no buttons, so it can't fail for the same reason the handler did.

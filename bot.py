@@ -1,7 +1,7 @@
 import asyncio, hashlib, os, logging, random, re, time
 from decimal import Decimal
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
@@ -27,6 +27,13 @@ class Premium(StatesGroup):
 
 UID_RE = re.compile(r"\d{5,15}")
 
+# Telegram deep-link payload: t.me/<bot>?start=<code>. Telegram itself only
+# ever delivers 1-64 characters of A-Za-z0-9_- here, so anything else did not
+# come from a real deep link and is dropped rather than stored. Filtering at
+# the edge is also what keeps arbitrary user text out of the log line in
+# _capture_ref() - the payload is echoed there, and only a matched string is.
+REF_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
 OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
 _video_cache = {}
@@ -38,6 +45,19 @@ _expiry_choice = {}
 # purpose: it only has to survive between two taps, and a restart handing out
 # one extra lookup is harmless.
 _uid_lookup_at = {}
+# Single-flight verification: tg_id -> {"uid": str, "task": asyncio.Task}.
+#
+# One entry means one real panel lookup is in progress for that user. A second
+# message arriving while it is there never starts another - it awaits the same
+# task and reuses its result. This is what stops a user's own duplicate sends
+# from queueing extra lookups behind panelbot's lock, and it is why they no
+# longer have to resend an ID they already sent.
+#
+# Keyed by tg_id, not by (tg_id, uid): one user has at most one check running,
+# so a different uid arriving mid-check is answered rather than run in
+# parallel. Entries are removed by _clear_inflight from the task's done
+# callback, so completion, failure, timeout and cancellation all clean up.
+_verify_inflight = {}
 
 # Cache entries are (file_id, content_hash). The hash is of the file's BYTES at
 # the moment Telegram issued that file_id, so replacing artwork on disk changes
@@ -289,6 +309,28 @@ def _row_field(row, name, default=None):
         return default
     return default if value is None else value
 
+async def _sub_id(tg_id):
+    """The value every outbound affiliate link carries for this user.
+
+    ref_code when the landing page supplied one, the tg_id otherwise, so the
+    link is NEVER sent without a sub-ID - an untracked click is worse than one
+    tracked by a fallback. The two are told apart on the way back in: a tg_id
+    is all digits and matches no ref_code, which is what server.py's probe
+    reports separately.
+    """
+    try:
+        user = await db.get_user(tg_id)
+    except Exception:
+        # Tracking must not cost anyone the register screen.
+        logging.exception("sub-id lookup failed for tg_id=%s, using the tg_id", tg_id)
+        user = None
+    return _row_field(user, "ref_code") or str(tg_id)
+
+
+async def _ref_url(tg_id):
+    return config.ref_url(await _sub_id(tg_id))
+
+
 async def _user_quota(tg_id):
     # (is_premium, that tier's daily limit). Resolved from the database on
     # every call rather than cached, so a /premium grant - or a restart that
@@ -380,16 +422,53 @@ async def show(bot, tg_id, key):
         # The menu caption is a template ({limit}/{used}/{left}); routing it
         # here means no caller can render it raw and leak the braces on screen.
         await _show_menu(bot, tg_id)
+    elif key == "register":
+        # Same reason, one step further: this caption is a template ({ref}) AND
+        # its Register button is per-user, so no caller may render it raw.
+        await _show_register(bot, tg_id)
     elif "video" in s:
         await render(bot, tg_id, s["video"], s["text"], s["kb"], is_video=True)
     else:
         await render(bot, tg_id, s["photo"], s["text"], s["kb"])
 
+async def _capture_ref(tg_id, command):
+    # First-touch attribution: db.save_ref_code only fills a NULL, so a user
+    # who later arrives on a different landing link keeps the code that
+    # actually brought them in. The return value says which of the two
+    # happened, and the log line reports it either way - that is the line to
+    # grep to confirm a payload arrived.
+    raw = (command.args or "").strip() if command else ""
+    if not raw:
+        return
+    if not REF_RE.match(raw):
+        # Length only, never the value: an unmatched payload is unvalidated
+        # user input and does not belong in the log verbatim.
+        logging.warning("/start: tg_id=%s sent a %d-char payload that is not a "
+                        "valid deep-link tracking id - ignored", tg_id, len(raw))
+        return
+    try:
+        stored = await db.save_ref_code(tg_id, raw)
+    except Exception:
+        # Tracking is not worth losing a /start over: the funnel continues and
+        # the failure is on record. That is the only reason this is wrapped.
+        logging.exception("/start: could not store ref_code=%s for tg_id=%s",
+                          raw, tg_id)
+        return
+    logging.info("/start deep-link ref_code=%s tg_id=%s (%s)", raw, tg_id,
+                 "stored" if stored else "already attributed, kept first touch")
+
 @dp.message(CommandStart())
-async def start(m: Message, bot: Bot, state: FSMContext):
+async def start(m: Message, bot: Bot, state: FSMContext,
+                command: CommandObject | None = None):
     await state.clear()
     tg_id = m.from_user.id
     await db.touch_user(tg_id, m.from_user.username)
+    # Deep-link tracking id, captured BEFORE the verified shortcut below
+    # returns - a returning user still arrives through a landing link, and
+    # reading it after that branch would silently drop every one of them.
+    # touch_user above has to run first: save_ref_code updates an existing row.
+    # command defaults to None so /devstart's start(m, bot, state) still works.
+    await _capture_ref(tg_id, command)
     user = await db.get_user(tg_id)
     if user and user["verified"]:
         # Verified users go straight to the menu and never re-enter the funnel
@@ -460,6 +539,12 @@ async def cmd_devstart(m: Message, bot: Bot, state: FSMContext):
         task = tasks.pop(tg_id, None)
         if task:
             task.cancel()
+    # A verification still running from the previous run would clear its own
+    # entry later and could report a verdict onto the fresh funnel, so it is
+    # cancelled here with the other per-user tasks.
+    inflight = _verify_inflight.pop(tg_id, None)
+    if inflight and not inflight["task"].done():
+        inflight["task"].cancel()
     _pair_choice.pop(tg_id, None)
     _expiry_choice.pop(tg_id, None)
     _uid_lookup_at.pop(tg_id, None)
@@ -931,12 +1016,14 @@ async def noop(cb: CallbackQuery):
     await cb.answer()
 
 def _register_btn(label="\U0001F511 Register & Get Access",
-                  icon="5307843983102204243"):
+                  icon="5307843983102204243", url=None):
     # Shared by the two verification verdicts. The defaults are what the
     # wrong-link verdict has always rendered and must not change; the deposit
     # verdict passes its own label and icon so only that screen restyles.
-    # URL, style and position are the same for both and are not overridable.
-    return [[(label, "url:" + config.REF_LINK, "success", icon)]]
+    # Style and position are the same for both and are not overridable.
+    # url defaults to the un-subbed REF_LINK so a caller that cannot resolve a
+    # sub-ID still renders a working button; both real callers pass one.
+    return [[(label, "url:" + (url or config.REF_LINK), "success", icon)]]
 
 async def _replace(bot, tg_id, old_msg_id, text, kb_rows=None):
     # Swap the transient "checking" message for the verdict; track as ui_msg.
@@ -967,6 +1054,25 @@ async def _show_menu(bot, tg_id, test_mode=False):
         text = config.MSG_TEST_MODE + "\n\n" + text
     await render(bot, tg_id, s["photo"], text, s["kb"])
 
+def _with_ref(item, url):
+    # Rewrites ONLY the button whose URL is the plain REF_LINK. "How to
+    # Register" and "Support" are matched by nothing here and pass through
+    # untouched, so this cannot restyle or re-point them by accident.
+    if item[1] == "url:" + config.REF_LINK:
+        return (item[0], "url:" + url) + tuple(item[2:])
+    return item
+
+
+async def _show_register(bot, tg_id):
+    # The registration screen, with this user's sub-ID in both places the link
+    # appears: the caption the user can copy, and the button they tap. One
+    # lookup feeds both, so the two can never disagree.
+    s = config.SCREENS["register"]
+    url = await _ref_url(tg_id)
+    kb = [[_with_ref(item, url) for item in row] for row in s["kb"]]
+    await render(bot, tg_id, s["photo"], s["text"].format(ref=url), kb)
+
+
 async def _clear_nudge(bot, tg_id):
     """Delete the activation nudge once the user is verified.
 
@@ -989,58 +1095,102 @@ async def _clear_nudge(bot, tg_id):
     except Exception:
         logging.debug("nudge cleanup failed tg_id=%s", tg_id, exc_info=True)
 
-async def _run_verification(bot, tg_id, uid):
-    """Run the panel check and show the verdict.
+async def _panel_verdict(tg_id, uid):
+    """ONE panel query, classified. Sends nothing to the user.
 
-    Returns True only when access was granted. Every other outcome tells the
-    user to send their account ID again, so the caller must re-arm UID capture -
-    with ENABLE_AUTO_RETRY off, that re-send is the only route to verification.
+    Returns (status, detail). Splitting the query from the messaging is what
+    lets the caller retry a VERIFY_TEMPORARY without re-sending the "checking"
+    ack or showing a verdict that is about to be superseded. The campaign and
+    deposit rules are exactly as they were - only their result is now named
+    rather than flattened into a bool.
     """
-    # Immediate ack while we query the panel (can take up to ~20s), then verdict.
-    ack = await bot.send_message(
-        tg_id, "\U000023F3 <b>Checking account</b> <code>" + uid + "</code>\U00002026",
-        parse_mode="HTML")
     try:
         info = await panelbot.lookup_trader(uid)
     except panelbot.PanelUnavailable as e:
-        # Panel silent/disabled. The reason string ("disabled"/"timeout"/
-        # "floodwait"/"session"/"warmup"/"error") is what separates a broken
-        # session from a slow panel. MSG_DELAYED asks the user to resend, and
-        # the caller re-arms capture so that actually works.
-        logging.warning("VERIFY uid=%s tg_id=%s -> PanelUnavailable(%s) -> MSG_DELAYED",
+        # The reason string ("disabled"/"timeout"/"floodwait"/"session"/
+        # "warmup"/"error") is what separates a broken session from a slow
+        # panel, and it selects the backoff below.
+        logging.warning("VERIFY uid=%s tg_id=%s -> PanelUnavailable(%s) -> TEMPORARY",
                         uid, tg_id, e)
-        await _replace(bot, tg_id, ack.message_id, config.MSG_DELAYED)
-        return False
+        return config.VERIFY_TEMPORARY, str(e)
     if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
         dep = info.get("sum_deposits") or Decimal(0)
         logging.info("VERIFY uid=%s tg_id=%s campaign MATCH dep=%s min=%s -> %s",
                      uid, tg_id, dep, config.MIN_DEPOSIT,
                      "ACCESS" if dep >= config.MIN_DEPOSIT else "NEED_DEPOSIT")
         if dep >= config.MIN_DEPOSIT:
-            await db.set_verified(tg_id, dep)
-            await _clear_nudge(bot, tg_id)
-            # Verified: drop the ack and hand the user the main menu.
-            try:
-                await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
-            except Exception:
-                pass
-            await _show_menu(bot, tg_id)
-            return True
-        else:
-            # Per-screen override: bare label, its own icon. The wrong-link
-            # verdict below deliberately keeps the helper's defaults.
-            await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT,
-                           _register_btn(label="Register & Get Access",
-                                         icon=config.E_NEED_DEP_REG))
-            return False
-    else:
-        # Not found, or a different campaign. record_found=False with a healthy
-        # panel usually means the reply format changed - see PANEL PARSE above.
-        logging.info("VERIFY uid=%s tg_id=%s -> WRONG_LINK (record_found=%s "
-                     "campaign_id=%s expected=%s)", uid, tg_id, info is not None,
-                     info.get("campaign_id") if info else None, config.CAMPAIGN_ID)
-        await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK, _register_btn())
-    return False
+            return config.VERIFY_GRANTED, dep
+        return config.VERIFY_NEED_DEPOSIT, dep
+    # Not found, or a different campaign. record_found=False with a healthy
+    # panel usually means the reply format changed - see PANEL PARSE above.
+    logging.info("VERIFY uid=%s tg_id=%s -> WRONG_LINK (record_found=%s "
+                 "campaign_id=%s expected=%s)", uid, tg_id, info is not None,
+                 info.get("campaign_id") if info else None, config.CAMPAIGN_ID)
+    return config.VERIFY_WRONG_LINK, info
+
+def _retry_delay(attempt, reason):
+    # Doubling backoff. "floodwait" means the panel has already rate-limited
+    # us, so it gets a much longer floor - retrying that quickly is what turns
+    # a short block into a long one for every user, not just this one.
+    delay = config.UID_VERIFY_BACKOFF * (2 ** attempt)
+    if reason == "floodwait":
+        return max(delay, config.UID_VERIFY_FLOOD_BACKOFF)
+    return delay
+
+async def _run_verification(bot, tg_id, uid):
+    """Run the panel check, retry transient failures, and show the verdict.
+
+    Returns one of the config.VERIFY_* statuses. A settled refusal
+    (VERIFY_NOT_ELIGIBLE) is returned on the first answer and never retried -
+    the panel has told us something true about the account. Only
+    VERIFY_TEMPORARY is retried, and only inside this one call, so the user is
+    never asked to resend an ID they already sent.
+    """
+    # Immediate ack while we query the panel (can take up to ~20s), then verdict.
+    # It stays up across retries, so a transient failure is invisible to the
+    # user rather than a verdict that flickers and is replaced.
+    ack = await bot.send_message(
+        tg_id, "\U000023F3 <b>Checking account</b> <code>" + uid + "</code>\U00002026",
+        parse_mode="HTML")
+
+    status, detail = await _panel_verdict(tg_id, uid)
+    attempt = 0
+    while status == config.VERIFY_TEMPORARY and attempt < config.UID_VERIFY_RETRIES:
+        delay = _retry_delay(attempt, detail)
+        attempt += 1
+        logging.info("VERIFY RETRY tg_id=%s uid=%s reason=%s attempt=%d/%d in %.1fs",
+                     tg_id, uid, detail, attempt, config.UID_VERIFY_RETRIES, delay)
+        await asyncio.sleep(delay)
+        status, detail = await _panel_verdict(tg_id, uid)
+
+    if status == config.VERIFY_GRANTED:
+        await db.set_verified(tg_id, detail)
+        await _clear_nudge(bot, tg_id)
+        # Verified: drop the ack and hand the user the main menu.
+        try:
+            await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
+        except Exception:
+            pass
+        await _show_menu(bot, tg_id)
+        return status
+    if status == config.VERIFY_NEED_DEPOSIT:
+        # Per-screen override: bare label, its own icon. The wrong-link
+        # verdict below deliberately keeps the helper's defaults.
+        await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT,
+                       _register_btn(label="Register & Get Access",
+                                     icon=config.E_NEED_DEP_REG,
+                                     url=await _ref_url(tg_id)))
+        return status
+    if status == config.VERIFY_WRONG_LINK:
+        await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK,
+                       _register_btn(url=await _ref_url(tg_id)))
+        return status
+    # Every retry was also temporary. Say so once, after the attempts, rather
+    # than after each one.
+    logging.warning("VERIFY EXHAUSTED tg_id=%s uid=%s reason=%s after %d retries",
+                    tg_id, uid, detail, attempt)
+    await _replace(bot, tg_id, ack.message_id, config.MSG_DELAYED)
+    return config.VERIFY_TEMPORARY
 
 async def _verify_account_id(tg_id, account_id):
     """Check one account ID. Returns True when it is valid.
@@ -1109,6 +1259,52 @@ async def premium_uid(m: Message, bot: Bot, state: FSMContext):
             cost=config.PREMIUM_UNLOCK_COST)
     await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
+def _clear_inflight(tg_id, task):
+    """Drop the in-flight entry, but only if it is still THIS task.
+
+    Guards against a stale callback wiping a newer attempt's entry: if the user
+    has already started a fresh verification by the time an old task finishes,
+    the newer entry must survive.
+    """
+    entry = _verify_inflight.get(tg_id)
+    if entry is not None and entry.get("task") is task:
+        _verify_inflight.pop(tg_id, None)
+
+async def _verify_once(bot, tg_id, uid):
+    """Run ONE verification to completion and return its config.VERIFY_* status.
+
+    This is a wrapper, not a replacement: the actual check is still
+    _run_verification -> panelbot.lookup_trader, with the same campaign and
+    deposit rules. What it adds is a ceiling and a guarantee that no exception
+    escapes into a bare task, because the caller's in-flight entry is cleared
+    from this task's done callback and a task that dies silently would leave
+    the user unable to try again.
+    """
+    try:
+        return await asyncio.wait_for(_run_verification(bot, tg_id, uid),
+                                      timeout=config.UID_VERIFY_TIMEOUT)
+    except asyncio.TimeoutError:
+        # The panel has its own HARD_TIMEOUT; reaching this one means the wait
+        # was for panelbot's lock, not the round-trip. Same user-facing verdict
+        # as any other transient panel problem.
+        logging.warning("VERIFY TIMEOUT tg_id=%s uid=%s exceeded %ss ceiling",
+                        tg_id, uid, config.UID_VERIFY_TIMEOUT)
+        try:
+            await bot.send_message(tg_id, config.MSG_DELAYED, parse_mode="HTML")
+        except Exception:
+            logging.exception("could not deliver the delay notice to %s", tg_id)
+        return config.VERIFY_TEMPORARY
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # Log the real exception rather than letting it vanish into the task.
+        logging.exception("verification failed for tg_id=%s uid=%s", tg_id, uid)
+        try:
+            await bot.send_message(tg_id, config.MSG_UID_ERROR, parse_mode="HTML")
+        except Exception:
+            logging.exception("could not deliver the error notice to %s", tg_id)
+        return config.VERIFY_TEMPORARY
+
 @dp.message(Reg.waiting_uid)
 async def capture_uid(m: Message, bot: Bot, state: FSMContext):
     # The user's message is deleted the moment it arrives, so anything that
@@ -1160,9 +1356,38 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
                                "(5\U0000201315 digits). Example: <b>123456789</b>", parse_mode="HTML")
         await state.set_state(Reg.waiting_uid)
         return
+    # --- single flight ------------------------------------------------------
+    # Deliberately BEFORE the cooldown check. A duplicate of an ID that is
+    # already being checked must not be told to wait and resend - that pairing
+    # (resend -> "wait Ns, then resend") is what made one submission take
+    # several attempts. Reuse the running check instead; no second lookup.
+    inflight = _verify_inflight.get(tg_id)
+    if inflight is not None and not inflight["task"].done():
+        if inflight["uid"] == uid:
+            logging.info("UID IN-FLIGHT tg_id=%s uid=%s - reusing the running check",
+                         tg_id, uid)
+            await bot.send_message(tg_id, config.MSG_UID_IN_FLIGHT.format(uid=uid),
+                                   parse_mode="HTML")
+            # Await the SAME task, so this caller ends on the same verdict the
+            # first one gets. The task itself sends the verdict message.
+            status = await asyncio.shield(inflight["task"])
+            if status != config.VERIFY_GRANTED:
+                await state.set_state(Reg.waiting_uid)
+            return
+        # A different ID mid-check. The running check stays authoritative -
+        # nothing is cancelled and nothing runs in parallel.
+        logging.info("UID BUSY tg_id=%s sent=%s while checking=%s",
+                     tg_id, uid, inflight["uid"])
+        await bot.send_message(
+            tg_id, config.MSG_UID_OTHER_PENDING.format(uid=inflight["uid"]),
+            parse_mode="HTML")
+        await state.set_state(Reg.waiting_uid)
+        return
+
     wait = config.UID_LOOKUP_COOLDOWN - (time.monotonic() - _uid_lookup_at.get(tg_id, 0.0))
     if wait > 0:
-        # Throttled before the shared panel queue is ever touched.
+        # Throttled before the shared panel queue is ever touched. With the
+        # in-flight guard above, this now only applies BETWEEN attempts.
         logging.info("UID COOLDOWN tg_id=%s uid=%s %.0fs remaining", tg_id, uid, wait)
         await bot.send_message(tg_id, config.MSG_UID_COOLDOWN.format(seconds=int(wait) + 1),
                                parse_mode="HTML")
@@ -1194,8 +1419,17 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
     # Stamped only where a panel lookup actually happens - the TEST_MODE
     # bypass above queries nothing, so it must not start a cooldown.
     _uid_lookup_at[tg_id] = time.monotonic()
-    granted = await _run_verification(bot, tg_id, uid)
-    if not granted:
+    # Submitted immediately, as a task, so duplicates arriving while it runs
+    # can find and reuse it instead of queueing a second lookup. The entry is
+    # published BEFORE the first await on the task, so there is no window in
+    # which a duplicate could slip past the guard above.
+    task = asyncio.create_task(_verify_once(bot, tg_id, uid))
+    _verify_inflight[tg_id] = {"uid": uid, "task": task}
+    # Cleanup is bound to the task, not to this coroutine: if this handler is
+    # cancelled mid-await the check still finishes and still clears its entry.
+    task.add_done_callback(lambda t, k=tg_id: _clear_inflight(k, t))
+    status = await asyncio.shield(task)
+    if status != config.VERIFY_GRANTED:
         # Every non-granted verdict asks the user to send their ID again
         # (deposit then resend / register then resend / retry shortly). The
         # state was cleared above and there is no catch-all message handler, so

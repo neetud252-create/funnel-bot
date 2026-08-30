@@ -659,8 +659,21 @@ async def main():
                 bot_src.index("async def retry_worker")])
     check("the funnel's capture path still short-circuits on verified",
           'user["verified"]' in capture, capture[:200])
-    check("the funnel's capture path still reaches the panel",
-          "_run_verification" in capture, capture[:200])
+    # The capture path reaches the panel through the single-flight wrapper
+    # rather than calling _run_verification directly. Assert the whole chain,
+    # not just one name: the guarantee is that the funnel still ends at
+    # panelbot, and each link is checked so the chain cannot be cut anywhere.
+    check("the funnel's capture path submits a real verification",
+          "_verify_once" in capture, capture[:200])
+    verify_once = _code_only(
+        bot_src[bot_src.index("async def _verify_once"):
+                bot_src.index("@dp.message(Reg.waiting_uid)")])
+    check("the single-flight wrapper calls _run_verification",
+          "_run_verification" in verify_once, verify_once[:200])
+    check("_run_verification still reaches panelbot",
+          "panelbot.lookup_trader(uid)" in bot_src)
+    check("the capture path still never reaches the game-only format check",
+          "_verify_account_id" not in capture, capture[:200])
 
     # No one-time flag anywhere on the Premium path.
     for flag in ("already_verified", "_verified_uids", "uid_verified",

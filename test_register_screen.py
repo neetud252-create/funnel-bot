@@ -60,7 +60,12 @@ CAPTION_EMOJI = [
     ("downarrow", "5406745015365943482", "⬇️", False),       # ends its line
 ]
 
-REG_URL = "https://shorturl.at/2fu2t"
+# The registration link is now REF_LINK, the same link the verdict buttons
+# use, and the caption carries it as a {ref} template that _show_register fills
+# with the user's sub-ID. REG_URL is the untemplated form: what the button
+# stores and what the caption renders to before a sub-ID is attached.
+REG_URL = config.REF_LINK
+SUBBED_URL = config.ref_url("u8f3a2c")
 HOWTO_URL = "https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy"
 
 # Captured from the live config BEFORE the copy change. Only text and
@@ -79,7 +84,7 @@ EXPECTED = [
 
 EXPECT_PLAIN = ("\U0001F510To access Go+, register for a new Pocket Option "
                 "account using my link:\n\n"
-                "\U0001F517 " + REG_URL + "\n\n"
+                "\U0001F517 {ref}\n\n"
                 "➡️Once you register, send your new account ID in the text "
                 "box below \U0001F447\n\n"
                 "⚠️Please note: Your ID must contain numbers only "
@@ -100,9 +105,18 @@ def main():
     print("[register] caption content")
     check("rendered caption matches the specified copy exactly",
           plain == EXPECT_PLAIN, repr(plain))
+    check("only the registration URL changed in the copy",
+          plain.replace("{ref}", "X") == EXPECT_PLAIN.replace("{ref}", "X"),
+          repr(plain))
     check("no bold markup was introduced", "<b>" not in text, repr(text))
-    check("no unfilled placeholder",
-          "{" not in text and "}" not in text, repr(text))
+    # {ref} is the ONLY placeholder: any other would reach .format() in
+    # _show_register and raise KeyError on the register screen.
+    check("{ref} is the only placeholder",
+          re.findall(r"\{[^}]*\}", text) == ["{ref}"],
+          str(re.findall(r"\{[^}]*\}", text)))
+    check("the caption template formats without error",
+          text.format(ref=SUBBED_URL).count(SUBBED_URL) == 1,
+          repr(text))
     check("real em dash, not a hyphen",
           "numbers only \U00002014 no extra symbols" in plain, repr(plain))
     check("the example line is exact",
@@ -116,13 +130,30 @@ def main():
 
     # --- the URL -------------------------------------------------------------
     print("\n[register] the referral URL")
-    check("the URL is exactly %s" % REG_URL, REG_URL in plain, repr(plain))
+    check("the shortener is gone from the whole config",
+          "shorturl.at" not in open(
+              os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py"),
+              encoding="utf-8").read(), "config.py still names shorturl.at")
+    check("the caption renders REF_LINK, not a second registration URL",
+          REG_URL in strip_all(text.format(ref=SUBBED_URL)),
+          repr(strip_all(text.format(ref=SUBBED_URL))))
     check("it is a bare link, so Telegram auto-links it as before",
           "<a " not in text, repr(text))
     check("one space between the link emoji and the URL",
-          "\U0001F517 " + REG_URL in plain, repr(plain))
+          "\U0001F517 " + SUBBED_URL in strip_all(text.format(ref=SUBBED_URL)),
+          repr(strip_all(text.format(ref=SUBBED_URL))))
     check("the caption URL matches the Register button's URL",
           REG_URL in str(screen["kb"][0][0][1]), str(screen["kb"][0][0]))
+    # The sub-ID itself.
+    check("ref_url appends the sub-ID under REF_SUB_PARAM",
+          config.REF_SUB_PARAM + "=u8f3a2c" in SUBBED_URL, SUBBED_URL)
+    check("ref_url keeps REF_LINK as the base",
+          SUBBED_URL.startswith(REG_URL.split("?")[0]), SUBBED_URL)
+    check("ref_url never duplicates the parameter",
+          config.ref_url("second", SUBBED_URL).count(config.REF_SUB_PARAM + "=") == 1,
+          config.ref_url("second", SUBBED_URL))
+    check("the button stores the plain REF_LINK so build_kb cannot drop it",
+          screen["kb"][0][0][1] == "url:" + REG_URL, str(screen["kb"][0][0]))
     # Photo caption: there is no link preview to preserve either way.
     check("the screen is still a photo screen",
           screen.get("photo") == "register", repr(screen.get("photo")))

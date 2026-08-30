@@ -64,6 +64,17 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT F
 -- already in the table.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS game_tokens INTEGER NOT NULL DEFAULT 0;
 
+-- Deep-link tracking id from t.me/<bot>?start=<code>, captured by /start and
+-- owned by the landing page that generated it. Nothing in the funnel reads it;
+-- it exists to attribute a tg_id to the link that produced it.
+-- ref_code_at is when the FIRST capture happened - save_ref_code below never
+-- overwrites a code, so the pair always describes the same arrival.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_code TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_code_at TIMESTAMPTZ;
+-- For the reverse lookup (every user who arrived on one code). The forward
+-- lookup needs no index: it is get_user(), which already returns the whole row.
+CREATE INDEX IF NOT EXISTS users_ref_code_idx ON users (ref_code);
+
 CREATE TABLE IF NOT EXISTS traders (
     trader_id  TEXT PRIMARY KEY,
     registered BOOLEAN DEFAULT TRUE,
@@ -113,6 +124,30 @@ async def touch_user(tg_id: int, username: str | None):
             INSERT INTO users (tg_id, username) VALUES ($1,$2)
             ON CONFLICT (tg_id) DO UPDATE SET username=$2
         """, tg_id, username)
+
+async def save_ref_code(tg_id: int, code: str):
+    # First-touch attribution, enforced in the WHERE rather than by reading
+    # first and writing second: one statement, so two /start messages arriving
+    # together cannot both see NULL and both write. Returns True when this call
+    # is the one that stored the code, False when a code was already there (or
+    # there is no such row) - the caller logs which.
+    async with pool.acquire() as c:
+        row = await c.fetchrow("""
+            UPDATE users SET ref_code=$2, ref_code_at=now()
+             WHERE tg_id=$1 AND ref_code IS NULL
+            RETURNING ref_code
+        """, tg_id, code)
+        return row is not None
+
+async def user_by_ref_code(code: str):
+    # Reverse of save_ref_code, for the postback attribution probe in server.py.
+    # ref_code is not unique (nothing stops a landing page reusing a code), so
+    # this returns the EARLIEST claimer and nothing else - the caller only uses
+    # it to report whether the join resolves at all.
+    async with pool.acquire() as c:
+        return await c.fetchrow(
+            "SELECT * FROM users WHERE ref_code=$1 ORDER BY ref_code_at LIMIT 1",
+            code)
 
 async def get_user(tg_id: int):
     async with pool.acquire() as c:
@@ -342,6 +377,9 @@ async def set_tokens(tg_id: int, amount: int):
 # this reset just undid. nudge_msg_id is cleared because the nudge it points at
 # belongs to the funnel run being discarded; the id would otherwise outlive its
 # message and the next verify would try to delete a stranger's message id.
+# ref_code/ref_code_at are cleared too: /devstart means "as if this user had
+# never used the bot", and a kept code would make the next deep link look
+# already-attributed, so the re-test would never store the id it is checking.
 # attempts is untouched: it is declared in SCHEMA but read and written nowhere.
 _RESET_SQL = """
     UPDATE users
@@ -355,6 +393,8 @@ _RESET_SQL = """
            ui_msg_id          = NULL,
            album_ids          = NULL,
            nudge_msg_id       = NULL,
+           ref_code           = NULL,
+           ref_code_at        = NULL,
            last_checked       = NULL
      WHERE tg_id = $1
     RETURNING tg_id
