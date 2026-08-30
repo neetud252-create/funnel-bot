@@ -244,6 +244,7 @@ def main():
 
     # --- nothing outside this screen moved -----------------------------------
     print("\n[register] no other screen or configuration changed")
+    E_REG_BTN_HOW_ID = "5222444124698853913"
     NEW_IDS = {"5350619413533958825", "5271604874419647061",
                "5435955998479102657", "5836690092306992715",
                "5222444124698853913"}
@@ -257,6 +258,15 @@ def main():
         for row in (other.get("kb") or []):
             for item in row:
                 icon = item[3] if len(item) > 3 else None
+                # One deliberate sharer: the access screen's "Quick Setup
+                # Guide" opens the SAME How-to-Register video this screen's own
+                # button does, so it carries the same icon on purpose. Narrowed
+                # to that exact button rather than waived for the whole screen.
+                if (key, item[0]) == ("access", "Quick Setup Guide"):
+                    check("the access screen's setup guide shares this "
+                          "screen's How-to-Register icon on purpose",
+                          icon == E_REG_BTN_HOW_ID, str(icon))
+                    continue
                 check("screen %r button %r kept its own icon"
                       % (key, item[0][:18]), icon not in NEW_IDS, str(icon))
 
@@ -269,9 +279,14 @@ def main():
           config.SUPPORT_URL)
 
     # Screens either side of "register" in the funnel are intact.
+    # The access screen now carries a menu rather than a lone button, so what
+    # is pinned here is the thing this test actually cares about: that it still
+    # routes into THIS screen, on the same callback, exactly once.
+    _access_actions = [b[1] for row in config.SCREENS["access"]["kb"]
+                       for b in row]
     check("the access screen still leads here",
-          [b[1] for row in config.SCREENS["access"]["kb"] for b in row]
-          == ["cb:go:register"], str(config.SCREENS["access"]["kb"]))
+          _access_actions.count("cb:go:register") == 1,
+          str(config.SCREENS["access"]["kb"]))
     check("the access caption is unchanged",
           "In One Trade." in config.SCREENS["access"]["text"])
     check("the results caption is unchanged",

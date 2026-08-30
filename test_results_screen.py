@@ -237,9 +237,12 @@ def main():
           == ["cb:results"], str(config.SCREENS["ai"]["kb"]))
     check("the ai caption is unchanged",
           "THE TECHNOLOGY BEHIND GO+" in config.SCREENS["ai"]["text"])
-    check("the access screen this leads to is unchanged",
-          [b[1] for row in config.SCREENS["access"]["kb"] for b in row]
-          == ["cb:go:register"], str(config.SCREENS["access"]["kb"]))
+    # The access screen carries a menu now; what matters to THIS test is only
+    # that it still routes onward into the register flow, once.
+    check("the access screen still routes into the register flow",
+          [b[1] for row in config.SCREENS["access"]["kb"]
+           for b in row].count("cb:go:register") == 1,
+          str(config.SCREENS["access"]["kb"]))
     check("the tech caption is unchanged",
           "IT IS SIMPLE" in config.SCREENS["tech"]["text"])
     check("the welcome caption is unchanged",

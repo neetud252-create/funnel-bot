@@ -26,14 +26,20 @@ CHANNEL_MENTION = _channel_mention(CHANNEL_URL)
 # Link defaults MUST stay valid http(s) URLs even when unset: Telegram rejects
 # the whole message if any inline button URL is malformed, which takes down the
 # entire screen (this is what broke the menu after verification).
-# TODO: swap the three PLACEHOLDER links below for the real ones (set REF_LINK,
-# SUPPORT, VIP_LINK, YOUTUBE_URL in the Railway service variables).
+# TODO: swap the four PLACEHOLDER links below for the real ones (set REF_LINK,
+# SUPPORT, VIP_LINK, YOUTUBE_URL, FOREX_TIPS_URL in the Railway service
+# variables).
 REF_LINK    = os.getenv("REF_LINK", "https://example.com/PLACEHOLDER_REF")
 
 SUPPORT     = os.getenv("SUPPORT", "https://t.me/flashhher")   # TODO: real support handle (was @go_plus_supportbot)
 SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
 VIP_LINK    = os.getenv("VIP_LINK", "https://t.me/PLACEHOLDER_VIP")          # TODO: real VIP team invite
 YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@pocketoption?si=gb2BpGjz2SzhMOH6s")  # TODO: real YouTube channel
+# Forex Tips button on the access screen. The project had NO existing forex-tips
+# destination, so this is a configuration slot rather than a link anyone chose:
+# the placeholder keeps the button renderable (build_kb drops a button whose URL
+# fails _URL_OK, which would silently remove it) until the real URL is set.
+FOREX_TIPS_URL = os.getenv("FOREX_TIPS_URL", "https://t.me/PLACEHOLDER_FOREX_TIPS")  # TODO: real Forex Tips link
 
 # Query parameter the affiliate panel reads back as the sub-ID. CONFIRMED
 # against the Pocket Option panel: it echoes this value into its postbacks as
@@ -645,7 +651,33 @@ SCREENS = {
                  + pe(E_ACC_DOWN, "\U0001F447") + " Activate the bot now "
                  + pe(E_ACC_DOWN, "\U0001F447")),
         # Interim: routes into the UID-capture register flow (Group C adds full verification)
-        "kb": [[("Activate Bot", "cb:go:register", "success", "6280525956771745921")]],
+        #
+        # "Get Bot Access" carries the SAME callback the old "Activate Bot"
+        # button did - cb:go:register, matched by nav() in bot.py - so the
+        # activation path, the Reg.waiting_uid arming and the register nudge are
+        # reached exactly as before. Renaming the label could not change where
+        # it goes: the destination is the callback string, and that is untouched.
+        # Its icon is the same custom emoji id the old button used.
+        #
+        # The five added buttons all reuse destinations that already existed:
+        #   Quick Setup Guide - the "How to Register" video, the same URL the
+        #                       register screen's own button opens
+        #   Review            - cb:results, the reviews album handler in bot.py
+        #   Support           - SUPPORT_URL, as on the register and menu screens
+        #   YouTube           - YOUTUBE_URL, as on the menu screen
+        #   Forex Tips        - FOREX_TIPS_URL, the one destination this project
+        #                       did not already have (see the constant above)
+        #
+        # Styles are Telegram's three: success (green), primary (blue), danger
+        # (red). Review and Support carry their emoji in the LABEL rather than
+        # as a custom emoji id, because this project has no id for a star or a
+        # lightbulb and inventing one would render nothing at all.
+        "kb": [[("Get Bot Access", "cb:go:register", "success", "6280525956771745921")],
+               [("Quick Setup Guide", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary", E_REG_BTN_HOW)],
+               [("⭐ Review", "cb:results", "danger"),
+                ("Support", "url:" + SUPPORT_URL, "danger", E_MENU_SUPPORT)],
+               [("YouTube", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE),
+                ("💡 Forex Tips", "url:" + FOREX_TIPS_URL, "primary")]],
     },
     "register": {
         "photo": "register",

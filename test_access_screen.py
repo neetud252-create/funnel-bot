@@ -81,9 +81,14 @@ EXPECT_PLAIN = ("\U0001F6A8 +$18,400 \U00002014 In One Trade. \U0001F4B0\n"
                 "⚡️Stop watching others win.\n\n"
                 "\U0001F447 Activate the bot now \U0001F447")
 
-# The button, exactly as it was before this change.
-BUTTON = {
-    "text": "Activate Bot",
+# The access-screen menu. "Activate Bot" became "Get Bot Access" and four more
+# buttons joined it; the CALLBACK is what matters and it did not move, so this
+# screen still opens the same register flow it always did. The detailed
+# structure lives in test_access_menu.py - what is pinned here is only that the
+# activation button is still first, still green, and still carries the original
+# callback and icon.
+ACTIVATION_BUTTON = {
+    "text": "Get Bot Access",
     "icon_custom_emoji_id": "6280525956771745921",
     "style": "success",
     "callback_data": "go:register",
@@ -183,22 +188,26 @@ def main():
           "\U0001F447 Activate the bot now \U0001F447" in plain, repr(plain))
 
     # --- the button is untouched ---------------------------------------------
-    print("\n[access] the Activate Bot button did not move")
+    print("\n[access] the activation button did not move")
     H._install_stub_modules()
     bot_mod = H._load_bot()
     kb = bot_mod.build_kb(screen["kb"])
     flat = [b for row in kb.inline_keyboard for b in row]
 
-    check("exactly one button on this screen", len(flat) == 1, str(len(flat)))
+    check("the screen now carries the six-button menu", len(flat) == 6,
+          str(len(flat)))
     if flat:
         payload = flat[0].model_dump(exclude_none=True)
-        check("button payload is completely unchanged",
-              payload == BUTTON, str(payload))
-        for key, want in BUTTON.items():
-            check("button %s is %r" % (key, want),
+        check("the activation button is still the first one",
+              payload == ACTIVATION_BUTTON, str(payload))
+        for key, want in ACTIVATION_BUTTON.items():
+            check("activation button %s is %r" % (key, want),
                   payload.get(key) == want, repr(payload.get(key)))
         check("it is a callback button, not a URL",
               flat[0].url is None, repr(getattr(flat[0], "url", None)))
+        check("the old label is gone from the keyboard",
+              not any(b.text == "Activate Bot" for b in flat),
+              str([b.text for b in flat]))
 
     # --- the media is untouched ----------------------------------------------
     check("this screen is still a VIDEO screen",
