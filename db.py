@@ -221,14 +221,28 @@ async def log_postback(raw: dict):
         await c.execute("INSERT INTO postbacks (raw) VALUES ($1::jsonb)", json.dumps(raw))
 
 async def upsert_trader(trader_id: str, event, amount):
-    # Insert, or add the amount to the existing deposit (registration events
-    # pass amount 0), and refresh last_event/updated_at.
+    # Insert, or overwrite the stored deposit with the reported one, and
+    # refresh last_event/updated_at.
+    #
+    # ABSOLUTE, not additive. The panel sends sumdep as the trader's RUNNING
+    # TOTAL of deposits, so adding it would count every earlier deposit again
+    # on each new postback (100 then 250 would store 350, not 250). This now
+    # matches cache_trader below, which has always set the panel's total
+    # absolutely for exactly the same reason - the two paths write the same
+    # column and must agree on what the number means.
+    #
+    # amount is None when this postback reported no total at all: a
+    # registration, a missing amount macro, or an unparseable one. That is a
+    # different thing from a reported zero and must NOT overwrite - a reg
+    # postback arriving after a deposit would otherwise reset the total to 0.
+    # COALESCE on the parameter (not on EXCLUDED, which is already defaulted to
+    # 0 by the insert) is what keeps the two cases apart.
     async with pool.acquire() as c:
         await c.execute("""
             INSERT INTO traders (trader_id, last_event, deposit, updated_at)
-            VALUES ($1, $2, $3, now())
+            VALUES ($1, $2, COALESCE($3::numeric, 0), now())
             ON CONFLICT (trader_id) DO UPDATE SET
-                deposit    = traders.deposit + EXCLUDED.deposit,
+                deposit    = COALESCE($3::numeric, traders.deposit),
                 last_event = EXCLUDED.last_event,
                 updated_at = now()
         """, trader_id, event, amount)

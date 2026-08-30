@@ -35,12 +35,13 @@ SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
 VIP_LINK    = os.getenv("VIP_LINK", "https://t.me/PLACEHOLDER_VIP")          # TODO: real VIP team invite
 YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@pocketoption?si=gb2BpGjz2SzhMOH6s")  # TODO: real YouTube channel
 
-# Query parameter the affiliate panel reads back as the sub-ID. server.py's
-# TRADER_KEYS/SUBID_KEYS are still best guesses, and this is the outbound half
-# of the same unknown: it MUST match the macro the panel actually echoes into
-# its postback, or the join in server.py will never find a row. Env-overridable
-# so the name can be corrected without a deploy of new code.
-REF_SUB_PARAM = os.getenv("REF_SUB_PARAM", "sub_id")
+# Query parameter the affiliate panel reads back as the sub-ID. CONFIRMED
+# against the Pocket Option panel: it echoes this value into its postbacks as
+# click_id, so that is the name we must send. This is the outbound half of the
+# join - change it and server.py's SUBID_KEYS together, or the probe there
+# stops finding rows. Still env-overridable so a panel-side rename can be
+# absorbed without a code deploy.
+REF_SUB_PARAM = os.getenv("REF_SUB_PARAM", "click_id")
 
 
 def ref_url(sub_id, base=None):

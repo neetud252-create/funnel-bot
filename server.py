@@ -29,11 +29,15 @@ AMOUNT_KEYS = ("sumdep", "amount", "sum", "deposit", "payout", "revenue", "value
 REG_EVENTS = {"reg", "registration", "signup", "lead"}
 
 # The sub-ID specifically, for the attribution probe below. Narrower than
-# TRADER_KEYS on purpose: TRADER_KEYS also matches the panel's OWN trader id
-# ("trader_id", "uid", "user_id"), which is not a value we ever sent and must
-# not be mistaken for our sub-ID. config.REF_SUB_PARAM is the name we send;
-# the rest are the aliases a panel might echo it back under.
-SUBID_KEYS = ("sub_id", "subid", "sub1", "sub_id1", "click_id", "clickid")
+# TRADER_KEYS on purpose: TRADER_KEYS also matches the panel's OWN trader id,
+# and the live postbacks send BOTH -
+#   ?trader_id={trader_id}&event=reg&click_id={click_id}
+#   ?trader_id={trader_id}&event=dep&sumdep={sumdep}&click_id={click_id}
+# - so reading the sub-ID off TRADER_KEYS would pick up trader_id, a value we
+# never sent, and report a match that means nothing. click_id is the confirmed
+# name (it must stay in step with config.REF_SUB_PARAM, the outbound half);
+# clickid is the one spelling variant worth tolerating.
+SUBID_KEYS = ("click_id", "clickid")
 
 
 @app.get("/")
@@ -56,13 +60,22 @@ def _pick(m, keys):
 
 
 def _norm_amount(v):
+    """The running deposit total this postback reports, or None if it reports none.
+
+    None and Decimal(0) are deliberately different: db.upsert_trader writes a
+    reported total ABSOLUTELY, so None means "leave the stored total alone"
+    while 0 would overwrite it with zero. A missing macro reports no total, and
+    so does a malformed one - guessing 0 there would erase a real deposit.
+    """
     if v is None:
-        return Decimal(0)
+        return None
     s = str(v).strip().replace(",", ".")
     try:
         return Decimal(s)
     except (InvalidOperation, ValueError):
-        return Decimal(0)
+        log.warning("postback: amount %r is not a number - treated as no total "
+                    "reported, stored deposit left unchanged", v)
+        return None
 
 
 @app.api_route("/postback/{secret}", methods=["GET", "POST"])
@@ -100,7 +113,10 @@ async def postback(secret: str, request: Request):
         event = _pick(m, EVENT_KEYS)
         amount = _norm_amount(_pick(m, AMOUNT_KEYS))
         if event is not None and str(event).strip().lower() in REG_EVENTS:
-            amount = Decimal(0)
+            # A registration reports no deposit total. None rather than 0:
+            # the total is written absolutely now, and a 0 here would erase
+            # whatever an earlier deposit postback stored.
+            amount = None
         if trader_id is not None:
             ev = str(event) if event is not None else None
             await db.upsert_trader(str(trader_id), ev, amount)
