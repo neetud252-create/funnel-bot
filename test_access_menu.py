@@ -66,7 +66,7 @@ EXPECTED = {
     "Get Bot Access": ("go:register", None, "success"),
     "Quick Setup Guide": (None, "https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy",
                           "primary"),
-    "\U00002B50 Review": ("results", None, "danger"),
+    "\U00002B50 Review": (None, "https://t.me/Goplusfeedback", "danger"),
     "Support": (None, config.SUPPORT_URL, "danger"),
     "YouTube": (None, config.YOUTUBE_URL, "primary"),
     "\U0001F4A1 Forex Tips": (None, config.FOREX_TIPS_URL, "primary"),
@@ -220,8 +220,17 @@ def main():
     check("YouTube reuses YOUTUBE_URL, the same constant the menu uses",
           'url:" + YOUTUBE_URL' in config_src.split('"access":')[1]
           .split('"register":')[0], "access screen does not use YOUTUBE_URL")
-    check("Review reuses the existing results handler",
-          '@dp.callback_query(F.data == "results")' in bot_src)
+    _review = next(b for b in flat if b.text.endswith("Review"))
+    check("Review opens the feedback channel",
+          _review.url == "https://t.me/Goplusfeedback", repr(_review.url))
+    check("Review is a URL button now, not a callback",
+          _review.callback_data is None, repr(_review.callback_data))
+    # The reviews-album handler is no longer what Review opens, but it is still
+    # reached from the ai screen - this change orphaned nothing.
+    check("the results handler still exists and is still reachable",
+          '@dp.callback_query(F.data == "results")' in bot_src
+          and "cb:results" in str(config.SCREENS["ai"]["kb"]),
+          str(config.SCREENS["ai"]["kb"]))
     check("FOREX_TIPS_URL is env-backed like every other link",
           'FOREX_TIPS_URL = os.getenv("FOREX_TIPS_URL"' in config_src)
     check("its placeholder is still a valid URL, so the button renders",

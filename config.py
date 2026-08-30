@@ -662,7 +662,10 @@ SCREENS = {
         # The five added buttons all reuse destinations that already existed:
         #   Quick Setup Guide - the "How to Register" video, the same URL the
         #                       register screen's own button opens
-        #   Review            - cb:results, the reviews album handler in bot.py
+        #   Review            - the public feedback channel. This one button is
+        #                       a URL rather than the cb:results reviews album;
+        #                       that handler is untouched and still reached from
+        #                       the ai screen, so nothing was orphaned.
         #   Support           - SUPPORT_URL, as on the register and menu screens
         #   YouTube           - YOUTUBE_URL, as on the menu screen
         #   Forex Tips        - FOREX_TIPS_URL, the one destination this project
@@ -674,7 +677,7 @@ SCREENS = {
         # lightbulb and inventing one would render nothing at all.
         "kb": [[("Get Bot Access", "cb:go:register", "success", "6280525956771745921")],
                [("Quick Setup Guide", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary", E_REG_BTN_HOW)],
-               [("⭐ Review", "cb:results", "danger"),
+               [("⭐ Review", "url:https://t.me/Goplusfeedback", "danger"),
                 ("Support", "url:" + SUPPORT_URL, "danger", E_MENU_SUPPORT)],
                [("YouTube", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE),
                 ("💡 Forex Tips", "url:" + FOREX_TIPS_URL, "primary")]],
