@@ -22,9 +22,18 @@ The response is 204 on success because the caller is sendBeacon, which
 discards the body. 400 and 429 are returned rather than folded into 204 so the
 endpoint stays observable from outside; the browser ignores them either way.
 
-The body is read raw rather than declared as a JSON parameter, because
-sendBeacon cannot send application/json without a preflight it does not
-support - real beacons arrive as text/plain. That is asserted too.
+Both transports are asserted, because both must survive the same abuse:
+
+  - POST with a raw body, never inspecting the content type. Requiring
+    application/json would force a CORS preflight, and a navigation landing
+    between the OPTIONS and the POST loses the beacon.
+  - GET with the payload flattened into query parameters, fired as an image.
+    Never preflighted, not subject to CORS at all, and issued by the browser
+    rather than the document, so it outlives the navigation that started it.
+
+_store_click is the single place a click is validated or written, and this file
+asserts the two paths agree: same cid rule, same limiter budget, same columns
+from the same beacon.
 
 This test drives the real handler with a fake database. It opens no socket,
 runs no migration and writes nothing.
@@ -125,9 +134,12 @@ def _install_stub_modules():
             pass
 
         class Response:
-            def __init__(self, status_code=200, content=None):
+            def __init__(self, status_code=200, content=None,
+                         media_type=None, headers=None):
                 self.status_code = status_code
                 self.content = content
+                self.media_type = media_type
+                self.headers = headers or {}
 
         class FastAPI:
             def __init__(self, *a, **k):
@@ -177,6 +189,26 @@ class FakeRequest:
         return self._body
 
 
+class FakeGetRequest:
+    """A query-string beacon: GET /click?cid=...&utm_source=..."""
+
+    def __init__(self, params, ip="203.0.113.7", xff=None):
+        self.query_params = {k: str(v) for k, v in params.items()
+                             if v is not None}
+        self.headers = {}
+        if xff is not None:
+            self.headers["x-forwarded-for"] = xff
+        self.client = types.SimpleNamespace(host=ip)
+
+
+def as_query(body):
+    """The same beacon a POST would send, flattened the way an image tag is."""
+    flat = {k: v for k, v in body.items() if k != "utm"}
+    for field, value in (body.get("utm") or {}).items():
+        flat["utm_" + field] = value
+    return flat
+
+
 # The beacon exactly as the landing page sends it. ts is epoch milliseconds
 # from Date.now(), which is what the page actually produces.
 BEACON = {
@@ -195,6 +227,8 @@ OPTIONAL_COLUMNS = ("event_id", "fbclid", "fbp", "client_ts", "referrer",
 
 
 async def main_async(server, config, db, records):
+    server_src = open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
+
     def beacon(**overrides):
         return dict(BEACON, **overrides)
 
@@ -205,10 +239,10 @@ async def main_async(server, config, db, records):
         records.clear()
         if not keep_rate:
             server._click_hits.clear()
-        return await server.click(FakeRequest(body, **kw))
+        return await server.click_post(FakeRequest(body, **kw))
 
     # --- the documented beacon ---------------------------------------------
-    print("\n[click] the beacon the landing page sends")
+    print("\n[click/post] the beacon the landing page sends")
     r = await post(BEACON)
     check("a well-formed beacon is answered 204", r.status_code == 204,
           str(r.status_code))
@@ -258,7 +292,7 @@ async def main_async(server, config, db, records):
           open(os.path.join(ROOT, "db.py"), encoding="utf-8").read())
 
     # --- sendBeacon's content type -----------------------------------------
-    print("\n[click] sendBeacon's content type is not application/json")
+    print("\n[click/post] no preflight: the content type is never inspected")
     for name, ctype in (("text/plain", "text/plain;charset=UTF-8"),
                         ("an absent content-type", ""),
                         ("application/json", "application/json")):
@@ -318,7 +352,7 @@ async def main_async(server, config, db, records):
     # --- log hygiene --------------------------------------------------------
     print("\n[click] no raw request content ever reaches the log")
     records.clear()
-    await server.click(FakeRequest(beacon(cid="<script>alert(1)</script>",
+    await server.click_post(FakeRequest(beacon(cid="<script>alert(1)</script>",
                                           referrer="javascript:alert(1)",
                                           event_id="'; DROP TABLE clicks;--")))
     joined = " ".join(records)
@@ -328,7 +362,7 @@ async def main_async(server, config, db, records):
     check("a rejected cid is reported by type and length only",
           "type=str" in joined and "len=" in joined, joined[:200])
     records.clear()
-    await server.click(FakeRequest(b"{not json", ip="198.51.100.4"))
+    await server.click_post(FakeRequest(b"{not json", ip="198.51.100.4"))
     check("an unparseable body is reported by size only",
           any("unparseable body" in m and "bytes=9" in m for m in records),
           str(records))
@@ -386,6 +420,110 @@ async def main_async(server, config, db, records):
           0 < len(db._clicks["utm_long"]["utm_ad"]) < len(long_ad),
           str(len(db._clicks["utm_long"]["utm_ad"] or "")))
 
+    # --- the image-beacon transport ----------------------------------------
+    print("\n[click/get] the same beacon as query parameters")
+
+    async def get(params, keep_rate=False, **kw):
+        records.clear()
+        if not keep_rate:
+            server._click_hits.clear()
+        return await server.click_get(FakeGetRequest(params, **kw))
+
+    r = await get(as_query(beacon(cid="g_full")))
+    check("a query-string beacon is accepted", r.status_code == 200,
+          str(r.status_code))
+    check("it answers with an image, so onload fires",
+          r.media_type == "image/gif", str(r.media_type))
+    check("the image is a real GIF", (r.content or b"")[:6] == b"GIF89a",
+          repr((r.content or b"")[:6]))
+    check("the pixel is never cached, or a repeat beacon is never sent",
+          "no-store" in (r.headers or {}).get("Cache-Control", ""),
+          str(r.headers))
+    row = db._clicks.get("g_full")
+    check("the query beacon is stored", row is not None, str(sorted(db._clicks)))
+    if row:
+        check("flat utm_* parameters fill the same four columns",
+              (row["utm_source"], row["utm_campaign"], row["utm_adset"],
+               row["utm_ad"]) == ("fb", "go-plus-aug", "lookalike-1", "video-a"),
+              str(row))
+        check("the Meta fields survive the query transport",
+              (row["event_id"], row["fbclid"], row["fbp"])
+              == (BEACON["event_id"], BEACON["fbclid"], BEACON["fbp"]),
+              str(row))
+        check("Date.now() as a STRING is still read as epoch milliseconds",
+              row["client_ts"] is not None and row["client_ts"].year == 2025,
+              repr(row["client_ts"]))
+
+    r = await get({"cid": "g_bracket", "utm[source]": "fb",
+                   "utm[campaign]": "bracketed"})
+    check("the utm[source] spelling is understood when it is the only one",
+          (db._clicks["g_bracket"]["utm_source"],
+           db._clicks["g_bracket"]["utm_campaign"]) == ("fb", "bracketed"),
+          str(db._clicks.get("g_bracket")))
+    r = await get({"cid": "g_both", "utm_source": "flat",
+                   "utm[source]": "bracketed"})
+    check("the flat spelling wins when a beacon sends both",
+          db._clicks["g_both"]["utm_source"] == "flat",
+          str(db._clicks.get("g_both")))
+
+    print("\n[click/get] the two transports store the same thing")
+    await post(beacon(cid="same_post"))
+    await get(as_query(beacon(cid="same_get")))
+    via_post = dict(db._clicks["same_post"])
+    via_get = dict(db._clicks["same_get"])
+    via_post.pop("raw"), via_get.pop("raw")
+    check("every stored column matches across transports",
+          via_post == via_get,
+          "%s != %s" % (via_post, via_get))
+    check("raw keeps whatever actually arrived on each",
+          db._clicks["same_get"]["raw"] != db._clicks["same_post"]["raw"])
+
+    print("\n[click/get] validation is the POST path's, not a second copy")
+    check("there is exactly one place a click is validated",
+          server_src.count("REF_CODE_RE.match") == 1, server_src)
+    check("and exactly one place a click is written",
+          server_src.count("db.save_click") == 1, server_src)
+    before_bad = len(db._clicks)
+    for name, bad_cid in (("a dotted", "ab.cd"), ("an HTML-shaped",
+                          "<script>alert(1)</script>"), ("an over-long",
+                          "a" * 65), ("an empty", "")):
+        r = await get(dict(as_query(BEACON), cid=bad_cid))
+        check("%s cid is refused with 400 on the GET path too" % name,
+              r.status_code == 400, str(r.status_code))
+        check("a refused GET returns no pixel to load",
+              getattr(r, "content", None) is None, repr(getattr(r, "content", None)))
+    r = await get({k: v for k, v in as_query(BEACON).items() if k != "cid"})
+    check("a GET with no cid at all is refused", r.status_code == 400,
+          str(r.status_code))
+    check("not one bad GET wrote a row", len(db._clicks) == before_bad,
+          "%d rows" % len(db._clicks))
+
+    records.clear()
+    await server.click_get(FakeGetRequest(
+        dict(as_query(BEACON), cid="<script>alert(1)</script>",
+             referrer="javascript:alert(1)")))
+    joined = " ".join(records)
+    for needle in ("<script>", "alert(1)", "javascript:"):
+        check("%r never reaches the log from a GET either" % needle,
+              needle not in joined, joined[:200])
+    check("the log says which transport carried the rejection",
+          "via get" in joined, joined[:200])
+
+    r = await get(dict(as_query(BEACON), cid="g_big",
+                       referrer="x" * (config.CLICK_MAX_BYTES + 100)))
+    check("an oversized query string is refused with 400",
+          r.status_code == 400, str(r.status_code))
+    check("and stores nothing", "g_big" not in db._clicks)
+
+    print("\n[click/get] first write wins across transports")
+    await post(beacon(cid="cross"))
+    r = await get(dict(as_query(BEACON), cid="cross", event_id="OVERWRITTEN"))
+    check("a GET cannot overwrite a click a POST already stored",
+          db._clicks["cross"]["event_id"] == BEACON["event_id"],
+          str(db._clicks["cross"]))
+    check("and is still answered with the pixel", r.status_code == 200,
+          str(r.status_code))
+
     # --- rate limiting ------------------------------------------------------
     print("\n[click] the per-IP rate limit")
     server._click_hits.clear()
@@ -401,6 +539,25 @@ async def main_async(server, config, db, records):
           r.status_code == 204, str(r.status_code))
     check("the limiter logs the address and the limit, never the payload",
           not any("fbclid" in m or "IwAR" in m for m in records), str(records))
+
+    print("\n[click] one budget covers both transports")
+    server._click_hits.clear()
+    for i in range(limit):
+        await get(dict(as_query(BEACON), cid="mix%d" % i), keep_rate=True,
+                  ip="192.0.2.30")
+    r = await post(beacon(cid="mix_post"), keep_rate=True, ip="192.0.2.30")
+    check("a POST cannot take a second budget after GETs spent the first",
+          r.status_code == 429, str(r.status_code))
+    server._click_hits.clear()
+    for i in range(limit):
+        await post(beacon(cid="mixp%d" % i), keep_rate=True, ip="192.0.2.31")
+    r = await get(dict(as_query(BEACON), cid="mix_get"), keep_rate=True,
+                  ip="192.0.2.31")
+    check("nor a GET after POSTs spent it", r.status_code == 429,
+          str(r.status_code))
+    check("the GET path reads the forwarded address the same way",
+          server._client_ip(FakeGetRequest({}, ip="10.0.0.1",
+                                           xff="1.1.1.1, 2.2.2.2")) == "2.2.2.2")
 
     print("\n[click] the limiter's key cannot be forged")
     check("the RIGHTMOST forwarded address is the key",
@@ -462,8 +619,20 @@ async def main_async(server, config, db, records):
               kw.get("allow_origins") == [LANDING_ORIGIN], str(kw))
         check("the origin is never a wildcard",
               "*" not in (kw.get("allow_origins") or []), str(kw))
-        check("only POST and its preflight are allowed",
-              kw.get("allow_methods") == ["POST", "OPTIONS"], str(kw))
+        check("only the beacon methods and their preflight are allowed",
+              kw.get("allow_methods") == ["GET", "POST", "OPTIONS"], str(kw))
+    saved_origins = config.CLICK_ORIGINS
+    try:
+        # An image request is not a CORS request at all, so the GET transport
+        # has to keep working with no allowed origin configured - which is the
+        # state this service is actually deployed in right now.
+        config.CLICK_ORIGINS = []
+        r = await get({"cid": "no_cors"})
+        check("the image transport works with no CLICK_ORIGIN configured",
+              r.status_code == 200 and "no_cors" in db._clicks,
+              str(r.status_code))
+    finally:
+        config.CLICK_ORIGINS = saved_origins
 
     # --- nothing else moved -------------------------------------------------
     print("\n[click] the postback endpoint is untouched")
@@ -486,9 +655,7 @@ async def main_async(server, config, db, records):
     check("a wrong secret is still refused",
           result == {"status": "forbidden"}, str(result))
     check("/click did not become a second postback path",
-          "upsert_trader" not in
-          open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
-          .split("async def click(")[1])
+          "upsert_trader" not in server_src.split("async def click_get(")[1])
 
 
 def main():

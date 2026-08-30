@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ if config.CLICK_ORIGINS:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.CLICK_ORIGINS,
-        allow_methods=["POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["content-type"],
         max_age=600,
     )
@@ -138,7 +139,16 @@ def _parse_ts(v):
                 seconds /= 1000.0
             return datetime.fromtimestamp(seconds, tz=timezone.utc)
         if isinstance(v, str):
-            parsed = datetime.fromisoformat(v.strip().replace("Z", "+00:00"))
+            text = v.strip()
+            # A query-string beacon delivers Date.now() as the STRING
+            # "1756500000000", so a numeric string is an epoch, not an ISO
+            # date. Tried first: fromisoformat would simply fail on it and
+            # every GET beacon would store a NULL client_ts.
+            try:
+                return _parse_ts(float(text))
+            except ValueError:
+                pass
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
             return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except (ValueError, OverflowError, OSError):
         return None
@@ -275,57 +285,75 @@ async def _probe_attribution(m, trader_id, event, amount):
         log.exception("postback: attribution probe failed for sub_id=%r", sub_id)
 
 
-@app.post("/click")
-async def click(request: Request):
-    """Landing-page click beacon. Public, unauthenticated, write-only.
+# A 1x1 transparent GIF. The GET path is fired as `new Image().src = ...`,
+# which is what survives a navigation that kills fetch: an image request is
+# issued by the browser itself and outlives the document that started it.
+# Answering with a real image makes onload fire and keeps the console clean;
+# the request is already delivered by the time the body matters at all.
+_PIXEL = base64.b64decode(
+    b"R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+_PIXEL_HEADERS = {
+    # Without this the browser serves a repeat beacon for the same URL out of
+    # cache and never sends the request at all.
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+}
 
-    Answers 204 with an empty body in the success case because the caller is
-    sendBeacon, which discards the response either way. 400 and 429 are
-    returned rather than folded into 204 so the endpoint is observable from the
-    outside - the browser ignores them, but a person testing it does not.
+# Query-string spellings of the nested utm object. The flat form is what an
+# image beacon builds by hand; the bracket form is what most query-string
+# serialisers emit. Both fold back into the same {"utm": {...}} shape the JSON
+# body carries, so _store_click cannot tell the two transports apart.
+_UTM_FIELDS = ("source", "campaign", "adset", "ad")
 
-    NOTHING from the request is ever logged verbatim except the cid, and the
-    cid only after it has matched config.REF_CODE_RE. Everything else is
-    reported as a length or a count. This is unauthenticated input: it reaches
-    the log, and the log is read.
+
+def _payload_from_query(params):
+    data = dict(params)
+    utm = {}
+    for field in _UTM_FIELDS:
+        value = data.pop("utm_" + field, None)
+        if value is None:
+            value = data.pop("utm[%s]" % field, None)
+        if value is not None:
+            utm[field] = value
+    if utm:
+        data["utm"] = utm
+    return data
+
+
+def _rate_check(request):
+    """Shared gate. Returns (ip, None) to proceed or (ip, 429) to refuse.
+
+    Both transports run this before reading anything else, so the limit is one
+    budget per IP across GET and POST together - splitting it would let a
+    caller take double by alternating.
     """
-    now = time.monotonic()
     ip = _client_ip(request)
-    if not _rate_ok(ip, now):
-        # The IP is logged, the payload is not - the address is the only thing
-        # worth having here and it is not attacker-authored free text.
-        log.warning("/click rate limited ip=%s (over %s per %ss)",
-                    ip, config.CLICK_RATE_MAX, config.CLICK_RATE_WINDOW)
-        return Response(status_code=429)
+    if _rate_ok(ip, time.monotonic()):
+        return ip, None
+    log.warning("/click rate limited ip=%s (over %s per %ss)",
+                ip, config.CLICK_RATE_MAX, config.CLICK_RATE_WINDOW)
+    return ip, 429
 
-    # Read the body ourselves rather than declaring a JSON body parameter.
-    # sendBeacon sends a Blob whose type is usually text/plain (the only JSON
-    # it can send without a preflight it does not support), so a handler that
-    # required application/json would reject the real caller.
-    raw = await request.body()
-    if len(raw) > config.CLICK_MAX_BYTES:
-        log.warning("/click oversized body ip=%s bytes=%d limit=%d",
-                    ip, len(raw), config.CLICK_MAX_BYTES)
-        return Response(status_code=400)
-    try:
-        data = json.loads(raw or b"{}")
-    except (ValueError, UnicodeDecodeError):
-        log.warning("/click unparseable body ip=%s bytes=%d", ip, len(raw))
-        return Response(status_code=400)
-    if not isinstance(data, dict):
-        log.warning("/click body is %s, not an object, ip=%s",
-                    type(data).__name__, ip)
-        return Response(status_code=400)
 
+async def _store_click(data, ip, transport):
+    """Validate and store one click, whichever transport carried it.
+
+    Returns 400 when the cid is unusable and 204 when the click was accepted -
+    stored, a duplicate, or lost to a database error. The caller cannot act on
+    the difference between those three and is not told them apart.
+
+    This is the ONLY place a click is validated or written, so the GET and POST
+    paths cannot drift into two different sets of rules.
+    """
     cid = data.get("cid")
     if not isinstance(cid, str) or not config.REF_CODE_RE.match(cid):
         # Length and type only. An invalid cid is exactly the input that must
         # not be echoed, since it is the field an attacker controls most
         # directly and the one most likely to be crafted.
-        log.warning("/click rejected cid ip=%s type=%s len=%s", ip,
-                    type(cid).__name__,
+        log.warning("/click rejected cid via %s ip=%s type=%s len=%s",
+                    transport, ip, type(cid).__name__,
                     len(cid) if isinstance(cid, str) else "n/a")
-        return Response(status_code=400)
+        return 400
 
     utm = data.get("utm")
     if not isinstance(utm, dict):
@@ -345,11 +373,88 @@ async def click(request: Request):
             raw=data,
         )
     except Exception:
-        # 204 even so. The landing page cannot act on a failure and a retry
-        # would only repeat it; the exception is on record for us instead.
+        # Accepted even so. The landing page cannot act on a failure and a
+        # retry would only repeat it; the exception is on record for us.
         log.exception("/click could not store cid=%s", cid)
-        return Response(status_code=204)
+        return 204
 
-    log.info("/click cid=%s ip=%s %s", cid, ip,
+    log.info("/click cid=%s via=%s ip=%s %s", cid, transport, ip,
              "stored" if stored else "duplicate, first write kept")
-    return Response(status_code=204)
+    return 204
+
+
+@app.get("/click")
+async def click_get(request: Request):
+    """Image-beacon transport: GET /click?cid=...&event_id=...&utm_source=...
+
+    Exists because a POST the page has to negotiate is a POST the page can
+    lose. A simple GET is never preflighted, and fired as an image it is not
+    subject to CORS at all - nothing on this path depends on CLICK_ORIGIN being
+    right, and nothing is left in flight when the document goes away.
+
+    Validation, rate limiting and storage are the POST path's, unchanged; only
+    the way the fields arrive differs. Nested utm arrives flattened, which
+    _payload_from_query folds back into the shape the JSON body has.
+    """
+    ip, refused = _rate_check(request)
+    if refused:
+        return Response(status_code=refused)
+
+    params = dict(request.query_params)
+    # Same ceiling as the body, for the same reason. A query string past this
+    # is not a beacon, and most front ends would have truncated it anyway.
+    size = sum(len(str(k)) + len(str(v)) for k, v in params.items())
+    if size > config.CLICK_MAX_BYTES:
+        log.warning("/click oversized query ip=%s chars=%d limit=%d",
+                    ip, size, config.CLICK_MAX_BYTES)
+        return Response(status_code=400)
+
+    status = await _store_click(_payload_from_query(params), ip, "get")
+    if status != 204:
+        return Response(status_code=status)
+    return Response(content=_PIXEL, media_type="image/gif",
+                    headers=_PIXEL_HEADERS)
+
+
+@app.post("/click")
+async def click_post(request: Request):
+    """Beacon transport: POST /click with a JSON body.
+
+    Kept as a SIMPLE request so no preflight is involved: the body is read raw
+    and the content type is never inspected, so the page may send text/plain -
+    one of the three types CORS treats as simple - and the browser issues the
+    POST directly. sendBeacon does this by default. A page that sends
+    application/json instead forces a preflight, and a navigation landing
+    between the OPTIONS and the POST loses the beacon entirely; that is what
+    the GET path above exists to sidestep.
+
+    Answers 204 with an empty body because the caller discards it. 400 and 429
+    are returned rather than folded into 204 so the endpoint is observable from
+    the outside - the browser ignores them, but a person testing it does not.
+
+    NOTHING from the request is ever logged verbatim except the cid, and the
+    cid only after it has matched config.REF_CODE_RE.
+    """
+    ip, refused = _rate_check(request)
+    if refused:
+        return Response(status_code=refused)
+
+    # Read the body ourselves rather than declaring a JSON body parameter.
+    # Requiring application/json would both reject the text/plain a simple
+    # request must use and force the preflight this endpoint avoids.
+    raw = await request.body()
+    if len(raw) > config.CLICK_MAX_BYTES:
+        log.warning("/click oversized body ip=%s bytes=%d limit=%d",
+                    ip, len(raw), config.CLICK_MAX_BYTES)
+        return Response(status_code=400)
+    try:
+        data = json.loads(raw or b"{}")
+    except (ValueError, UnicodeDecodeError):
+        log.warning("/click unparseable body ip=%s bytes=%d", ip, len(raw))
+        return Response(status_code=400)
+    if not isinstance(data, dict):
+        log.warning("/click body is %s, not an object, ip=%s",
+                    type(data).__name__, ip)
+        return Response(status_code=400)
+
+    return Response(status_code=await _store_click(data, ip, "post"))
