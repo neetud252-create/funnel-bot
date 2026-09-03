@@ -182,6 +182,33 @@ async def send_media(bot, tg_id, key, is_video, text, kb):
         return await send(tg_id, FSInputFile(asset_path(key, ext)), caption=text,
                           parse_mode="HTML", reply_markup=kb)
 
+async def send_review_album(bot, tg_id):
+    """send_media()'s contract, for the one screen that cannot use it.
+
+    The reviews go out as an album, and send_media_group is a single call: one
+    stale file_id fails the whole group ("Wrong file identifier/HTTP URL
+    specified" against message #1) rather than one photo. A file_id issued to a
+    different bot is never valid here, so drop every cached review id and retry
+    once from the assets already in the repo.
+    """
+    media = [InputMediaPhoto(media=photo_for(k)) for k in config.REVIEWS]
+    try:
+        return await bot.send_media_group(tg_id, media)
+    except TelegramBadRequest:
+        cached = [k for k, item in zip(config.REVIEWS, media)
+                  if isinstance(item.media, str)]
+        if not cached:
+            raise               # a fresh upload failed; nothing to retry with
+        logging.warning("cached album file_id rejected for %s - dropping and "
+                        "re-uploading", ", ".join(repr(k) for k in cached))
+        for key in cached:
+            await _forget(key, "jpg")
+        # Every item from disk: Telegram only names the first bad one, so a
+        # partial retry could trip straight over the next stale id.
+        return await bot.send_media_group(
+            tg_id, [InputMediaPhoto(media=FSInputFile(asset_path(k, "jpg")))
+                    for k in config.REVIEWS])
+
 async def load_media_cache():
     """One query at startup. Photo vs video is inferred from which file exists,
     which is why the table carries no kind column."""
@@ -645,8 +672,7 @@ async def results(cb: CallbackQuery, bot: Bot):
     await cb.answer()
     tg_id = cb.from_user.id
     await wipe(bot, tg_id)
-    media = [InputMediaPhoto(media=photo_for(k)) for k in config.REVIEWS]
-    msgs = await bot.send_media_group(tg_id, media)
+    msgs = await send_review_album(bot, tg_id)
     for k, msg in zip(config.REVIEWS, msgs):
         await remember(k, msg)
     s = config.SCREENS["results"]
