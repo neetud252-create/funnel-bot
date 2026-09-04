@@ -680,7 +680,7 @@ SCREENS = {
                [("⭐ Review", "url:https://t.me/Goplusfeedback", "danger"),
                 ("Support", "url:" + SUPPORT_URL, "danger", E_MENU_SUPPORT)],
                [("YouTube", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE),
-                ("Channel", "url:https://t.me/apexxtraderz", "primary")]],
+                ("Channel", "url:" + CHANNEL_URL, "primary")]],
     },
     "register": {
         "photo": "register",

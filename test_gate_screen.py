@@ -58,7 +58,7 @@ CAPTION_EMOJI = [
 
 # callback/url -> (expected label, expected icon id, expected style)
 BUTTONS = [
-    ("https://t.me/apexxtraderz", "Join Channel", "5397916757333654639", "primary"),
+    (config.CHANNEL_URL, "Join Channel", "5397916757333654639", "primary"),
     ("check_sub", "Check Subscription", "5260463209562776385", "success"),
 ]
 
@@ -76,7 +76,8 @@ def main():
     check("invites the user to join the free channel",
           "Join our free trading channel to activate the bot:" in text, repr(text))
     check("names the channel as an @mention",
-          "@apexxtraderz" in text, repr(text))
+          config.CHANNEL_MENTION.startswith("@")
+          and config.CHANNEL_MENTION in text, repr(text))
     check("the mention is bare, so Telegram auto-links it",
           "<a " not in text and "](" not in text, repr(text))
     check("closes by pointing at the buttons",

@@ -71,13 +71,13 @@ SECOND_BUTTON = {
     "text": "Open Telegram channel",
     "icon_custom_emoji_id": "5220069871072583573",
     "style": "primary",
-    "url": "https://t.me/apexxtraderz",
+    "url": config.CHANNEL_URL,
 }
 
 EXPECT_PLAIN = ("Real feedback from active Go+ traders.\n\n"
                 "☝️ The screenshots above are just a tiny fraction of the results.\n\n"
                 "\U0001F91D More feedback is published on our trading channel:\n\n"
-                "\U0001F449 \U0001F50A@apexxtraderz")
+                "\U0001F449 \U0001F50A" + config.CHANNEL_MENTION)
 
 
 def strip_all(html):
@@ -117,11 +117,12 @@ def main():
 
     # --- the channel handle --------------------------------------------------
     print("\n[results] the channel handle")
-    check("@apexxtraderz is present", "@apexxtraderz" in plain, repr(plain))
+    check("the channel handle is present",
+          config.CHANNEL_MENTION in plain, repr(plain))
     check("it is the derived CHANNEL_MENTION, not a second hardcoded copy",
           config.CHANNEL_MENTION in text, config.CHANNEL_MENTION)
-    check("the handle resolves to https://t.me/apexxtraderz",
-          config.CHANNEL_URL == "https://t.me/apexxtraderz", config.CHANNEL_URL)
+    check("the handle resolves to a public t.me channel URL",
+          config.CHANNEL_URL.startswith("https://t.me/"), config.CHANNEL_URL)
     check("handle and CHANNEL_URL name the same channel",
           config.CHANNEL_URL.rsplit("/", 1)[-1]
           == config.CHANNEL_MENTION.lstrip("@"),
@@ -129,7 +130,7 @@ def main():
     check("the mention is bare, so Telegram auto-links it",
           "<a " not in text, repr(text))
     check("no space between the speaker and the handle",
-          "\U0001F50A@apexxtraderz" in plain, repr(plain))
+          "\U0001F50A" + config.CHANNEL_MENTION in plain, repr(plain))
     check("one space between the pointing finger and the speaker",
           "\U0001F449 \U0001F50A" in plain, repr(plain))
     # This screen is a photo caption, which has no link preview either way.
