@@ -1,0 +1,36 @@
+name: Update bot links
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace bot links
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('config.py')
+          s = p.read_text()
+          s = s.replace('https://t.me/Goplusfeedback', 'https://t.me/goplustrade_reviews')
+          s = s.replace('https://youtube.com/@pocketoption?si=gb2BpGjz2SzhMOH6s', 'https://youtube.com/@apextraderrz?si=Meme1VIiOkjaV-Ql')
+          p.write_text(s)
+          PY
+      - name: Commit changes
+        run: |
+          if git diff --quiet -- config.py; then
+            echo "Links already updated"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config.py
+          git commit -m "Update Review and YouTube channel links"
+          git push
