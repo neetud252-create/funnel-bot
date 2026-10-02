@@ -64,6 +64,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT F
 -- already in the table.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS game_tokens INTEGER NOT NULL DEFAULT 0;
 
+-- Gift progress is per Telegram user. The file itself is stored by Telegram;
+-- bot_settings below keeps only this bot's reusable file_id.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gift_sent_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gift_acknowledged_at TIMESTAMPTZ;
+
 -- Deep-link tracking id from t.me/<bot>?start=<code>, captured by /start and
 -- owned by the landing page that generated it. Nothing in the funnel reads it;
 -- it exists to attribute a tg_id to the link that produced it.
@@ -90,6 +95,11 @@ CREATE TABLE IF NOT EXISTS media_cache (
     file_id      TEXT NOT NULL,
     content_hash TEXT,
     updated_at   TIMESTAMPTZ DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS bot_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS postbacks (
     id         BIGSERIAL PRIMARY KEY,
@@ -279,6 +289,39 @@ async def drop_media_cache(asset_key: str):
     # Called when Telegram rejects a stored file_id, so the next send re-uploads.
     async with pool.acquire() as c:
         await c.execute("DELETE FROM media_cache WHERE asset_key=$1", asset_key)
+
+
+# --- Configured downloadable gift -------------------------------------------
+async def set_setting(key: str, value: str):
+    async with pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO bot_settings (setting_key, setting_value, updated_at)
+            VALUES ($1, $2, now())
+            ON CONFLICT (setting_key) DO UPDATE SET
+                setting_value = EXCLUDED.setting_value,
+                updated_at = now()
+        """, key, value)
+
+
+async def get_setting(key: str):
+    async with pool.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT setting_value FROM bot_settings WHERE setting_key=$1", key)
+        return row["setting_value"] if row else None
+
+
+async def mark_gift_sent(tg_id: int):
+    async with pool.acquire() as c:
+        await c.execute(
+            "UPDATE users SET gift_sent_at=COALESCE(gift_sent_at, now()) "
+            "WHERE tg_id=$1", tg_id)
+
+
+async def acknowledge_gift(tg_id: int):
+    async with pool.acquire() as c:
+        await c.execute(
+            "UPDATE users SET gift_acknowledged_at="
+            "COALESCE(gift_acknowledged_at, now()) WHERE tg_id=$1", tg_id)
 
 # --- Group C: affiliate postbacks ---
 async def log_postback(raw: dict):
@@ -474,6 +517,8 @@ _RESET_SQL = """
            nudge_msg_id       = NULL,
            ref_code           = NULL,
            ref_code_at        = NULL,
+           gift_sent_at       = NULL,
+           gift_acknowledged_at = NULL,
            last_checked       = NULL
      WHERE tg_id = $1
     RETURNING tg_id

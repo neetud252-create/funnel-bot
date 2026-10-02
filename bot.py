@@ -452,6 +452,7 @@ async def show(bot, tg_id, key):
     if key == "menu":
         # The menu caption is a template ({limit}/{used}/{left}); routing it
         # here means no caller can render it raw and leak the braces on screen.
+        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id)
     elif key == "register":
         # Same reason, one step further: this caption is a template ({ref}) AND
@@ -529,6 +530,106 @@ def _is_admin(tg_id):
     # ADMIN_IDS is empty unless it is set in Railway, so every admin command is
     # inert until it is - the safe default for an unconfigured service.
     return tg_id in config.ADMIN_IDS
+
+
+GIFT_FILE_ID_KEY = "money_management_gift_file_id"
+GIFT_FILE_NAME_KEY = "money_management_gift_file_name"
+
+
+@dp.message(Command("setgift"))
+async def cmd_setgift(m: Message):
+    """Save an Excel document uploaded to the Go+ bot by an administrator."""
+    if not _is_admin(m.from_user.id):
+        logging.warning("non-admin %s tried /setgift", m.from_user.id)
+        return
+    document = getattr(m, "document", None)
+    name = (getattr(document, "file_name", None) or "").strip()
+    if not document or not name.lower().endswith((".xlsx", ".xls")):
+        await m.answer(
+            "Attach the .xlsx or .xls file as a document and put /setgift "
+            "in the file caption.")
+        return
+    await db.set_setting(GIFT_FILE_ID_KEY, document.file_id)
+    await db.set_setting(GIFT_FILE_NAME_KEY, name)
+    await m.answer(
+        "✅ GIFT UPLOADED\n\n"
+        f"File: {name}\n"
+        "It will now be delivered after a UID is confirmed as registered "
+        "through our link.")
+
+
+def _gift_ack_kb():
+    return build_kb([[("I Downloaded My Gift", "cb:gift:downloaded", "success")]])
+
+
+async def _send_gift(bot, tg_id):
+    """Deliver the configured Excel gift once. Returns True when configured."""
+    file_id = await db.get_setting(GIFT_FILE_ID_KEY)
+    if not file_id:
+        logging.warning("gift requested for tg_id=%s but /setgift is not configured", tg_id)
+        return False
+    user = await db.get_user(tg_id)
+    if user and _row_field(user, "gift_sent_at"):
+        if _row_field(user, "gift_acknowledged_at"):
+            await _show_start_trading(bot, tg_id)
+        else:
+            await bot.send_message(
+                tg_id,
+                "🎁 <b>Your free Money Management Sheet was delivered above.</b>\n\n"
+                "Download it, then confirm below.",
+                parse_mode="HTML", reply_markup=_gift_ack_kb())
+        return True
+    name = await db.get_setting(GIFT_FILE_NAME_KEY) or "Apex Trader Money Management.xlsx"
+    await bot.send_document(
+        tg_id, file_id,
+        caption=("🎁 <b>Account confirmed — your free gift is ready.</b>\n\n"
+                 "Download the Apex Trader Money Management Excel sheet, "
+                 "then tap the button below."),
+        parse_mode="HTML", reply_markup=_gift_ack_kb())
+    await db.mark_gift_sent(tg_id)
+    logging.info("gift delivered tg_id=%s file=%r", tg_id, name)
+    return True
+
+
+async def _show_start_trading(bot, tg_id):
+    user = await db.get_user(tg_id)
+    if user and user["verified"]:
+        text = ("✅ <b>Your account and deposit are verified.</b>\n\n"
+                "Tap Start Trading to open Go+.")
+    else:
+        text = ("🚀 <b>Your gift is unlocked.</b>\n\n"
+                "Tap Start Trading. Deposit at least "
+                f"<b>${config.MIN_DEPOSIT}</b>, then send your account ID "
+                "again so the bot can confirm your balance and unlock Go+.")
+    await bot.send_message(
+        tg_id, text, parse_mode="HTML",
+        reply_markup=build_kb([[('Start Trading', 'cb:gift:start', 'success')]]))
+
+
+@dp.callback_query(F.data == "gift:downloaded")
+async def gift_downloaded(cb: CallbackQuery, bot: Bot):
+    await cb.answer("Gift confirmed")
+    await db.acknowledge_gift(cb.from_user.id)
+    await _show_start_trading(bot, cb.from_user.id)
+
+
+@dp.callback_query(F.data == "gift:start")
+async def gift_start(cb: CallbackQuery, bot: Bot, state: FSMContext):
+    await cb.answer()
+    tg_id = cb.from_user.id
+    user = await db.get_user(tg_id)
+    if user and user["verified"]:
+        await _show_menu(bot, tg_id)
+        return
+    await state.set_state(Reg.waiting_uid.state)
+    await bot.send_message(
+        tg_id,
+        "💰 <b>Deposit and verify</b>\n\n"
+        f"Add <b>${config.MIN_DEPOSIT}</b> or more to your trading account. "
+        "After depositing, send your account ID here again.",
+        parse_mode="HTML",
+        reply_markup=build_kb([[('Deposit Now', 'url:' + await _ref_url(tg_id),
+                                  'success')]]))
 
 # --- Admin: development reset -----------------------------------------------
 # Walks the funnel from the top as if the sender had never used the bot, on the
@@ -1196,20 +1297,29 @@ async def _run_verification(bot, tg_id, uid):
     if status == config.VERIFY_GRANTED:
         await db.set_verified(tg_id, detail)
         await _clear_nudge(bot, tg_id)
-        # Verified: drop the ack and hand the user the main menu.
+        # Verified: drop the ack, deliver the registration gift, then hand the
+        # user the main menu. Gift delivery is idempotent per Telegram user.
         try:
             await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
         except Exception:
             pass
+        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id)
         return status
     if status == config.VERIFY_NEED_DEPOSIT:
-        # Per-screen override: bare label, its own icon. The wrong-link
-        # verdict below deliberately keeps the helper's defaults.
-        await _replace(bot, tg_id, ack.message_id, config.MSG_NEED_DEPOSIT,
-                       _register_btn(label="Register & Get Access",
-                                     icon=config.E_NEED_DEP_REG,
-                                     url=await _ref_url(tg_id)))
+        # Campaign match proves the account was created through our link. That
+        # is the gift gate; deposit remains the later Go+ access gate.
+        try:
+            await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
+        except Exception:
+            pass
+        if not await _send_gift(bot, tg_id):
+            # Safe fallback until an admin uploads the workbook to THIS bot.
+            await bot.send_message(
+                tg_id, config.MSG_NEED_DEPOSIT, parse_mode="HTML",
+                reply_markup=build_kb(_register_btn(
+                    label="Register & Get Access", icon=config.E_NEED_DEP_REG,
+                    url=await _ref_url(tg_id))))
         return status
     if status == config.VERIFY_WRONG_LINK:
         await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK,
@@ -1377,6 +1487,7 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         # menu. Same reasoning as /start - a stale flag costs nothing, an
         # avoidable lookup risks a FloodWait that hits everyone.
         await state.clear()
+        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id)
         return
     if not UID_RE.fullmatch(uid):
@@ -1444,6 +1555,7 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         logging.warning("VERIFY_MODE=test: bypassing verification for tg_id=%s uid=%s", tg_id, uid)
         await db.set_verified(tg_id, Decimal(0))
         await _clear_nudge(bot, tg_id)
+        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id, test_mode=True)
         return
     # Stamped only where a panel lookup actually happens - the TEST_MODE
@@ -1486,6 +1598,7 @@ async def retry_worker(bot):
                         await db.set_verified(r["tg_id"], dep)
                         await _clear_nudge(bot, r["tg_id"])
                         try:
+                            await _send_gift(bot, r["tg_id"])
                             await _show_menu(bot, r["tg_id"])
                         except Exception:
                             logging.exception("retry_worker: notify failed for %s", r["tg_id"])

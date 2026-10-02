@@ -51,7 +51,8 @@ def _install_stub_modules():
                 "signals_used_today": 0, "last_reset_date": None,
                 "verified": False, "verified_at": None, "uid": None,
                 "deposit": 0, "last_checked": None, "nudge_msg_id": None,
-                "username": None, "game_tokens": 0}
+                "username": None, "game_tokens": 0,
+                "gift_sent_at": None, "gift_acknowledged_at": None}
 
     def _u(tg_id):
         return db._users.setdefault(tg_id, _fresh_row())
@@ -163,6 +164,7 @@ def _install_stub_modules():
             "is_premium": False, "ui_msg_id": None, "album_ids": None,
             "nudge_msg_id": None, "last_checked": None,
             "ref_code": None, "ref_code_at": None,
+            "gift_sent_at": None, "gift_acknowledged_at": None,
         })
         return True
 
@@ -199,11 +201,28 @@ def _install_stub_modules():
 
     db._media_cache = {}
 
+    db._settings = {}
+
+    async def set_setting(key, value):
+        db._settings[key] = value
+
+    async def get_setting(key):
+        return db._settings.get(key)
+
+    async def mark_gift_sent(tg_id):
+        if _u(tg_id)["gift_sent_at"] is None:
+            _u(tg_id)["gift_sent_at"] = "now"
+
+    async def acknowledge_gift(tg_id):
+        if _u(tg_id)["gift_acknowledged_at"] is None:
+            _u(tg_id)["gift_acknowledged_at"] = "now"
+
     for fn in (get_user, set_ui_msg, set_album, signal_state, consume_signal,
                set_premium, is_premium, touch_user, save_ref_code,
                reset_user, unverify,
                set_nudge_msg, uid_owners, save_uid_only, set_verified,
                load_media_cache, save_media_cache, drop_media_cache,
+               set_setting, get_setting, mark_gift_sent, acknowledge_gift,
                unlock_premium, game_tokens, add_tokens, set_tokens):
         setattr(db, fn.__name__, fn)
     sys.modules["db"] = db
@@ -288,6 +307,14 @@ class FakeBot:
         self.calls.append({"kind": "video", "id": mid, "body": caption,
                            "markup": reply_markup, "parse_mode": parse_mode,
                            "asset": str(getattr(video, "path", video))})
+        return FakeMsg(mid, caption=caption)
+
+    async def send_document(self, chat_id, document, caption=None,
+                            parse_mode=None, reply_markup=None):
+        mid = self._mid()
+        self.calls.append({"kind": "document", "id": mid, "body": caption,
+                           "markup": reply_markup, "parse_mode": parse_mode,
+                           "asset": str(document)})
         return FakeMsg(mid, caption=caption)
 
     async def send_media_group(self, chat_id, media):
