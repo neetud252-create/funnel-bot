@@ -34,7 +34,7 @@ REF_LINK    = os.getenv("REF_LINK", "https://example.com/PLACEHOLDER_REF")
 SUPPORT     = os.getenv("SUPPORT", "https://t.me/flashhher")   # TODO: real support handle (was @go_plus_supportbot)
 SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
 VIP_LINK    = os.getenv("VIP_LINK", "https://t.me/PLACEHOLDER_VIP")          # TODO: real VIP team invite
-YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@pocketoption?si=gb2BpGjz2SzhMOH6s")  # TODO: real YouTube channel
+YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@apextraderrz?si=Meme1VIiOkjaV-Ql")  # TODO: real YouTube channel
 # Forex Tips button on the access screen. The project had NO existing forex-tips
 # destination, so this is a configuration slot rather than a link anyone chose:
 # the placeholder keeps the button renderable (build_kb drops a button whose URL
@@ -677,7 +677,7 @@ SCREENS = {
         # lightbulb and inventing one would render nothing at all.
         "kb": [[("Get Bot Access", "cb:go:register", "success", "6280525956771745921")],
                [("Quick Setup Guide", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary", E_REG_BTN_HOW)],
-               [("⭐ Review", "url:https://t.me/Goplusfeedback", "danger"),
+               [("⭐ Review", "url:https://t.me/goplustrade_reviews", "danger"),
                 ("Support", "url:" + SUPPORT_URL, "danger", E_MENU_SUPPORT)],
                [("YouTube", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE),
                 ("Channel", "url:" + CHANNEL_URL, "primary")]],
