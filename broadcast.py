@@ -12,6 +12,7 @@ from aiogram.exceptions import (
     TelegramNetworkError, TelegramServerError,
 )
 import db
+import config
 
 SCHEMA = """
 ALTER TABLE users ADD COLUMN IF NOT EXISTS broadcast_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
@@ -64,14 +65,15 @@ def controls(post):
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def recipient_keyboard(post):
+def recipient_keyboard(post, recipient):
     # These callbacks are separate from the existing funnel callbacks.
     rows = []
     if post['button_kind'] != 'none':
         rows.append([InlineKeyboardButton(text=BUTTONS[post['button_kind']],
                                          callback_data='bc:open')])
-    rows.append([InlineKeyboardButton(text='Stop broadcast messages', callback_data='bc:stop')])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    if recipient in config.ADMIN_IDS:
+        rows.append([InlineKeyboardButton(text='Stop broadcast messages', callback_data='bc:stop')])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
 async def deliver(bot, post, recipient):
@@ -79,10 +81,12 @@ async def deliver(bot, post, recipient):
         # Telegram video notes cannot carry inline keyboards; send controls separately.
         await bot.copy_message(recipient, post['source_chat'], post['source_message'])
         await asyncio.sleep(1.05)
-        await bot.send_message(recipient, 'Go+ update', reply_markup=recipient_keyboard(post))
+        markup = recipient_keyboard(post, recipient)
+        if markup:
+            await bot.send_message(recipient, 'Go+ update', reply_markup=markup)
     else:
         await bot.copy_message(recipient, post['source_chat'], post['source_message'],
-                               reply_markup=recipient_keyboard(post))
+                               reply_markup=recipient_keyboard(post, recipient))
 
 
 async def count_recipients(post):

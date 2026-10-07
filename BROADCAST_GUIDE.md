@@ -24,7 +24,7 @@ broadcast's delivered, blocked, failed, uncertain, skipped, and remaining counts
 An automatic report is sent at completion. Do not delete the source post until
 delivery completes, because the bot copies it from Telegram.
 
-Recipients can tap **Stop broadcast messages** or send `/unsubscribe`.
+Only admins see the **Stop broadcast messages** button. Recipients can send `/unsubscribe`.
 `/subscribe` enables broadcasts again. These commands do not affect bot access.
 Blocked and unsubscribed users are excluded. Round videos receive their buttons
 in a separate message because video notes cannot carry inline keyboards.

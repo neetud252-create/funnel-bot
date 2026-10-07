@@ -74,10 +74,20 @@ class BroadcastTests(unittest.IsolatedAsyncioTestCase):
         await B.deliver(self.bot, post(button_kind='register'), 9)
         markup = self.bot.copy_message.await_args.kwargs['reply_markup']
         self.assertEqual(markup.inline_keyboard[0][0].callback_data, 'bc:open')
-        self.assertEqual(markup.inline_keyboard[-1][0].callback_data, 'bc:stop')
-        await B.deliver(self.bot, post(video_note=True), 10)
+        self.assertEqual(len(markup.inline_keyboard), 1)
+        with patch.object(B.config, 'ADMIN_IDS', [10]):
+            await B.deliver(self.bot, post(video_note=True), 10)
         self.assertEqual(self.bot.copy_message.await_args.args, (10, 1, 5))
         self.assertEqual(self.bot.send_message.await_args.args[0], 10)
+
+    async def test_stop_button_only_visible_to_admin(self):
+        with patch.object(B.config, 'ADMIN_IDS', [1]):
+            self.assertIsNone(B.recipient_keyboard(post(), 9))
+            admin = B.recipient_keyboard(post(), 1)
+            self.assertEqual(admin.inline_keyboard[0][0].callback_data, 'bc:stop')
+            user = B.recipient_keyboard(post(button_kind='open'), 9)
+            self.assertEqual(len(user.inline_keyboard), 1)
+            self.assertEqual(user.inline_keyboard[0][0].callback_data, 'bc:open')
 
     async def test_enqueue_claims_draft_once_and_snapshots_recipients(self):
         # MagicMock supplies the asynchronous context manager protocol.
