@@ -1154,11 +1154,11 @@ LIMIT_KB = [[("\U000000AB Back", "cb:go:menu")]]
 DEFAULT_PAIR = "AUD/CAD OTC"
 
 # Delayed follow-up sent a few seconds after the register screen opens (bot.py).
-REGISTER_NUDGE = (pe(E_NUDGE_WARN, NUDGE_WARN_FALLBACK)
-                  + " Only 2 Go+ activations left today."
-                  "\n\nNo extensions. No second chance.\n\n"
-                  + pe(E_NUDGE_ROCKET, NUDGE_ROCKET_FALLBACK)
-                  + " Activate Go+ now.")
+REGISTER_NUDGE = (
+    "🎁 <b>Your $50 Money Management Sheet is on us!</b>\n"
+    "Register through our link today and get it <b>completely FREE.</b>\n"
+    "🚀 Create your account, return here, and claim your gift!"
+)
 
 # --- Group F verification verdict messages (pe() style, factual, no scarcity) ---
 _MINDEP = str(int(MIN_DEPOSIT)) if MIN_DEPOSIT == MIN_DEPOSIT.to_integral_value() else str(MIN_DEPOSIT)
