@@ -39,10 +39,12 @@ async def main():
     assert buttons[0][0].callback_data == "gift:downloaded"
     assert fake_db._users[tg_id]["gift_sent_at"] == "now"
 
-    # A repeated UID cannot send another copy of the workbook.
+    # A repeated UID must receive another copy of the workbook.
     bot2 = H.FakeBot()
     await bot_mod._run_verification(bot2, tg_id, "123456789")
-    assert not [c for c in bot2.calls if c["kind"] == "document"]
+    repeat_docs = [c for c in bot2.calls if c["kind"] == "document"]
+    assert len(repeat_docs) == 1, repeat_docs
+    assert repeat_docs[0]["asset"] == "go-plus-file-id"
 
     cb = H.FakeCB(tg_id, "gift:downloaded", 12)
     bot3 = H.FakeBot()
@@ -50,6 +52,13 @@ async def main():
     assert fake_db._users[tg_id]["gift_acknowledged_at"] == "now"
     start_messages = [c for c in bot3.calls if c["kind"] == "text"]
     assert start_messages[-1]["markup"].inline_keyboard[0][0].callback_data == "gift:start"
+
+    # Acknowledging a previous gift must not suppress future attachments.
+    bot_after_ack = H.FakeBot()
+    await bot_mod._run_verification(bot_after_ack, tg_id, "123456789")
+    ack_docs = [c for c in bot_after_ack.calls if c["kind"] == "document"]
+    assert len(ack_docs) == 1, ack_docs
+    assert ack_docs[0]["asset"] == "go-plus-file-id"
 
     state = H.FakeState()
     cb2 = H.FakeCB(tg_id, "gift:start", 13)
@@ -71,7 +80,7 @@ async def main():
     finally:
         config.ADMIN_IDS = old_admins
 
-    print("PASS - registered UID receives one gift, then reaches deposit verification.")
+    print("PASS - registered UID receives the gift every time, including after acknowledgement.")
 
 
 if __name__ == "__main__":

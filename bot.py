@@ -563,22 +563,11 @@ def _gift_ack_kb():
 
 
 async def _send_gift(bot, tg_id):
-    """Deliver the configured Excel gift once. Returns True when configured."""
+    """Deliver the configured Excel gift on every request. Returns True when configured."""
     file_id = await db.get_setting(GIFT_FILE_ID_KEY)
     if not file_id:
         logging.warning("gift requested for tg_id=%s but /setgift is not configured", tg_id)
         return False
-    user = await db.get_user(tg_id)
-    if user and _row_field(user, "gift_sent_at"):
-        if _row_field(user, "gift_acknowledged_at"):
-            await _show_start_trading(bot, tg_id)
-        else:
-            await bot.send_message(
-                tg_id,
-                "🎁 <b>Your free Money Management Sheet was delivered above.</b>\n\n"
-                "Download it, then confirm below.",
-                parse_mode="HTML", reply_markup=_gift_ack_kb())
-        return True
     name = await db.get_setting(GIFT_FILE_NAME_KEY) or "Apex Trader Money Management.xlsx"
     await bot.send_document(
         tg_id, file_id,
@@ -1298,7 +1287,7 @@ async def _run_verification(bot, tg_id, uid):
         await db.set_verified(tg_id, detail)
         await _clear_nudge(bot, tg_id)
         # Verified: drop the ack, deliver the registration gift, then hand the
-        # user the main menu. Gift delivery is idempotent per Telegram user.
+        # user the main menu. Always attach the workbook, including on retries.
         try:
             await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
         except Exception:
