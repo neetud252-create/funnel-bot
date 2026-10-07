@@ -13,6 +13,7 @@ from aiogram.exceptions import (
 )
 import db
 import config
+import activity_stats
 
 SCHEMA = """
 ALTER TABLE users ADD COLUMN IF NOT EXISTS broadcast_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
@@ -70,7 +71,7 @@ def recipient_keyboard(post, recipient):
     rows = []
     if post['button_kind'] != 'none':
         rows.append([InlineKeyboardButton(text=BUTTONS[post['button_kind']],
-                                         callback_data='bc:open')])
+                                         callback_data=f'bc:open:{post["id"]}')])
     if recipient in config.ADMIN_IDS:
         rows.append([InlineKeyboardButton(text='Stop broadcast messages', callback_data='bc:stop')])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
@@ -170,6 +171,8 @@ def install(dp, is_admin, open_funnel):
             await cb.answer('Broadcast messages stopped', show_alert=True)
             return
         if action == 'open':
+            await activity_stats.record(cb.from_user.id, 'broadcast_click',
+                                        parts[2] if len(parts) == 3 else '')
             await cb.answer()
             await open_funnel(cb, bot, state)
             return

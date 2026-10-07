@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 import uvicorn
 import db, config, panelbot
 import broadcast
+import activity_stats
 from server import app
 
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +27,7 @@ async def _broadcast_open(cb, bot, state):
 
 
 # Register before UID handlers; admin drafting never changes the funnel FSM.
+activity_stats.install(dp)
 broadcast.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
 
 class Reg(StatesGroup):
@@ -462,6 +464,8 @@ async def _screen_error(bot, tg_id):
                           tg_id)
 
 async def show(bot, tg_id, key):
+    if key == 'register':
+        await activity_stats.record(tg_id, 'registration_opened')
     s = config.SCREENS[key]
     if key == "menu":
         # The menu caption is a template ({limit}/{used}/{left}); routing it
@@ -590,6 +594,7 @@ async def _send_gift(bot, tg_id):
                  "then tap the button below."),
         parse_mode="HTML", reply_markup=_gift_ack_kb())
     await db.mark_gift_sent(tg_id)
+    await activity_stats.record(tg_id, 'gift_delivered')
     logging.info("gift delivered tg_id=%s file=%r", tg_id, name)
     return True
 
@@ -613,6 +618,7 @@ async def _show_start_trading(bot, tg_id):
 async def gift_downloaded(cb: CallbackQuery, bot: Bot):
     await cb.answer("Gift confirmed")
     await db.acknowledge_gift(cb.from_user.id)
+    await activity_stats.record(cb.from_user.id, 'gift_ack')
     await _show_start_trading(bot, cb.from_user.id)
 
 
@@ -1310,6 +1316,7 @@ async def _run_verification(bot, tg_id, uid):
         await _show_menu(bot, tg_id)
         return status
     if status == config.VERIFY_NEED_DEPOSIT:
+        await activity_stats.record(tg_id, 'referral_confirmed')
         # Campaign match proves the account was created through our link. That
         # is the gift gate; deposit remains the later Go+ access gate.
         try:
@@ -1541,6 +1548,7 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
     # goes through the full panel lookup, and access is granted on the campaign
     # + deposit check alone. Sharing is allowed by design.
     await db.save_uid_only(tg_id, uid)
+    await activity_stats.record(tg_id, 'uid_submitted')
     # ...but it is worth seeing. Never let this reporting break the funnel.
     try:
         holders = await db.uid_owners(uid)
@@ -1614,6 +1622,13 @@ async def main():
     await db.connect()
     async with db.pool.acquire() as conn:
         await conn.execute(broadcast.SCHEMA)
+        await conn.execute(activity_stats.SCHEMA)
+    # Validate dashboard queries against the live schema before accepting commands.
+    await activity_stats.report()
+    activity_middleware = activity_stats.ActivityMiddleware()
+    dp.message.outer_middleware(activity_middleware)
+    dp.callback_query.outer_middleware(activity_middleware)
+    logging.info('Admin activity statistics ready; /stats enabled')
     logging.info('Broadcast schema ready; admin drafting and delivery queue enabled')
     bot = Bot(os.environ["BOT_TOKEN"])
     if config.TEST_MODE:

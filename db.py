@@ -384,6 +384,13 @@ async def set_verified(tg_id: int, deposit):
             "verified_at=COALESCE(verified_at, now()) WHERE tg_id=$1",
             tg_id, deposit)
 
+    # Track every real grant path, including Premium checks and background retries.
+    import activity_stats
+    import config
+    if not config.TEST_MODE:
+        await activity_stats.record(tg_id, 'referral_confirmed')
+        await activity_stats.record(tg_id, 'deposit_verified')
+
 async def unverify(tg_id: int):
     # Testing helper behind /unverify. Drops the user back to the start of the
     # funnel; uid is deliberately kept so the same id can be re-sent at once.
