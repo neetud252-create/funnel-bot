@@ -9,10 +9,24 @@ from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
 from aiogram.exceptions import TelegramBadRequest
 import uvicorn
 import db, config, panelbot
+import broadcast
 from server import app
 
 logging.basicConfig(level=logging.INFO)
 dp = Dispatcher()
+
+
+async def _broadcast_open(cb, bot, state):
+    user = await db.get_user(cb.from_user.id)
+    if user and user['verified']:
+        await state.clear()
+        await _show_menu(bot, cb.from_user.id)
+    else:
+        await nav(cb.model_copy(update={'data': 'go:register'}), bot, state)
+
+
+# Register before UID handlers; admin drafting never changes the funnel FSM.
+broadcast.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
 
 class Reg(StatesGroup):
     waiting_uid = State()
@@ -1598,6 +1612,9 @@ async def retry_worker(bot):
 
 async def main():
     await db.connect()
+    async with db.pool.acquire() as conn:
+        await conn.execute(broadcast.SCHEMA)
+    logging.info('Broadcast schema ready; admin drafting and delivery queue enabled')
     bot = Bot(os.environ["BOT_TOKEN"])
     if config.TEST_MODE:
         logging.warning("VERIFY_MODE=test - panel verification is BYPASSED. "
@@ -1614,7 +1631,7 @@ async def main():
     port = int(os.environ.get("PORT", 8000))
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
-    tasks = [server.serve(), dp.start_polling(bot)]
+    tasks = [server.serve(), dp.start_polling(bot), broadcast.worker(bot)]
     if config.ENABLE_AUTO_RETRY:
         logging.info("ENABLE_AUTO_RETRY on - background re-check every 30 min")
         tasks.append(retry_worker(bot))
