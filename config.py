@@ -1155,9 +1155,9 @@ DEFAULT_PAIR = "AUD/CAD OTC"
 
 # Delayed follow-up sent a few seconds after the register screen opens (bot.py).
 REGISTER_NUDGE = (
-    "🎁 <b>Your $50 Money Management Sheet is on us!</b>\n"
-    "Register through our link today and get it <b>completely FREE.</b>\n"
-    "🚀 Create your account, return here, and claim your gift!"
+    "🎁 <b>You’ve unlocked a FREE Money Management Sheet worth $50!</b>\n\n"
+    "Register through our link today to claim your gift—<b>completely FREE.</b>\n\n"
+    "🚀 Create your account, return here, and it’s yours!"
 )
 
 # --- Group F verification verdict messages (pe() style, factual, no scarcity) ---
