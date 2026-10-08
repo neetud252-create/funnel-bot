@@ -218,10 +218,7 @@ E_BOLT  = "5895638385300606573"
 # restyled.
 E_SIG_CHART = "5451882707875276247"
 E_SIG_LENS  = "5188217332748527444"
-# Activation nudge (REGISTER_NUDGE) only. Swap these to change its emoji
-# without touching the copy. Both are rendered through pe(), which embeds the
-# plain-emoji fallback that clients without premium emoji show instead - an
-# invalid ID makes Telegram reject the whole message, so keep the fallbacks.
+# Legacy emoji IDs retained for the existing welcome-screen icon contract.
 E_NUDGE_WARN          = "5420323339723881652"
 E_NUDGE_ROCKET        = "5188481279963715781"
 NUDGE_WARN_FALLBACK   = "\U000026A0\U0000FE0F"   # warning sign
@@ -654,7 +651,7 @@ SCREENS = {
         #
         # "Get Bot Access" carries the SAME callback the old "Activate Bot"
         # button did - cb:go:register, matched by nav() in bot.py - so the
-        # activation path, the Reg.waiting_uid arming and the register nudge are
+        # activation path and Reg.waiting_uid arming are
         # reached exactly as before. Renaming the label could not change where
         # it goes: the destination is the callback string, and that is untouched.
         # Its icon is the same custom emoji id the old button used.
@@ -1154,13 +1151,6 @@ LIMIT_KB = [[("\U000000AB Back", "cb:go:menu")]]
 # TODO: the picked pair only lives in memory (bot.py _pair_choice), so a restart
 # mid-funnel falls back to this label.
 DEFAULT_PAIR = "AUD/CAD OTC"
-
-# Delayed follow-up sent a few seconds after the register screen opens (bot.py).
-REGISTER_NUDGE = (
-    "🎁 <b>You’ve unlocked a FREE Money Management Sheet worth $50!</b>\n\n"
-    "Register through our link today to claim your gift—<b>completely FREE.</b>\n\n"
-    "🚀 Create your account, return here, and it’s yours!"
-)
 
 # --- Group F verification verdict messages (pe() style, factual, no scarcity) ---
 _MINDEP = str(int(MIN_DEPOSIT)) if MIN_DEPOSIT == MIN_DEPOSIT.to_integral_value() else str(MIN_DEPOSIT)

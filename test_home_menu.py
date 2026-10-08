@@ -60,7 +60,6 @@ async def main():
             else:
                 show.assert_awaited_once_with(bot, uid, 'register')
                 assert state.state == bot_mod.Reg.waiting_uid.state
-                bot_mod._nudge_tasks.pop(uid).cancel()
                 menu.assert_not_awaited()
 
     # New users reach the requested photo immediately with tracked links in
@@ -69,7 +68,8 @@ async def main():
     fake_db._users[uid] = dict(fake_db._fresh_row(), ref_code='campaign_42')
     bot = H.FakeBot()
     state = H.FakeState()
-    await bot_mod.home_action(H.FakeCB(uid, 'home:access', 1), bot, state)
+    with patch.object(bot_mod.asyncio, 'create_task', side_effect=AssertionError('Unexpected registration task')):
+        await bot_mod.home_action(H.FakeCB(uid, 'home:access', 1), bot, state)
     screen = bot.calls[-1]
     assert screen['kind'] == 'photo' and screen['asset'] == 'assets/register.jpg'
     ref = config.ref_url('campaign_42')
@@ -82,7 +82,7 @@ async def main():
     await bot_mod.enter_registration_uid(H.FakeCB(uid, 'reg:enter_uid', 1), bot, state)
     assert bot.calls[-1]['body'] == config.MSG_ENTER_UID
     assert bot.calls[-1]['markup'].inline_keyboard[0][0].callback_data == 'go:register'
-    assert state.state == bot_mod.Reg.waiting_uid.state and uid not in bot_mod._nudge_tasks
+    assert state.state == bot_mod.Reg.waiting_uid.state
     with patch.object(bot_mod, '_verify_once', AsyncMock(return_value=config.VERIFY_GRANTED)) as verify:
         await bot_mod.capture_uid(H.FakeMessage(uid, 'not-an-ID'), bot, state)
         verify.assert_not_awaited()
@@ -97,7 +97,18 @@ async def main():
     assert bot.calls[-1]['asset'] == 'assets/register.jpg'
     await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
     assert bot.calls[-1]['kind'] == 'animation' and state.state is None
-    bot_mod._nudge_tasks.pop(uid).cancel()
+
+    # Returning users have the retired promotion removed when Telegram allows it.
+    fake_db._users[72030] = dict(fake_db._fresh_row(), nudge_msg_id=7654)
+    bot = H.FakeBot()
+    await bot_mod.start(H.FakeMessage(72030, '/start'), bot, H.FakeState())
+    assert any(call['kind'] == 'delete' and call['id'] == 7654 for call in bot.calls)
+    assert fake_db._users[72030]['nudge_msg_id'] is None
+    fake_db._users[72030]['nudge_msg_id'] = 7655
+    with patch.object(bot_mod.asyncio, 'create_task', side_effect=AssertionError('Unexpected registration task')):
+        await bot_mod.nav(H.FakeCB(72030, 'go:register', 1), bot, H.FakeState())
+    assert any(call['kind'] == 'delete' and call['id'] == 7655 for call in bot.calls)
+    assert fake_db._users[72030]['nudge_msg_id'] is None
 
     for action in ('test', 'tips'):
         cb = H.FakeCB(72000, 'home:' + action, 1)

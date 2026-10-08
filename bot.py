@@ -59,7 +59,6 @@ REF_RE = config.REF_CODE_RE
 OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
 _video_cache = {}
-_nudge_tasks = {}
 _signal_tasks = {}
 _pair_choice = {}
 _expiry_choice = {}
@@ -544,9 +543,7 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     # touch_user above has to run first: save_ref_code updates an existing row.
     # command defaults to None so /devstart's start(m, bot, state) still works.
     await _capture_ref(tg_id, command)
-    pending = _nudge_tasks.pop(tg_id, None)
-    if pending:
-        pending.cancel()
+    await _clear_nudge(bot, tg_id)
     await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)
 
 
@@ -562,6 +559,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if action == 'back':
         await cb.answer()
         await state.clear()
+        await _clear_nudge(bot, cb.from_user.id)
         await render(bot, cb.from_user.id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)
         return
     if action in home_menu.PENDING:
@@ -590,9 +588,7 @@ async def enter_registration_uid(cb: CallbackQuery, bot: Bot, state: FSMContext)
         await state.clear()
         await _show_menu(bot, tg_id)
         return
-    pending = _nudge_tasks.pop(tg_id, None)
-    if pending:
-        pending.cancel()
+    await _clear_nudge(bot, tg_id)
     await state.set_state(Reg.waiting_uid.state)
     await render(bot, tg_id, None, config.MSG_ENTER_UID,
                  [[('Back to registration', 'cb:go:register', 'primary', config.E_BACK)]])
@@ -753,10 +749,9 @@ async def cmd_devstart(m: Message, bot: Bot, state: FSMContext):
     # deliver a signal onto the fresh gate screen and spend a quota the reset
     # just cleared; a stale _uid_lookup_at would make the first account ID of
     # the new run bounce off the per-user panel cooldown.
-    for tasks in (_signal_tasks, _nudge_tasks):
-        task = tasks.pop(tg_id, None)
-        if task:
-            task.cancel()
+    task = _signal_tasks.pop(tg_id, None)
+    if task:
+        task.cancel()
     # A verification still running from the previous run would clear its own
     # entry later and could report a verdict onto the fresh funnel, so it is
     # cancelled here with the other per-user tasks.
@@ -867,34 +862,10 @@ async def results(cb: CallbackQuery, bot: Bot):
                                reply_markup=build_kb(s["kb"]))
     await db.set_ui_msg(tg_id, m.message_id)
 
-async def _register_nudge(bot, tg_id, state):
-    # Fire-and-forget follow-up ~4s after the register screen opens. Only nudges
-    # if the user is still parked on it (skips if they sent an ID or navigated
-    # away). Not recorded as ui_msg_id, so it doesn't interfere with wipe().
-    try:
-        await asyncio.sleep(4)
-        if await state.get_state() != Reg.waiting_uid.state:
-            return
-        nudge = await bot.send_message(tg_id, config.REGISTER_NUDGE, parse_mode="HTML")
-        # Recorded so _clear_nudge can remove it once the user verifies. Still
-        # not ui_msg_id - wipe()/render() must leave this message alone.
-        await db.set_nudge_msg(tg_id, nudge.message_id)
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logging.warning("register nudge failed", exc_info=True)
-    finally:
-        if _nudge_tasks.get(tg_id) is asyncio.current_task():
-            _nudge_tasks.pop(tg_id, None)
-
 async def _open_registration(bot, tg_id, state):
+    await _clear_nudge(bot, tg_id)
     await show(bot, tg_id, 'register')
     await state.set_state(Reg.waiting_uid.state)
-    # Both entry points use the same tracking, UID capture and single nudge.
-    old = _nudge_tasks.pop(tg_id, None)
-    if old:
-        old.cancel()
-    _nudge_tasks[tg_id] = asyncio.create_task(_register_nudge(bot, tg_id, state))
 
 
 @dp.callback_query(F.data.startswith("go:"))
@@ -1292,7 +1263,7 @@ async def _show_register(bot, tg_id):
 
 
 async def _clear_nudge(bot, tg_id):
-    """Delete the activation nudge once the user is verified.
+    """Clean up a promotion sent before the registration follow-up was removed.
 
     Best effort throughout: a bot may only delete its own messages, and only
     within 48 hours, so a nudge from an earlier session will fail. Logged at

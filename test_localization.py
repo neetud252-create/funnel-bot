@@ -140,13 +140,13 @@ async def check_delivery_and_selector():
         # Allow other callbacks to overlap. A different recipient still wins over context.
         await asyncio.sleep(0)
         popup = await outbound(transport, None, AnswerCallbackQuery(callback_query_id='123', text='Verified'))
-        background = await outbound(transport, None, SendMessage(chat_id=3, text=config.REGISTER_NUDGE))
+        background = await outbound(transport, None, SendMessage(chat_id=3, text=config.MSG_ENTER_UID))
         return popup.text, background.text
     answers = await asyncio.gather(*(context(callback_handler, H.FakeCB(tg_id, 'check', 1), {})
                                      for tg_id in (1, 2)))
     assert answers[0][0] == L.translate_message('Verified', 'pt')
     assert answers[1][0] == L.translate_message('Verified', 'ru')
-    assert answers[0][1] == answers[1][1] == L.translate_message(config.REGISTER_NUDGE, 'ar')
+    assert answers[0][1] == answers[1][1] == L.translate_message(config.MSG_ENTER_UID, 'ar')
     assert L._callback_user.get() is None
     # Read the DB on delivery, so a delayed job uses a choice made after it was queued.
     await save(2, 'bn')

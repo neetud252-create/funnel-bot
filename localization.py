@@ -84,7 +84,7 @@ def message_sources():
     result.extend(value for name, value in vars(config).items()
                   if isinstance(value, str) and value and (
                       name.startswith('MSG_') and not name.startswith(('MSG_ADMIN_', 'MSG_TOKENS_'))
-                      or name in ('REGISTER_NUDGE', 'SIGNAL_ANALYZING', 'SIGNAL_RESULT', 'SIGNAL_CHART')))
+                      or name in ('SIGNAL_ANALYZING', 'SIGNAL_RESULT', 'SIGNAL_CHART')))
     return tuple(dict.fromkeys(result))
 
 

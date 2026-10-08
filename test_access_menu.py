@@ -13,13 +13,11 @@ copy of the string, so a later edit to either side fails this file.
 
 Every other button reuses a destination that already existed in the project:
 
-    Quick Setup Guide -> the "How to Register" video, the same URL the register
-                         screen's own button opens
-    Review            -> cb:results, the reviews-album handler in bot.py
+    Quick Setup Guide -> the "How to Register" video, also on the welcome menu
+    Review            -> the Go+ reviews channel
     Support           -> SUPPORT_URL, as on the register and menu screens
     YouTube           -> YOUTUBE_URL, as on the menu screen
-    Forex Tips        -> FOREX_TIPS_URL, the one destination this project did
-                         not already have
+    Channel           -> CHANNEL_URL
 
 Layout and colour are pinned to the specified design: two full-width rows, then
 two rows of two. Telegram accepts exactly three button styles - success
@@ -41,6 +39,7 @@ os.chdir(ROOT)
 sys.path.insert(0, ROOT)
 
 import config
+import home_menu
 import test_signal_flow as H
 
 
@@ -66,17 +65,17 @@ EXPECTED = {
     "Get Bot Access": ("go:register", None, "success"),
     "Quick Setup Guide": (None, "https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy",
                           "primary"),
-    "\U00002B50 Review": (None, "https://t.me/Goplusfeedback", "danger"),
+    "\U00002B50 Review": (None, "https://t.me/goplustrade_reviews", "danger"),
     "Support": (None, config.SUPPORT_URL, "danger"),
     "YouTube": (None, config.YOUTUBE_URL, "primary"),
-    "\U0001F4A1 Forex Tips": (None, config.FOREX_TIPS_URL, "primary"),
+    "Channel": (None, config.CHANNEL_URL, "primary"),
 }
 
 EXPECTED_ROWS = [
     ["Get Bot Access"],
     ["Quick Setup Guide"],
     ["\U00002B50 Review", "Support"],
-    ["YouTube", "\U0001F4A1 Forex Tips"],
+    ["YouTube", "Channel"],
 ]
 
 
@@ -125,9 +124,9 @@ def main():
           'F.data.startswith("go:")' in bot_src and "async def nav(" in bot_src)
     check("nav() still arms UID capture for the register key",
           'if key == "register":' in bot_src
-          and "await state.set_state(Reg.waiting_uid)" in bot_src)
-    check("nav() still starts the register nudge",
-          "_register_nudge(bot, tg_id, state)" in bot_src)
+          and "await state.set_state(Reg.waiting_uid.state)" in bot_src)
+    check("registration no longer schedules a promotional follow-up",
+          "_register_nudge" not in bot_src and "_nudge_tasks" not in bot_src)
     check("no second activation handler was introduced",
           bot_src.count('F.data.startswith("go:")') == 1)
     check("the callback still names the register screen, which still exists",
@@ -146,9 +145,8 @@ def main():
         check("it opens the existing How-to-Register video, not a new URL",
               guide.url == "https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy",
               repr(guide.url))
-        check("that URL is the register screen's own, reused verbatim",
-              guide.url in str(config.SCREENS["register"]["kb"]),
-              str(config.SCREENS["register"]["kb"]))
+        check("the same guide is available from the welcome menu",
+              guide.url in str(home_menu.keyboard()), str(home_menu.keyboard()))
 
     # --- 5 & 6. the paired rows --------------------------------------------
     print("\n[access-menu] the layout matches the design")
@@ -162,9 +160,9 @@ def main():
         check("Review and Support share row 3",
               [b.text for b in rows[2]] == ["\U00002B50 Review", "Support"],
               str([b.text for b in rows[2]]))
-        check("YouTube and Forex Tips share row 4",
+        check("YouTube and Channel share row 4",
               [b.text for b in rows[3]]
-              == ["YouTube", "\U0001F4A1 Forex Tips"],
+              == ["YouTube", "Channel"],
               str([b.text for b in rows[3]]))
         check("Get Bot Access is alone on row 1",
               len(rows[0]) == 1 and rows[0][0].text == "Get Bot Access",
@@ -208,7 +206,7 @@ def main():
           styles.count("success") == 1 and styles[0] == "success", str(styles))
     check("Review and Support are the red pair",
           styles[2] == "danger" and styles[3] == "danger", str(styles))
-    check("Quick Setup Guide, YouTube and Forex Tips are blue",
+    check("Quick Setup Guide, YouTube and Channel are blue",
           styles[1] == "primary" and styles[4] == "primary"
           and styles[5] == "primary", str(styles))
 
@@ -222,7 +220,7 @@ def main():
           .split('"register":')[0], "access screen does not use YOUTUBE_URL")
     _review = next(b for b in flat if b.text.endswith("Review"))
     check("Review opens the feedback channel",
-          _review.url == "https://t.me/Goplusfeedback", repr(_review.url))
+          _review.url == "https://t.me/goplustrade_reviews", repr(_review.url))
     check("Review is a URL button now, not a callback",
           _review.callback_data is None, repr(_review.callback_data))
     # The reviews-album handler is no longer what Review opens, but it is still
