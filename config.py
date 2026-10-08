@@ -1104,9 +1104,10 @@ MSG_ACCOUNT_ID_INVALID = ("\U00002757 <b>That account ID is not valid.</b>\n\n"
                           "Example: <b>123456789</b>\n\n"
                           "Send your account ID again to continue.")
 
-MSG_ENTER_UID = ("👇 <b>Send your Pocket Option account ID below.</b>\n\n"
-                 "Please note: Your ID must contain numbers only — no extra symbols\n\n"
-                 "Example: <b>123456789</b>")
+UID_GUIDE_PHOTO = 'account_id_guide'
+MSG_ENTER_UID = ("⛔ Enter Your Pocket Option Trader ID\n\n"
+                 "📌 You can find it in your Pocket Option account settings.\n\n"
+                 "⚡ Send your Trader ID to continue.")
 
 # A second tap once Premium is held. The unlock statement refuses it (its WHERE
 # requires is_premium = FALSE), so nothing was deducted and this only says so.

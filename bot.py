@@ -93,6 +93,8 @@ def asset_path(key, ext):
     # unchanged on disk and upload it with its actual filename.
     if key == home_menu.PHOTO and ext == 'jpg':
         ext = home_menu.PHOTO_EXT
+    elif key == config.UID_GUIDE_PHOTO and ext == 'jpg':
+        ext = 'png'
     return "assets/" + key + "." + ext
 
 def content_hash(path):
@@ -265,7 +267,8 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4')}
+    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4'),
+           (config.UID_GUIDE_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -590,8 +593,8 @@ async def enter_registration_uid(cb: CallbackQuery, bot: Bot, state: FSMContext)
         return
     await _clear_nudge(bot, tg_id)
     await state.set_state(Reg.waiting_uid.state)
-    await render(bot, tg_id, None, config.MSG_ENTER_UID,
-                 [[('Back to registration', 'cb:go:register', 'primary', config.E_BACK)]])
+    await render(bot, tg_id, config.UID_GUIDE_PHOTO, config.MSG_ENTER_UID,
+                 [[('❌ Cancel', 'cb:home:back', 'success')]])
 
 
 @dp.callback_query(F.data.startswith('lang:'))

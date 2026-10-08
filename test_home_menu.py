@@ -80,9 +80,16 @@ async def main():
     assert not fake_db._users[uid]['verified']
 
     await bot_mod.enter_registration_uid(H.FakeCB(uid, 'reg:enter_uid', 1), bot, state)
+    assert bot.calls[-1]['kind'] == 'photo'
+    assert bot.calls[-1]['asset'] == 'assets/account_id_guide.png'
     assert bot.calls[-1]['body'] == config.MSG_ENTER_UID
-    assert bot.calls[-1]['markup'].inline_keyboard[0][0].callback_data == 'go:register'
+    cancel = bot.calls[-1]['markup'].inline_keyboard[0][0]
+    assert cancel.text == '❌ Cancel' and cancel.style == 'success'
+    assert cancel.callback_data == 'home:back'
     assert state.state == bot_mod.Reg.waiting_uid.state
+    await bot_mod.home_action(H.FakeCB(uid, cancel.callback_data, 1), bot, state)
+    assert state.state is None and bot.calls[-1]['body'] == home_menu.TEXT
+    await bot_mod.enter_registration_uid(H.FakeCB(uid, 'reg:enter_uid', 1), bot, state)
     with patch.object(bot_mod, '_verify_once', AsyncMock(return_value=config.VERIFY_GRANTED)) as verify:
         await bot_mod.capture_uid(H.FakeMessage(uid, 'not-an-ID'), bot, state)
         verify.assert_not_awaited()
