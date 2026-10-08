@@ -2,9 +2,10 @@
 import config
 
 TEXT = (
-    "👋 <b>Welcome to Go+ — Your Personal Trading Assistant</b>\n\n"
-    "📈 Explore trading tools, guides, and account support in one place.\n\n"
-    "⚡ Get started below, view the guide, or contact our support team."
+    "👋 <b>Welcome to Go+ — Your Personal AI Trading Assistant!</b>\n\n"
+    "🤖 Explore <b>AI-powered market analysis, trading signals, and easy-to-follow guides</b>"
+    "—all in one place.\n\n"
+    "⚡️ Get started below, view the guide, or contact our support team."
 )
 
 
