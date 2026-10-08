@@ -631,13 +631,11 @@ async def devstart_tests(bot_mod, fake_db, config):
         sends = [c for c in fake_bot.calls if c["kind"] != "delete"]
         check("/devstart sends exactly one screen", len(sends) == 1,
               str([c["kind"] for c in sends]))
-        gate = config.SCREENS["gate"]
-        check("/devstart lands on the gate screen",
-              gate["text"] in (sends[-1]["body"] or ""), repr(sends[-1]["body"]))
-        check("/devstart shows the gate artwork",
-              (sends[-1]["asset"] or "").replace("\\", "/").endswith("assets/gate.jpg"),
-              repr(sends[-1]["asset"]))
-        check("the new gate message becomes the tracked screen",
+        check("/devstart lands on the welcome menu",
+              bot_mod.home_menu.TEXT == sends[-1]["body"], repr(sends[-1]["body"]))
+        check("/devstart shows the text welcome interface",
+              sends[-1]["kind"] == "text" and sends[-1]["asset"] is None)
+        check("the new welcome message becomes the tracked screen",
               row["ui_msg_id"] == sends[-1]["id"],
               "%s vs %s" % (row["ui_msg_id"], sends[-1]["id"]))
         check("/devstart clears the FSM state",
@@ -683,17 +681,17 @@ async def devstart_tests(bot_mod, fake_db, config):
               not _is_admin_gated_start(bot_src),
               "the /start handler grew an ADMIN_IDS check")
 
-        # A verified admin must still reach the menu through /start - /devstart
-        # is the only thing that sends them back down the funnel.
+        # Verified users see the same home menu and retain access via its button.
         vip = 7106
         _dirty_user(fake_db, vip)
         menu_bot = FakeBot()
         await bot_mod.start(FakeMessage(vip, "/start"), menu_bot, FakeState())
         body = last_screen(menu_bot)["body"] or ""
-        check("a verified user's /start goes straight to the menu",
-              "Go+ main menu" in body, repr(body[:60]))
-        check("that menu still shows their tier",
-              "\U0001F3C6 Premium" in body, repr(body))
+        check("a verified user's /start shows the welcome menu",
+              body == bot_mod.home_menu.TEXT, repr(body[:60]))
+        await bot_mod.home_action(FakeCB(vip, 'home:access', 1), menu_bot, FakeState())
+        check("Get Bot Access still shows their Premium menu",
+              "\U0001F3C6 Premium" in (last_screen(menu_bot)["body"] or ""))
     finally:
         config.ADMIN_IDS = saved_admins
 
@@ -717,13 +715,10 @@ async def devstart_tests(bot_mod, fake_db, config):
     check("/devstart reuses the shared ADMIN_IDS gate",
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
-    # /start is upstream's, not ours: it branches verified users to the menu.
-    # These pin that shape so a later edit here cannot quietly revert it.
-    check("/start keeps upstream's verified shortcut",
-          'if user and user["verified"]:' in bot_src
-          and "await _show_menu(bot, tg_id)" in bot_src)
-    check("/start still opens the gate for everyone else",
-          'await show(bot, tg_id, "gate")' in bot_src)
+    check("/start renders the home menu",
+          'await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())' in bot_src)
+    check("Get Bot Access retains the subscription gate",
+          "await show(bot, tg_id, 'gate')" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",
           "await start(m, bot, state)" in bot_src)
     check("/devstart clears the nudge before the reset nulls its id",

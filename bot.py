@@ -11,6 +11,7 @@ import uvicorn
 import db, config, panelbot
 import broadcast
 import activity_stats
+import home_menu
 from server import app
 
 logging.basicConfig(level=logging.INFO)
@@ -513,24 +514,34 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     await state.clear()
     tg_id = m.from_user.id
     await db.touch_user(tg_id, m.from_user.username)
-    # Deep-link tracking id, captured BEFORE the verified shortcut below
-    # returns - a returning user still arrives through a landing link, and
-    # reading it after that branch would silently drop every one of them.
+    # Capture attribution for both new and returning users before the home screen.
     # touch_user above has to run first: save_ref_code updates an existing row.
     # command defaults to None so /devstart's start(m, bot, state) still works.
     await _capture_ref(tg_id, command)
-    user = await db.get_user(tg_id)
-    if user and user["verified"]:
-        # Verified users go straight to the menu and never re-enter the funnel
-        # or the intro sequence. The stored flag is trusted deliberately - the
-        # panel bot is NOT re-queried here. Panel lookups are rate limited and
-        # serialised behind a lock, so one per /start would risk a FloodWait;
-        # panelbot then raises PanelUnavailable("floodwait") and NO verification
-        # succeeds for ANY user until it clears. A stale flag costs nothing; a
-        # FloodWait breaks the funnel for everyone at once.
-        await _show_menu(bot, tg_id)
+    pending = _nudge_tasks.pop(tg_id, None)
+    if pending:
+        pending.cancel()
+    await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())
+
+
+@dp.callback_query(F.data.startswith("home:"))
+async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
+    action = cb.data.split(":", 1)[1]
+    if action in home_menu.PENDING:
+        await cb.answer(home_menu.PENDING[action], show_alert=True)
         return
-    await show(bot, tg_id, "gate")
+    if action != 'access':
+        await cb.answer()
+        return
+    await cb.answer()
+    await state.clear()
+    tg_id = cb.from_user.id
+    user = await db.get_user(tg_id)
+    if user and user['verified']:
+        # Trust the saved verification just as /start did before the welcome menu.
+        await _show_menu(bot, tg_id)
+    else:
+        await show(bot, tg_id, 'gate')
 
 @dp.message(Command("unverify"))
 async def unverify_cmd(m: Message):
