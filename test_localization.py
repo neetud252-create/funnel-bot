@@ -14,6 +14,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 import home_menu
 import localization as L
+import emoji_theme
 import test_signal_flow as H
 
 
@@ -120,7 +121,9 @@ async def check_delivery_and_selector():
     assert result.reply_markup.inline_keyboard[0][0].callback_data == 'home:access'
     assert result.reply_markup.inline_keyboard[0][0].style == 'success'
     assert result.reply_markup.inline_keyboard[0][1].url == markup.inline_keyboard[0][1].url
-    assert result.model_dump(exclude_defaults=True)['reply_markup']['inline_keyboard'][0][0]['text'] == '💎 Получить доступ'
+    assert result.model_dump(exclude_defaults=True)['reply_markup']['inline_keyboard'][0][0]['text'] == 'Получить доступ'
+    assert result.reply_markup.inline_keyboard[0][0].icon_custom_emoji_id == '5427168083074628963'
+    assert '5773793517482546530' in result.text
 
     async def callback_handler(event, data):
         # Allow other callbacks to overlap. A different recipient still wins over context.
@@ -137,7 +140,7 @@ async def check_delivery_and_selector():
     # Read the DB on delivery, so a delayed job uses a choice made after it was queued.
     await save(2, 'bn')
     result = await outbound(transport, None, original)
-    assert result.text == L.translate_message(home_menu.TEXT, 'bn')
+    assert result.text == emoji_theme.html(L.translate_message(home_menu.TEXT, 'bn'))
     assert await L.language_for(99999) == 'en'
     with patch.object(db, 'get_user', AsyncMock(side_effect=RuntimeError('offline'))):
         assert await L.language_for(2) == 'en'

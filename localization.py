@@ -8,6 +8,7 @@ from pathlib import Path
 from string import Formatter
 import logging
 import re
+import emoji_theme
 
 LANGUAGES = (
     ('en', 'English 🇬🇧'), ('ru', 'Russian 🇷🇺'),
@@ -147,6 +148,10 @@ def localize_method(method, language):
         value = getattr(method, field, None)
         if isinstance(value, str):
             translated = translate_message(value, language)
+            # Telegram callback alerts are plain text. Only HTML messages/captions
+            # accept tg-emoji entities; keep their existing plain-text fallbacks.
+            if getattr(method, 'parse_mode', None) == 'HTML':
+                translated = emoji_theme.html(translated)
             if translated != value:
                 updates[field] = translated
     markup = getattr(method, 'reply_markup', None)
@@ -155,6 +160,7 @@ def localize_method(method, language):
         for row in markup.inline_keyboard:
             buttons = []
             for button in row:
+                button = emoji_theme.button(button)
                 callback = button.callback_data or ''
                 # Language names stay recognizable from any selected language.
                 # Admin campaign controls keep their original wording.
