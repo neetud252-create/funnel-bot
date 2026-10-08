@@ -52,7 +52,7 @@ async def main():
                 show.assert_awaited_once_with(bot, uid, 'gate')
                 menu.assert_not_awaited()
 
-    for action in ('test', 'language', 'tips'):
+    for action in ('test', 'tips'):
         cb = H.FakeCB(72000, 'home:' + action, 1)
         bot = H.FakeBot()
         state = H.FakeState()

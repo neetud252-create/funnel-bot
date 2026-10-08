@@ -12,6 +12,7 @@ import db, config, panelbot
 import broadcast
 import activity_stats
 import home_menu
+import localization
 from server import app
 
 logging.basicConfig(level=logging.INFO)
@@ -527,6 +528,17 @@ async def start(m: Message, bot: Bot, state: FSMContext,
 @dp.callback_query(F.data.startswith("home:"))
 async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     action = cb.data.split(":", 1)[1]
+    if action == 'language':
+        await cb.answer()
+        language = await localization.language_for(cb.from_user.id)
+        await render(bot, cb.from_user.id, None, localization.SELECTOR_TEXT,
+                     localization.selector_keyboard(language))
+        return
+    if action == 'back':
+        await cb.answer()
+        await state.clear()
+        await render(bot, cb.from_user.id, None, home_menu.TEXT, home_menu.keyboard())
+        return
     if action in home_menu.PENDING:
         await cb.answer(home_menu.PENDING[action], show_alert=True)
         return
@@ -542,6 +554,18 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await _show_menu(bot, tg_id)
     else:
         await show(bot, tg_id, 'gate')
+
+
+@dp.callback_query(F.data.startswith('lang:'))
+async def choose_language(cb: CallbackQuery, bot: Bot):
+    language = cb.data.split(':', 1)[1]
+    if language not in localization.CODES:
+        await cb.answer('Please choose a language from the list.', show_alert=True)
+        return
+    await db.set_language(cb.from_user.id, language)
+    await cb.answer('Language saved.')
+    await render(bot, cb.from_user.id, None, localization.SELECTOR_TEXT,
+                 localization.selector_keyboard(language))
 
 @dp.message(Command("unverify"))
 async def unverify_cmd(m: Message):
@@ -1642,6 +1666,11 @@ async def main():
     logging.info('Admin activity statistics ready; /stats enabled')
     logging.info('Broadcast schema ready; admin drafting and delivery queue enabled')
     bot = Bot(os.environ["BOT_TOKEN"])
+    language_context = localization.UserContextMiddleware()
+    dp.message.outer_middleware(language_context)
+    dp.callback_query.outer_middleware(language_context)
+    bot.session.middleware(localization.OutboundMiddleware())
+    logging.info('Localization ready: 12 languages; saved per user')
     if config.TEST_MODE:
         logging.warning("VERIFY_MODE=test - panel verification is BYPASSED. "
                         "Set VERIFY_MODE=live before real users.")

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at   TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 -- Backfill for users verified before verified_at existed. set_verified wrote
 -- last_checked at the moment of verification, so it is the best record we have.
@@ -227,6 +228,16 @@ async def user_by_ref_code(code: str):
 async def get_user(tg_id: int):
     async with pool.acquire() as c:
         return await c.fetchrow("SELECT * FROM users WHERE tg_id=$1", tg_id)
+
+async def set_language(tg_id: int, language: str):
+    from localization import CODES
+    if language not in CODES:
+        raise ValueError('Unsupported bot language')
+    async with pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO users (tg_id, language) VALUES ($1, $2)
+            ON CONFLICT (tg_id) DO UPDATE SET language=EXCLUDED.language
+        """, tg_id, language)
 
 async def set_ui_msg(tg_id: int, msg_id: int):
     async with pool.acquire() as c:
