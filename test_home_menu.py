@@ -58,8 +58,46 @@ async def main():
                 menu.assert_awaited_once_with(bot, uid)
                 show.assert_not_awaited()
             else:
-                show.assert_awaited_once_with(bot, uid, 'gate')
+                show.assert_awaited_once_with(bot, uid, 'register')
+                assert state.state == bot_mod.Reg.waiting_uid.state
+                bot_mod._nudge_tasks.pop(uid).cancel()
                 menu.assert_not_awaited()
+
+    # New users reach the requested photo immediately with tracked links in
+    # both the caption and Register button; typing an ID is already enabled.
+    uid = 72020
+    fake_db._users[uid] = dict(fake_db._fresh_row(), ref_code='campaign_42')
+    bot = H.FakeBot()
+    state = H.FakeState()
+    await bot_mod.home_action(H.FakeCB(uid, 'home:access', 1), bot, state)
+    screen = bot.calls[-1]
+    assert screen['kind'] == 'photo' and screen['asset'] == 'assets/register.jpg'
+    ref = config.ref_url('campaign_42')
+    assert ref in screen['body'] and screen['markup'].inline_keyboard[0][0].url == ref
+    assert [row[0].callback_data for row in screen['markup'].inline_keyboard] == [
+        None, 'reg:enter_uid', 'home:back']
+    assert state.state == bot_mod.Reg.waiting_uid.state
+    assert not fake_db._users[uid]['verified']
+
+    await bot_mod.enter_registration_uid(H.FakeCB(uid, 'reg:enter_uid', 1), bot, state)
+    assert bot.calls[-1]['body'] == config.MSG_ENTER_UID
+    assert bot.calls[-1]['markup'].inline_keyboard[0][0].callback_data == 'go:register'
+    assert state.state == bot_mod.Reg.waiting_uid.state and uid not in bot_mod._nudge_tasks
+    with patch.object(bot_mod, '_verify_once', AsyncMock(return_value=config.VERIFY_GRANTED)) as verify:
+        await bot_mod.capture_uid(H.FakeMessage(uid, 'not-an-ID'), bot, state)
+        verify.assert_not_awaited()
+        assert 'numbers only' in bot.calls[-1]['body']
+        await bot_mod.capture_uid(H.FakeMessage(uid, '123456789'), bot, state)
+        verify.assert_awaited_once_with(bot, uid, '123456789')
+    # Stale ID buttons do not ask an already verified user to register again.
+    with patch.object(bot_mod, '_show_menu', AsyncMock()) as menu:
+        await bot_mod.enter_registration_uid(H.FakeCB(72001, 'reg:enter_uid', 1), bot, state)
+        menu.assert_awaited_once_with(bot, 72001)
+    await bot_mod.nav(H.FakeCB(uid, 'go:register', 1), bot, state)
+    assert bot.calls[-1]['asset'] == 'assets/register.jpg'
+    await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
+    assert bot.calls[-1]['kind'] == 'animation' and state.state is None
+    bot_mod._nudge_tasks.pop(uid).cancel()
 
     for action in ('test', 'tips'):
         cb = H.FakeCB(72000, 'home:' + action, 1)

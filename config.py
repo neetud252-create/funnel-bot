@@ -690,10 +690,8 @@ SCREENS = {
         # before - this is a photo caption, which has no link preview either
         # way, so nothing is gained or lost by the bare form.
         #
-        # Button labels are bare text; every icon rides on the 4th tuple
-        # element. Button 3 passes None for style on purpose: it had no style
-        # before, and build_kb skips a falsy one, so the payload keeps style
-        # absent while still carrying an icon.
+        # Registration, ID submission and return to the welcome screen.
+        # Custom button icons use the 4th tuple element.
         "text": (pe(E_REG_LOCK, "\U0001F510")
                  + "To access Go+, register for a new Pocket Option account "
                  "using my link:\n\n"
@@ -714,8 +712,8 @@ SCREENS = {
         # case is an untracked click, not a missing button - _show_register
         # swaps in the sub-ID version on the way out.
         "kb": [[("Register & Get Access", "url:" + REF_LINK, "success", E_REG_BTN_REG)],
-               [("How to Register", "url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy", "primary", E_REG_BTN_HOW)],
-               [("Support", "url:" + SUPPORT_URL, None, E_REG_BTN_SUP)]],
+               [("I created an account, check ID", "cb:reg:enter_uid", "primary", E_ACC_CHECK)],
+               [("Back", "cb:home:back", "danger", E_BACK)]],
     },
     # Post-verification home screen (shown once a UID passes the campaign +
     # deposit check). The signal counters are a format template - {limit},
@@ -1108,6 +1106,10 @@ MSG_ACCOUNT_ID_INVALID = ("\U00002757 <b>That account ID is not valid.</b>\n\n"
                           "An account ID is numbers only (5\U0000201315 digits). "
                           "Example: <b>123456789</b>\n\n"
                           "Send your account ID again to continue.")
+
+MSG_ENTER_UID = ("👇 <b>Send your Pocket Option account ID below.</b>\n\n"
+                 "Please note: Your ID must contain numbers only — no extra symbols\n\n"
+                 "Example: <b>123456789</b>")
 
 # A second tap once Premium is held. The unlock statement refuses it (its WHERE
 # requires is_premium = FALSE), so nothing was deducted and this only says so.

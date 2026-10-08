@@ -578,7 +578,24 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         # Trust the saved verification just as /start did before the welcome menu.
         await _show_menu(bot, tg_id)
     else:
-        await show(bot, tg_id, 'gate')
+        await _open_registration(bot, tg_id, state)
+
+
+@dp.callback_query(F.data == 'reg:enter_uid')
+async def enter_registration_uid(cb: CallbackQuery, bot: Bot, state: FSMContext):
+    await cb.answer()
+    tg_id = cb.from_user.id
+    user = await db.get_user(tg_id)
+    if user and user['verified']:
+        await state.clear()
+        await _show_menu(bot, tg_id)
+        return
+    pending = _nudge_tasks.pop(tg_id, None)
+    if pending:
+        pending.cancel()
+    await state.set_state(Reg.waiting_uid.state)
+    await render(bot, tg_id, None, config.MSG_ENTER_UID,
+                 [[('Back to registration', 'cb:go:register', 'primary', config.E_BACK)]])
 
 
 @dp.callback_query(F.data.startswith('lang:'))
@@ -870,21 +887,24 @@ async def _register_nudge(bot, tg_id, state):
         if _nudge_tasks.get(tg_id) is asyncio.current_task():
             _nudge_tasks.pop(tg_id, None)
 
+async def _open_registration(bot, tg_id, state):
+    await show(bot, tg_id, 'register')
+    await state.set_state(Reg.waiting_uid.state)
+    # Both entry points use the same tracking, UID capture and single nudge.
+    old = _nudge_tasks.pop(tg_id, None)
+    if old:
+        old.cancel()
+    _nudge_tasks[tg_id] = asyncio.create_task(_register_nudge(bot, tg_id, state))
+
+
 @dp.callback_query(F.data.startswith("go:"))
 async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
     await cb.answer()
     key = cb.data.split(":", 1)[1]
-    await show(bot, cb.from_user.id, key)
-    tg_id = cb.from_user.id
-    # Arm UID capture only while the register screen is on-screen.
     if key == "register":
-        await state.set_state(Reg.waiting_uid)
-        # Cancel any pending nudge first so re-opening quickly doesn't stack them.
-        old = _nudge_tasks.pop(tg_id, None)
-        if old:
-            old.cancel()
-        _nudge_tasks[tg_id] = asyncio.create_task(_register_nudge(bot, tg_id, state))
+        await _open_registration(bot, cb.from_user.id, state)
     else:
+        await show(bot, cb.from_user.id, key)
         await state.clear()
 
 # Must stay above menu_action: aiogram matches handlers in definition order and
@@ -1255,9 +1275,7 @@ async def _show_menu(bot, tg_id, test_mode=False):
     await render(bot, tg_id, s["photo"], text, s["kb"])
 
 def _with_ref(item, url):
-    # Rewrites ONLY the button whose URL is the plain REF_LINK. "How to
-    # Register" and "Support" are matched by nothing here and pass through
-    # untouched, so this cannot restyle or re-point them by accident.
+    # Rewrite only the referral URL; ID-entry and Back callbacks pass through.
     if item[1] == "url:" + config.REF_LINK:
         return (item[0], "url:" + url) + tuple(item[2:])
     return item

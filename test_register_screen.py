@@ -1,7 +1,8 @@
 """Verification test for the registration screen.
 
 This is SCREENS["register"] - the screen that asks the user to register through
-the referral link and then send their account ID. It carries three URL buttons.
+the referral link and then send their account ID. It carries a registration
+URL, an ID-entry callback, and a Back button.
 
 This test verifies COPY AND PRESENTATION ONLY. It does not exercise the
 registration or UID-capture flow, and it changes no production behaviour: it
@@ -11,13 +12,7 @@ Six caption emoji go through pe(); the three button emoji ride on the 4th tuple
 element as icon_custom_emoji_id. Labels stay bare text so Telegram renders
 exactly one premium emoji per button.
 
-Two structural details are pinned because they are easy to break:
-
-  * button 3 has NO style, and must keep having none. It passes None for style
-    so it can carry an icon in the 4th slot; build_kb skips a falsy style, so
-    the payload must come out with no "style" key at all.
-  * the URLs, callbacks and order are behaviour, not presentation, and are
-    asserted against the values captured before the copy change.
+The referral URL, callbacks and order must survive custom emoji rendering.
 
 Run from the repo root:  python test_register_screen.py
 
@@ -68,18 +63,17 @@ REG_URL = config.REF_LINK
 SUBBED_URL = config.ref_url("u8f3a2c")
 HOWTO_URL = "https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy"
 
-# Captured from the live config BEFORE the copy change. Only text and
-# icon_custom_emoji_id were allowed to move.
+# The three requested actions, in their displayed order.
 BASELINE = [
     {"url": REG_URL, "style": "success"},
-    {"url": HOWTO_URL, "style": "primary"},
-    {"url": config.SUPPORT_URL, "style": None},   # button 3 had no style
+    {"callback_data": "reg:enter_uid", "style": "primary"},
+    {"callback_data": "home:back", "style": "danger"},
 ]
 
 EXPECTED = [
     ("Register & Get Access", "5836690092306992715"),
-    ("How to Register", "5222444124698853913"),
-    ("Support", "5443038326535759644"),
+    ("I created an account, check ID", config.E_ACC_CHECK),
+    ("Back", config.E_BACK),
 ]
 
 EXPECT_PLAIN = ("\U0001F510To access Go+, register for a new Pocket Option "
@@ -219,28 +213,27 @@ def main():
         check("button %d: label is bare text, no unicode emoji" % n,
               all(ord(ch) < 128 for ch in payload.get("text", "")),
               repr(payload.get("text")))
-        # Behaviour, captured before the change.
-        check("button %d: URL unchanged" % n,
-              payload.get("url") == base["url"], repr(payload.get("url")))
+        check("button %d: expected URL" % n,
+              payload.get("url") == base.get("url"), repr(payload.get("url")))
         if base["style"] is None:
             check("button %d: still has NO style" % n,
                   "style" not in payload, str(payload))
         else:
             check("button %d: style unchanged (%s)" % (n, base["style"]),
                   payload.get("style") == base["style"], repr(payload.get("style")))
-        check("button %d: is a URL button, no callback_data" % n,
-              payload.get("callback_data") is None,
+        check("button %d: expected callback" % n,
+              payload.get("callback_data") == base.get("callback_data"),
               repr(payload.get("callback_data")))
 
-    check("button order is Register, How to Register, Support",
+    check("button order is Register, Check ID, Back",
           [b.text for b in flat]
-          == ["Register & Get Access", "How to Register", "Support"],
+          == ["Register & Get Access", "I created an account, check ID", "Back"],
           str([b.text for b in flat]))
     check("the three button icons are all different",
           len({b.icon_custom_emoji_id for b in flat}) == 3,
           str([b.icon_custom_emoji_id for b in flat]))
-    check("the Support button still points at SUPPORT_URL",
-          flat[2].url == config.SUPPORT_URL, repr(flat[2].url))
+    check("the Back button returns to the welcome menu",
+          flat[2].callback_data == 'home:back', repr(flat[2].callback_data))
 
     # --- nothing outside this screen moved -----------------------------------
     print("\n[register] no other screen or configuration changed")

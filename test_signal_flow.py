@@ -725,8 +725,8 @@ async def devstart_tests(bot_mod, fake_db, config):
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
           'await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)' in bot_src)
-    check("Get Bot Access retains the subscription gate",
-          "await show(bot, tg_id, 'gate')" in bot_src)
+    check("Get Bot Access opens the registration entry",
+          "await _open_registration(bot, tg_id, state)" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",
           "await start(m, bot, state)" in bot_src)
     check("/devstart clears the nudge before the reset nulls its id",
