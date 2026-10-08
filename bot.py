@@ -90,6 +90,10 @@ _verify_inflight = {}
 _file_hashes = {}
 
 def asset_path(key, ext):
+    # The photo cache uses the logical "jpg" type; retain the owner's PNG
+    # unchanged on disk and upload it with its actual filename.
+    if key == home_menu.PHOTO and ext == 'jpg':
+        ext = home_menu.PHOTO_EXT
     return "assets/" + key + "." + ext
 
 def content_hash(path):
@@ -253,7 +257,7 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = set()
+    ref = {(home_menu.PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -522,7 +526,7 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     pending = _nudge_tasks.pop(tg_id, None)
     if pending:
         pending.cancel()
-    await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())
+    await render(bot, tg_id, home_menu.PHOTO, home_menu.TEXT, home_menu.keyboard())
 
 
 @dp.callback_query(F.data.startswith("home:"))
@@ -537,7 +541,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if action == 'back':
         await cb.answer()
         await state.clear()
-        await render(bot, cb.from_user.id, None, home_menu.TEXT, home_menu.keyboard())
+        await render(bot, cb.from_user.id, home_menu.PHOTO, home_menu.TEXT, home_menu.keyboard())
         return
     if action in home_menu.PENDING:
         await cb.answer(home_menu.PENDING[action], show_alert=True)

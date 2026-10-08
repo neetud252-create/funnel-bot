@@ -36,11 +36,18 @@ async def main():
             await bot_mod.start(H.FakeMessage(uid, '/start'), bot, state, command)
             attribution.assert_awaited_once_with(uid, command)
         sends = [c for c in bot.calls if c['kind'] != 'delete']
-        assert len(sends) == 1 and sends[0]['kind'] == 'text'
+        assert len(sends) == 1 and sends[0]['kind'] == 'photo'
+        assert sends[0]['asset'] == 'assets/home_banner.png'
         assert sends[0]['body'] == home_menu.TEXT
+        assert sends[0]['markup'] is not None
         assert {k:v for k,v in fake_db._users[uid].items() if k!='ui_msg_id'} == {
             k:v for k,v in initial.items() if k!='ui_msg_id'}
         assert state.state is None
+
+        await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
+        assert bot.calls[-1]['kind'] == 'photo'
+        assert bot.calls[-1]['asset'] == 'assets/home_banner.png'
+        assert bot.calls[-1]['body'] == home_menu.TEXT
 
         with patch.object(bot_mod, '_show_menu', AsyncMock()) as menu, \
              patch.object(bot_mod, 'show', AsyncMock()) as show:

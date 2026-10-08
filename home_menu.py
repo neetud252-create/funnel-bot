@@ -1,6 +1,9 @@
 """Public /start welcome menu. Additional features are enabled separately."""
 import config
 
+PHOTO = 'home_banner'
+PHOTO_EXT = 'png'
+
 TEXT = (
     "👋 <b>Welcome to Go+ — Your Personal AI Trading Assistant!</b>\n\n"
     "🤖 Explore <b>AI-powered market analysis, trading signals, and easy-to-follow guides</b>"

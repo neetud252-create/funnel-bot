@@ -633,8 +633,8 @@ async def devstart_tests(bot_mod, fake_db, config):
               str([c["kind"] for c in sends]))
         check("/devstart lands on the welcome menu",
               bot_mod.home_menu.TEXT == sends[-1]["body"], repr(sends[-1]["body"]))
-        check("/devstart shows the text welcome interface",
-              sends[-1]["kind"] == "text" and sends[-1]["asset"] is None)
+        check("/devstart shows the welcome banner and caption",
+              sends[-1]["kind"] == "photo" and sends[-1]["asset"] == "assets/home_banner.png")
         check("the new welcome message becomes the tracked screen",
               row["ui_msg_id"] == sends[-1]["id"],
               "%s vs %s" % (row["ui_msg_id"], sends[-1]["id"]))
@@ -716,7 +716,7 @@ async def devstart_tests(bot_mod, fake_db, config):
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
-          'await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())' in bot_src)
+          'await render(bot, tg_id, home_menu.PHOTO, home_menu.TEXT, home_menu.keyboard())' in bot_src)
     check("Get Bot Access retains the subscription gate",
           "await show(bot, tg_id, 'gate')" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",
