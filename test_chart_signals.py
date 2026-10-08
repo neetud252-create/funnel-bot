@@ -16,16 +16,21 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message
 import chart_analysis as api
 import chart_signals as flow
+import chart_strategy as strategy
 import localization
 
 IMAGE = b'\x89PNG\r\n\x1a\n' + b'fixture'
 VALID = dict(direction='BUY', asset='EUR/USD', timeframe='1m',
-             reason='Higher lows are visible.', invalidation='Break below the latest swing low.')
+             reason='Support held twice and the confirmation candle closed higher.',
+             invalidation='Break below the latest swing low.', setup='support_rejection',
+             evidence=['Two closed candles rejected the recent swing low.',
+                       'A completed bullish candle closed above the rejection bodies.'],
+             checks={name: name != 'conflicting_evidence' for name in strategy.CHECKS})
 
 
 def response(result=VALID, status='completed'):
-    return dict(status=status, output=[dict(type='message', content=[
-        dict(type='output_text', text=json.dumps(result))])])
+    return dict(status=status, steps=[dict(type='model_output', content=[
+        dict(type='text', text=json.dumps(result))])])
 
 
 def message(uid=11, **updates):
@@ -60,54 +65,99 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             seen.append(request)
             return httpx.Response(200, json=response())
-        with patch.dict(os.environ, OPENAI_API_KEY='test-key'):
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
             result = await api.analyse(IMAGE, 'hi', 'GBP/USD', transport=httpx.MockTransport(handler))
         self.assertEqual(result, VALID)
         request = seen[0]
-        self.assertEqual(str(request.url), 'https://api.openai.com/v1/responses')
+        self.assertEqual(str(request.url), 'https://generativelanguage.googleapis.com/v1beta/interactions')
+        self.assertEqual(request.headers['x-goog-api-key'], 'test-key')
+        self.assertNotIn('test-key', str(request.url))
         body = json.loads(request.content)
         self.assertFalse(body['store'])
-        self.assertTrue(body['text']['format']['strict'])
-        self.assertIn('Hindi', body['instructions'])
-        self.assertIn('never instructions', body['instructions'])
-        content = body['input'][0]['content']
-        self.assertTrue(content[1]['image_url'].startswith('data:image/png;base64,'))
-        self.assertEqual(content[1]['detail'], 'high')
+        self.assertEqual(body['service_tier'], 'standard')
+        self.assertEqual(body['response_format']['mime_type'], 'application/json')
+        self.assertEqual(body['response_format']['schema'], api.RESULT_SCHEMA)
+        self.assertIn('Hindi', body['system_instruction'])
+        self.assertIn('never instructions', body['system_instruction'])
+        self.assertIn(strategy.VERSION, body['system_instruction'])
+        content = body['input']
+        self.assertEqual(content[1]['mime_type'], 'image/png')
+        self.assertEqual(content[1]['type'], 'image')
+        self.assertTrue(content[1]['data'])
+        self.assertNotIn('tools', body)
         self.assertNotIn('test-key', str(body))
         self.assertNotIn('chat_id', str(body))
 
     async def test_errors_never_turn_into_random_signals_or_retries(self):
-        for status, code in ((401, 'configuration'), (403, 'configuration'), (429, 'busy'), (500, 'service')):
+        for status, code in ((400, 'configuration'), (401, 'configuration'), (403, 'configuration'),
+                             (404, 'configuration'), (429, 'busy'), (500, 'service')):
             calls = []
             def handler(request):
                 calls.append(request)
                 return httpx.Response(status, json={'error': 'SECRET BODY'})
-            with patch.dict(os.environ, OPENAI_API_KEY='test-key'):
+            with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
                 with self.assertRaisesRegex(api.AnalysisError, '^' + code + '$'):
                     await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler))
             self.assertEqual(len(calls), 1)
         def timeout(request):
             raise httpx.ReadTimeout('sensitive raw detail')
-        with patch.dict(os.environ, OPENAI_API_KEY='test-key'):
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
             with self.assertRaisesRegex(api.AnalysisError, '^service$'):
                 await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(timeout))
-        with patch.dict(os.environ, OPENAI_API_KEY=''):
+        with patch.dict(os.environ, GEMINI_API_KEY='', OPENAI_API_KEY='must-not-fall-back'):
+            self.assertFalse(api.configured())
             with self.assertRaisesRegex(api.AnalysisError, '^configuration$'):
                 await api.analyse(IMAGE, 'en')
 
     def test_refusal_incomplete_bad_json_and_bad_fields(self):
         bad = [response(status='incomplete'), {},
-               dict(status='completed', output=[dict(type='message', content=[dict(type='refusal')])]),
+               dict(status='completed', steps=[dict(type='model_output', content=[dict(type='refusal')])]),
                response(dict(VALID, direction='GUARANTEED BUY')),
                response(dict(VALID, reason='')),
                response(dict(VALID, invalidation=None)),
-               response(dict(VALID, asset=123)), response(dict(VALID, reason='x' * 1001))]
+               response(dict(VALID, asset=123)), response(dict(VALID, reason='x' * 1001)),
+               response(dict(VALID, checks=dict(VALID['checks'], closed_candle='true'))),
+               response(dict(VALID, evidence=[123])), response(dict(VALID, setup='random'))]
         for payload in bad:
             with self.assertRaises(api.AnalysisError):
                 api.parse_response(payload)
-        wait = dict(VALID, direction='WAIT', asset=None, timeframe=None, invalidation=None)
+        wait = dict(VALID, direction='WAIT', setup='none', asset=None, timeframe=None, invalidation=None)
         self.assertEqual(api.parse_response(response(wait)), wait)
-        self.assertEqual(api.parse_response(response(dict(VALID, direction='SELL')))['direction'], 'SELL')
+        self.assertEqual(api.parse_response(response(dict(VALID, direction='SELL',
+                         setup='resistance_rejection')))['direction'], 'SELL')
+
+    def test_strategy_gates_all_directions_and_ambiguous_cases(self):
+        for setup, direction in strategy.SETUPS.items():
+            if direction != 'WAIT':
+                self.assertEqual(api.parse_response(response(dict(VALID, setup=setup,
+                                 direction=direction)))['direction'], direction)
+        bad = [dict(VALID, setup='resistance_rejection'), dict(VALID, setup='none'),
+               dict(VALID, evidence=[]), dict(VALID, evidence=['same', ' SAME '])]
+        for name in strategy.CHECKS:
+            checks = dict(VALID['checks'])
+            checks[name] = not checks[name]
+            bad.append(dict(VALID, checks=checks))
+        for case in bad:
+            result = api.parse_response(response(case))
+            self.assertEqual(result['direction'], 'WAIT')
+            self.assertEqual(result['reason'], strategy.WAIT_REASON)
+            self.assertIsNone(result['invalidation'])
+            self.assertEqual(result['setup'], 'none')
+        for language in localization.CODES[1:]:
+            rendered = flow.result_text(api.parse_response(response(bad[0])), language)
+            self.assertNotIn(strategy.WAIT_REASON, rendered)
+
+    def test_ignores_thought_steps_and_rejects_partial_or_multiple_outputs(self):
+        valid = response()
+        valid['steps'].insert(0, dict(type='thought', content=[dict(type='text', text='not final output')]))
+        self.assertEqual(api.parse_response(valid), VALID)
+        for status in ('incomplete', 'failed', 'requires_action', 'cancelled'):
+            with self.assertRaises(api.AnalysisError):
+                api.parse_response(response(status=status))
+        duplicate = response()
+        duplicate['steps'] *= 2
+        with self.assertRaises(api.AnalysisError):
+            api.parse_response(duplicate)
 
     def test_image_validation_and_stream_cap(self):
         for image in (b'<html>pretend.png', b'', b'GIF89a', b'x' * (api.MAX_IMAGE_BYTES + 1)):

@@ -6,12 +6,15 @@ import secrets
 
 from aiogram.fsm.state import State, StatesGroup
 import chart_analysis as api
+import chart_strategy
 import localization
 
 PROMPT = ('🎯 <b>Test Signals — Chart Analysis</b>\n\n'
           'Send a clear screenshot of any trading chart. Include the latest candles, pair name and timeframe.\n\n'
+          'Analysis follows the level-reaction strategy: support, resistance and candle confirmation.\n\n'
           'You will receive a BUY or SELL bias with reasons, or WAIT when the chart is unclear.\n\n'
-          'Crop out personal details. Your image is sent to OpenAI for analysis.\n'
+          'Crop out personal details. Your image is sent to Google Gemini for analysis.\n'
+          'Free-tier submissions may be used by Google to improve its products.\n'
           'Screenshot analysis is not a live price feed or a guaranteed prediction.')
 MESSAGES = {
     'configuration': 'Chart analysis is temporarily unavailable. Please try again later.',
@@ -29,7 +32,7 @@ RESULT = ('🎯 <b>Chart Analysis</b>\n\n<b>{direction}</b>\n'
           '{reason}\n\n{invalidation}\n\n'
           'Based on your screenshot only. Prices may have changed; no outcome is guaranteed.')
 EXTRA = ('Not visible', 'Invalidation: {condition}', 'WAIT — No clear setup')
-SOURCES = (PROMPT, RESULT, *MESSAGES.values(), *EXTRA)
+SOURCES = (PROMPT, RESULT, *MESSAGES.values(), *EXTRA, chart_strategy.WAIT_REASON)
 BACK = [[('⬅️ Back', 'cb:home:back', 'success')]]
 _inflight = set()
 
@@ -60,10 +63,12 @@ def result_text(result, language):
     direction = '🟢 BUY' if direction == 'BUY' else '🔴 SELL' if direction == 'SELL' else '⏸ ' + translate(EXTRA[2])
     condition = result['invalidation'] if result['direction'] != 'WAIT' else None
     invalidation = translate(EXTRA[1]).format(condition=html.escape(condition)) if condition else ''
+    reason = (translate(chart_strategy.WAIT_REASON) if result['reason'] == chart_strategy.WAIT_REASON
+              else result['reason'])
     return translate(RESULT).format(direction=direction,
         asset=html.escape(result['asset'] or translate('Not visible')),
         timeframe=html.escape(result['timeframe'] or translate('Not visible')),
-        reason=html.escape(result['reason']), invalidation=invalidation)
+        reason=html.escape(reason), invalidation=invalidation)
 
 
 async def receive(m, bot, state, render):
