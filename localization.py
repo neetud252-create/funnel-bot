@@ -79,7 +79,9 @@ def translate_parts(text, language, *, button=False):
 def message_sources():
     import config
     import home_menu
+    import chart_signals
     result = list(EXTRA_MESSAGES) + [home_menu.TEXT] + list(home_menu.PENDING.values())
+    result.extend(chart_signals.SOURCES)
     result.extend(screen['text'] for screen in config.SCREENS.values())
     result.extend(value for name, value in vars(config).items()
                   if isinstance(value, str) and value and (

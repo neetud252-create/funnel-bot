@@ -24,6 +24,8 @@ def sample(source):
                   icon=config.LEVEL_ICONS_TG['start'], tokens=12, cost=50,
                   balance=12, needed=38, seconds=20, wait='00:30', pair='GBP/USD OTC',
                   expiry='M1', direction=config.SIGNAL_DIRECTIONS[0][0],
+                  asset='GBP/USD OTC', timeframe='M1', reason='visible structure',
+                  invalidation='visible support breaks', condition='visible support breaks',
                   status=config.MSG_PREMIUM_ACTIVE.format(limit=50),
                   ref='https://example.com/Start?click_id=abc_BUY&src=Guide')
     return source.format(**values)

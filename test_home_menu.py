@@ -117,7 +117,7 @@ async def main():
     assert any(call['kind'] == 'delete' and call['id'] == 7655 for call in bot.calls)
     assert fake_db._users[72030]['nudge_msg_id'] is None
 
-    for action in ('test', 'tips'):
+    for action in ('tips',):
         cb = H.FakeCB(72000, 'home:' + action, 1)
         bot = H.FakeBot()
         state = H.FakeState()

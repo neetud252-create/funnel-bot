@@ -13,6 +13,7 @@ import broadcast
 import activity_stats
 import home_menu
 import localization
+import chart_signals
 from server import app
 
 logging.basicConfig(level=logging.INFO)
@@ -553,8 +554,13 @@ async def start(m: Message, bot: Bot, state: FSMContext,
 @dp.callback_query(F.data.startswith("home:"))
 async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     action = cb.data.split(":", 1)[1]
+    if action == 'test':
+        await chart_signals.open_screen(cb, bot, state, render)
+        return
     if action == 'language':
         await cb.answer()
+        if await state.get_state() == chart_signals.Chart.waiting_image.state:
+            await state.clear()
         language = await localization.language_for(cb.from_user.id)
         await render(bot, cb.from_user.id, None, localization.SELECTOR_TEXT,
                      localization.selector_keyboard(language))
@@ -1414,6 +1420,10 @@ async def _verify_account_id(tg_id, account_id):
                  account_id[:16], "VALID" if ok else "INVALID")
     return ok
 
+# Commands retain priority; chart uploads/text cannot fall into UID verification.
+chart_signals.install(dp, render)
+
+
 # MUST stay above the Reg.waiting_uid handler and uid_anytime below: aiogram
 # dispatches in definition order, and uid_anytime matches any bare number in
 # any state. Registered here, Premium.waiting_uid wins while it is armed, so a
@@ -1675,6 +1685,9 @@ async def main():
     async with db.pool.acquire() as conn:
         await conn.execute(broadcast.SCHEMA)
         await conn.execute(activity_stats.SCHEMA)
+        await conn.execute(chart_signals.api.SCHEMA)
+    logging.info('Screenshot analysis ready; API configured=%s; model=%s',
+                 chart_signals.api.configured(), chart_signals.api.MODEL)
     # Validate dashboard queries against the live schema before accepting commands.
     await activity_stats.report()
     activity_middleware = activity_stats.ActivityMiddleware()

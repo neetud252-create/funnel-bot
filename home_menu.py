@@ -33,6 +33,5 @@ def keyboard():
 
 
 PENDING = {
-    'test': 'Test Signals will be added in a later update.',
     'tips': 'Forex Tips will be added in a later update.',
 }
