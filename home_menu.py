@@ -3,6 +3,7 @@ import config
 
 PHOTO = 'home_banner'
 PHOTO_EXT = 'png'
+ANIMATION = 'home_banner_loop'
 
 TEXT = (
     "👋 <b>Welcome to Go+ — Your Personal AI Trading Assistant!</b>\n\n"

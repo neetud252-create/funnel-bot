@@ -9,7 +9,7 @@ import types
 from unittest.mock import AsyncMock, patch
 
 from aiogram import Bot
-from aiogram.methods import AnswerCallbackQuery, CopyMessage, SendDocument, SendMessage, SendPhoto
+from aiogram.methods import AnswerCallbackQuery, CopyMessage, SendAnimation, SendDocument, SendMessage, SendPhoto
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 import home_menu
@@ -124,6 +124,17 @@ async def check_delivery_and_selector():
     assert result.model_dump(exclude_defaults=True)['reply_markup']['inline_keyboard'][0][0]['text'] == 'Получить доступ'
     assert result.reply_markup.inline_keyboard[0][0].icon_custom_emoji_id == '5427168083074628963'
     assert '5773793517482546530' in result.text
+
+    for language in L.CODES:
+        animation = SendAnimation(chat_id=2, animation='banner-animation-id',
+                                  caption=home_menu.TEXT, reply_markup=markup, parse_mode='HTML')
+        localized = L.localize_method(animation, language)
+        assert localized.animation == 'banner-animation-id'
+        assert localized.caption == emoji_theme.html(L.translate_message(home_menu.TEXT, language))
+        assert '4942823933909926751' in localized.caption
+        assert localized.reply_markup.inline_keyboard[0][0].callback_data == 'home:access'
+        plain = html.unescape(re.sub('<[^>]+>', '', localized.caption))
+        assert len(plain.encode('utf-16-le')) // 2 <= 1024
 
     async def callback_handler(event, data):
         # Allow other callbacks to overlap. A different recipient still wins over context.

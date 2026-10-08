@@ -176,11 +176,20 @@ async def remember(key, msg):
 
 async def remember_video(key, msg):
     try:
-        fid = msg.video.file_id if msg and getattr(msg, "video", None) else None
+        kind = 'animation' if key == home_menu.ANIMATION else 'video'
+        media = getattr(msg, kind, None) if msg else None
+        fid = media.file_id if media else None
     except Exception:
         return
     if fid:
         await _store(key, "mp4", fid)
+
+def media_sender(bot, key, ext):
+    # Telegram animations use silent MP4s but return animation.file_id, not
+    # video.file_id. A distinct asset key keeps both cached types separate.
+    if ext == 'mp4':
+        return bot.send_animation if key == home_menu.ANIMATION else bot.send_video
+    return bot.send_photo
 
 async def send_media(bot, tg_id, key, is_video, text, kb):
     """Send a screen's media, preferring the cached file_id.
@@ -190,7 +199,7 @@ async def send_media(bot, tg_id, key, is_video, text, kb):
     drop the row and pay for a single upload instead.
     """
     ext = "mp4" if is_video else "jpg"
-    send = bot.send_video if is_video else bot.send_photo
+    send = media_sender(bot, key, ext)
     media = cached_id(key, ext) or FSInputFile(asset_path(key, ext))
     try:
         return await send(tg_id, media, caption=text, parse_mode="HTML",
@@ -257,7 +266,7 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(home_menu.PHOTO, 'jpg')}
+    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -291,7 +300,7 @@ async def warm_media_cache(bot):
             missing += 1
             continue
         try:
-            sender = bot.send_video if ext == "mp4" else bot.send_photo
+            sender = media_sender(bot, key, ext)
             m = await sender(chat, FSInputFile(asset_path(key, ext)))
             if ext == "mp4":
                 await remember_video(key, m)
@@ -413,6 +422,8 @@ async def wipe(bot, tg_id):
         await db.set_album(tg_id, None)
 
 async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
+    if media_key == home_menu.ANIMATION and media_missing(media_key, 'mp4'):
+        media_key, is_video = home_menu.PHOTO, False
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
     msg_id = user["ui_msg_id"] if user else None
@@ -443,7 +454,17 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
             m = await bot.send_message(tg_id, text, parse_mode="HTML",
                                        reply_markup=kb)
         else:
-            m = await send_media(bot, tg_id, media_key, is_video, text, kb)
+            try:
+                m = await send_media(bot, tg_id, media_key, is_video, text, kb)
+            except Exception:
+                if media_key != home_menu.ANIMATION:
+                    raise
+                logging.exception('Welcome animation failed; using the still banner')
+                media_key, is_video = home_menu.PHOTO, False
+                if media_missing(media_key, 'jpg'):
+                    m = await bot.send_message(tg_id, text, parse_mode='HTML', reply_markup=kb)
+                else:
+                    m = await send_media(bot, tg_id, media_key, False, text, kb)
             if is_video:
                 await remember_video(media_key, m)
             else:
@@ -526,7 +547,7 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     pending = _nudge_tasks.pop(tg_id, None)
     if pending:
         pending.cancel()
-    await render(bot, tg_id, home_menu.PHOTO, home_menu.TEXT, home_menu.keyboard())
+    await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)
 
 
 @dp.callback_query(F.data.startswith("home:"))
@@ -541,7 +562,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if action == 'back':
         await cb.answer()
         await state.clear()
-        await render(bot, cb.from_user.id, home_menu.PHOTO, home_menu.TEXT, home_menu.keyboard())
+        await render(bot, cb.from_user.id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)
         return
     if action in home_menu.PENDING:
         await cb.answer(home_menu.PENDING[action], show_alert=True)

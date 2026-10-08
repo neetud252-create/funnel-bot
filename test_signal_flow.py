@@ -309,6 +309,14 @@ class FakeBot:
                            "asset": str(getattr(video, "path", video))})
         return FakeMsg(mid, caption=caption)
 
+    async def send_animation(self, chat_id, animation, caption=None, parse_mode=None,
+                             reply_markup=None):
+        mid = self._mid()
+        self.calls.append({"kind": "animation", "id": mid, "body": caption,
+                           "markup": reply_markup, "parse_mode": parse_mode,
+                           "asset": str(getattr(animation, "path", animation))})
+        return FakeMsg(mid, caption=caption)
+
     async def send_document(self, chat_id, document, caption=None,
                             parse_mode=None, reply_markup=None):
         mid = self._mid()
@@ -634,7 +642,7 @@ async def devstart_tests(bot_mod, fake_db, config):
         check("/devstart lands on the welcome menu",
               bot_mod.home_menu.TEXT == sends[-1]["body"], repr(sends[-1]["body"]))
         check("/devstart shows the welcome banner and caption",
-              sends[-1]["kind"] == "photo" and sends[-1]["asset"] == "assets/home_banner.png")
+              sends[-1]["kind"] == "animation" and sends[-1]["asset"] == "assets/home_banner_loop.mp4")
         check("the new welcome message becomes the tracked screen",
               row["ui_msg_id"] == sends[-1]["id"],
               "%s vs %s" % (row["ui_msg_id"], sends[-1]["id"]))
@@ -716,7 +724,7 @@ async def devstart_tests(bot_mod, fake_db, config):
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
-          'await render(bot, tg_id, home_menu.PHOTO, home_menu.TEXT, home_menu.keyboard())' in bot_src)
+          'await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)' in bot_src)
     check("Get Bot Access retains the subscription gate",
           "await show(bot, tg_id, 'gate')" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",
