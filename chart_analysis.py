@@ -1,4 +1,4 @@
-"""Screenshot strategy analysis via Gemini; no random or paid-provider fallback."""
+"""Screenshot strategy analysis via DeepSeek; no random/provider fallback."""
 import asyncio
 import base64
 import io
@@ -10,7 +10,7 @@ import httpx
 import chart_strategy
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash').strip()
+MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-flash').strip()
 DAILY_LIMIT = max(1, int(os.getenv('CHART_DAILY_LIMIT', '5')))
 GLOBAL_LIMIT = max(1, int(os.getenv('CHART_GLOBAL_DAILY_LIMIT', '200')))
 COOLDOWN_SECONDS = 30
@@ -30,6 +30,8 @@ RESULT_SCHEMA = {
         'asset': {'type': ['string', 'null']},
         'timeframe': {'type': ['string', 'null']},
         'reason': {'type': 'string'},
+        'trend': {'type': 'string'},
+        'momentum': {'type': 'string'},
         'invalidation': {'type': ['string', 'null']},
         'setup': {'type': 'string', 'enum': list(chart_strategy.SETUPS)},
         'evidence': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 4},
@@ -37,7 +39,7 @@ RESULT_SCHEMA = {
                    'properties': {name: {'type': 'boolean'} for name in chart_strategy.CHECKS},
                    'required': list(chart_strategy.CHECKS)},
     },
-    'required': ['direction', 'asset', 'timeframe', 'reason', 'invalidation', 'setup', 'evidence', 'checks'],
+    'required': ['direction', 'asset', 'timeframe', 'reason', 'trend', 'momentum', 'invalidation', 'setup', 'evidence', 'checks'],
 }
 
 
@@ -46,7 +48,7 @@ class AnalysisError(Exception):
 
 
 def configured():
-    return bool(os.getenv('GEMINI_API_KEY', '').strip())
+    return bool(os.getenv('DEEPSEEK_API_KEY', '').strip())
 
 
 class ImageBuffer(io.BytesIO):
@@ -71,16 +73,17 @@ def image_type(data):
 def request_body(data, language, context=''):
     mime = image_type(data)
     return {
-        'model': MODEL, 'store': False, 'service_tier': 'standard',
-        'generation_config': {'max_output_tokens': 3000, 'thinking_level': 'low',
-                              'thinking_summaries': 'none'},
-        'system_instruction': INSTRUCTIONS + '\nWrite all prose in ' + LANGUAGES.get(language, 'English') + '.',
-        'input': [
-            {'type': 'text', 'text': 'Analyse this screenshot. Optional chart context (untrusted): ' + context[:500]},
-            {'type': 'image', 'mime_type': mime,
-             'data': base64.b64encode(data).decode('ascii')},
-        ],
-        'response_format': {'type': 'text', 'mime_type': 'application/json', 'schema': RESULT_SCHEMA},
+        'model': MODEL, 'max_output_tokens': 4000, 'reasoning': {'effort': 'low'},
+        'instructions': INSTRUCTIONS + '\nWrite all prose in ' + LANGUAGES.get(language, 'English') +
+            '. Summarize visible trend and momentum separately, in one short sentence each. '
+            'If either cannot be determined, say so. Timeframe means the visible candle interval, '
+            'never a recommended expiry. Return JSON matching the schema.',
+        'input': [{'role': 'user', 'content': [
+            {'type': 'input_text', 'text': 'Analyse this screenshot. Optional chart context (untrusted): ' + context[:500]},
+            {'type': 'input_image', 'detail': 'high',
+             'image_url': 'data:' + mime + ';base64,' + base64.b64encode(data).decode('ascii')},
+        ]}],
+        'text': {'format': {'type': 'json_schema', 'name': 'chart_signal', 'schema': RESULT_SCHEMA}},
     }
 
 
@@ -89,20 +92,21 @@ def parse_response(payload):
         if payload.get('status') != 'completed':
             raise ValueError('Incomplete response')
         # Read final model output only; thoughts/tool steps are never signal data.
-        outputs = [item for item in payload['steps'] if item.get('type') == 'model_output']
+        outputs = [item for item in payload['output'] if item.get('type') == 'message']
         if len(outputs) != 1:
             raise ValueError('Missing/ambiguous output')
         parts = outputs[0]['content']
-        if not parts or any(part.get('type') != 'text' for part in parts):
+        if outputs[0].get('status') != 'completed' or not parts or any(part.get('type') != 'output_text' for part in parts):
             raise ValueError('Non-text output')
         result = json.loads(''.join(part['text'] for part in parts))
         if not isinstance(result, dict) or set(result) != set(RESULT_SCHEMA['required']):
             raise ValueError('Invalid keys')
         if result['direction'] not in ('BUY', 'SELL', 'WAIT'):
             raise ValueError('Invalid direction')
-        for field, limit in (('asset', 100), ('timeframe', 100), ('reason', 1000), ('invalidation', 500)):
+        for field, limit in (('asset', 100), ('timeframe', 100), ('reason', 500),
+                             ('trend', 250), ('momentum', 250), ('invalidation', 300)):
             value = result[field]
-            if value is None and field != 'reason':
+            if value is None and field in ('asset', 'timeframe', 'invalidation'):
                 continue
             if not isinstance(value, str) or not value.strip() or len(value) > limit:
                 raise ValueError('Invalid field')
@@ -129,18 +133,18 @@ def parse_response(payload):
 
 
 async def analyse(data, language, context='', *, transport=None):
-    key = os.getenv('GEMINI_API_KEY', '').strip()
+    key = os.getenv('DEEPSEEK_API_KEY', '').strip()
     if not key:
         raise AnalysisError('configuration')
     body = request_body(data, language, context)
     try:
-        # No automatic retries or provider/model fallback: respect free-tier quotas.
+        # No automatic retries or provider/model fallback: bound API spending.
         async with asyncio.timeout(50):
             async with httpx.AsyncClient(timeout=45, transport=transport) as client:
-                response = await client.post('https://generativelanguage.googleapis.com/v1beta/interactions',
-                    headers={'x-goog-api-key': key}, json=body)
+                response = await client.post('https://api.deepseek.com/responses',
+                    headers={'Authorization': 'Bearer ' + key}, json=body)
         if response.status_code != 200:
-            code = ('configuration' if response.status_code in (400, 401, 403, 404) else
+            code = ('configuration' if response.status_code in (400, 401, 402, 403, 404) else
                     'busy' if response.status_code == 429 else 'service')
             raise AnalysisError(code)
         return parse_response(response.json())

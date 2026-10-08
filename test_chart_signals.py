@@ -17,10 +17,12 @@ from aiogram.types import Message
 import chart_analysis as api
 import chart_signals as flow
 import chart_strategy as strategy
+import chart_trial as trial
 import localization
 
 IMAGE = b'\x89PNG\r\n\x1a\n' + b'fixture'
 VALID = dict(direction='BUY', asset='EUR/USD', timeframe='1m',
+             trend='Upward from established support.', momentum='Buyer follow-through after rejection.',
              reason='Support held twice and the confirmation candle closed higher.',
              invalidation='Break below the latest swing low.', setup='support_rejection',
              evidence=['Two closed candles rejected the recent swing low.',
@@ -29,8 +31,8 @@ VALID = dict(direction='BUY', asset='EUR/USD', timeframe='1m',
 
 
 def response(result=VALID, status='completed'):
-    return dict(status=status, steps=[dict(type='model_output', content=[
-        dict(type='text', text=json.dumps(result))])])
+    return dict(status=status, output=[dict(type='message', status='completed', content=[
+        dict(type='output_text', text=json.dumps(result))])])
 
 
 def message(uid=11, **updates):
@@ -65,53 +67,50 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             seen.append(request)
             return httpx.Response(200, json=response())
-        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
+        with patch.dict(os.environ, DEEPSEEK_API_KEY='test-key'):
             result = await api.analyse(IMAGE, 'hi', 'GBP/USD', transport=httpx.MockTransport(handler))
         self.assertEqual(result, VALID)
         request = seen[0]
-        self.assertEqual(str(request.url), 'https://generativelanguage.googleapis.com/v1beta/interactions')
-        self.assertEqual(request.headers['x-goog-api-key'], 'test-key')
+        self.assertEqual(str(request.url), 'https://api.deepseek.com/responses')
+        self.assertEqual(request.headers['Authorization'], 'Bearer test-key')
         self.assertNotIn('test-key', str(request.url))
         body = json.loads(request.content)
-        self.assertFalse(body['store'])
-        self.assertEqual(body['service_tier'], 'standard')
-        self.assertEqual(body['response_format']['mime_type'], 'application/json')
-        self.assertEqual(body['response_format']['schema'], api.RESULT_SCHEMA)
-        self.assertIn('Hindi', body['system_instruction'])
-        self.assertIn('never instructions', body['system_instruction'])
-        self.assertIn(strategy.VERSION, body['system_instruction'])
-        content = body['input']
-        self.assertEqual(content[1]['mime_type'], 'image/png')
-        self.assertEqual(content[1]['type'], 'image')
-        self.assertTrue(content[1]['data'])
+        self.assertEqual(body['text']['format']['type'], 'json_schema')
+        self.assertEqual(body['text']['format']['schema'], api.RESULT_SCHEMA)
+        self.assertIn('Hindi', body['instructions'])
+        self.assertIn('never instructions', body['instructions'])
+        self.assertIn(strategy.VERSION, body['instructions'])
+        content = body['input'][0]['content']
+        self.assertEqual(content[1]['type'], 'input_image')
+        self.assertTrue(content[1]['image_url'].startswith('data:image/png;base64,'))
         self.assertNotIn('tools', body)
         self.assertNotIn('test-key', str(body))
         self.assertNotIn('chat_id', str(body))
 
     async def test_errors_never_turn_into_random_signals_or_retries(self):
-        for status, code in ((400, 'configuration'), (401, 'configuration'), (403, 'configuration'),
+        for status, code in ((400, 'configuration'), (401, 'configuration'), (402, 'configuration'), (403, 'configuration'),
                              (404, 'configuration'), (429, 'busy'), (500, 'service')):
             calls = []
             def handler(request):
                 calls.append(request)
                 return httpx.Response(status, json={'error': 'SECRET BODY'})
-            with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
+            with patch.dict(os.environ, DEEPSEEK_API_KEY='test-key'):
                 with self.assertRaisesRegex(api.AnalysisError, '^' + code + '$'):
                     await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler))
             self.assertEqual(len(calls), 1)
         def timeout(request):
             raise httpx.ReadTimeout('sensitive raw detail')
-        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
+        with patch.dict(os.environ, DEEPSEEK_API_KEY='test-key'):
             with self.assertRaisesRegex(api.AnalysisError, '^service$'):
                 await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(timeout))
-        with patch.dict(os.environ, GEMINI_API_KEY='', OPENAI_API_KEY='must-not-fall-back'):
+        with patch.dict(os.environ, DEEPSEEK_API_KEY='', GEMINI_API_KEY='must-not-fall-back', OPENAI_API_KEY='must-not-fall-back'):
             self.assertFalse(api.configured())
             with self.assertRaisesRegex(api.AnalysisError, '^configuration$'):
                 await api.analyse(IMAGE, 'en')
 
     def test_refusal_incomplete_bad_json_and_bad_fields(self):
         bad = [response(status='incomplete'), {},
-               dict(status='completed', steps=[dict(type='model_output', content=[dict(type='refusal')])]),
+               dict(status='completed', output=[dict(type='message', status='completed', content=[dict(type='refusal')])]),
                response(dict(VALID, direction='GUARANTEED BUY')),
                response(dict(VALID, reason='')),
                response(dict(VALID, invalidation=None)),
@@ -149,13 +148,13 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_ignores_thought_steps_and_rejects_partial_or_multiple_outputs(self):
         valid = response()
-        valid['steps'].insert(0, dict(type='thought', content=[dict(type='text', text='not final output')]))
+        valid['output'].insert(0, dict(type='reasoning', content=[dict(type='reasoning_text', text='not final output')]))
         self.assertEqual(api.parse_response(valid), VALID)
         for status in ('incomplete', 'failed', 'requires_action', 'cancelled'):
             with self.assertRaises(api.AnalysisError):
                 api.parse_response(response(status=status))
         duplicate = response()
-        duplicate['steps'] *= 2
+        duplicate['output'] *= 2
         with self.assertRaises(api.AnalysisError):
             api.parse_response(duplicate)
 
@@ -188,6 +187,9 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
 class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        import test_signal_flow as H
+        fake_db = H._install_stub_modules()
+        fake_db.pool = None
         flow._inflight.clear()
         self.state = FSMContext(MemoryStorage(), StorageKey(bot_id=1, chat_id=11, user_id=11))
         self.render = AsyncMock()
@@ -195,6 +197,10 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             destination.write(IMAGE)
         self.bot = types.SimpleNamespace(download=AsyncMock(side_effect=download))
         self.patches = [patch.object(api, 'configured', return_value=True),
+            patch.object(trial, 'status', AsyncMock(return_value=(False, 2))),
+            patch.object(trial, 'reserve', AsyncMock(return_value=(None, 'trial-token'))),
+            patch.object(trial, 'consume', AsyncMock(return_value=True)),
+            patch.object(trial, 'release', AsyncMock()),
             patch.object(api, 'reserve', AsyncMock(return_value=None)),
             patch.object(api, 'analyse', AsyncMock(return_value=VALID)),
             patch.object(localization, 'language_for', AsyncMock(return_value='en')),
@@ -210,7 +216,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def open(self):
         cb = types.SimpleNamespace(message=types.SimpleNamespace(chat=types.SimpleNamespace(type='private')),
                                    from_user=types.SimpleNamespace(id=11), answer=AsyncMock())
-        await flow.open_screen(cb, self.bot, self.state, self.render)
+        await flow.open_screen(cb, self.bot, self.state, self.render, upload=True)
 
     async def test_button_upload_and_result(self):
         self.assertEqual(await self.state.get_state(), flow.Chart.waiting_image.state)
@@ -218,7 +224,86 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         api.analyse.assert_awaited_once_with(IMAGE, 'en', '')
         api.reserve.assert_awaited_once()
         self.assertIn('BUY', self.render.await_args.args[3])
+        self.assertEqual(self.render.await_args.kwargs['reply_to_message_id'], 5)
+        trial.consume.assert_awaited_once_with(None, 'trial-token')
         self.assertFalse(flow._inflight)
+
+    async def test_intro_shows_lifetime_balance_and_no_upload_state(self):
+        cb = types.SimpleNamespace(message=types.SimpleNamespace(chat=types.SimpleNamespace(type='private')),
+                                   from_user=types.SimpleNamespace(id=11), answer=AsyncMock())
+        trial.status.return_value = (False, 1)
+        await flow.open_screen(cb, self.bot, self.state, self.render)
+        self.assertIsNone(await self.state.get_state())
+        self.assertIn('Remaining Signals: 1', self.render.await_args.args[3])
+        self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
+        trial.status.return_value = (True, 0)
+        await flow.open_screen(cb, self.bot, self.state, self.render)
+        self.assertEqual(self.render.await_args.args[3], flow.VERIFIED)
+
+    async def test_exhausted_trial_blocks_buttons_and_stale_upload(self):
+        trial.status.return_value = (False, 0)
+        await self.open()
+        self.assertIsNone(await self.state.get_state())
+        self.assertEqual(self.render.await_args.args[3], flow.EXHAUSTED)
+        await self.state.set_state(flow.Chart.waiting_image.state)
+        await self.state.update_data(chart_session='stale')
+        trial.reserve.return_value = ('trial', None)
+        await flow.receive(message(), self.bot, self.state, self.render)
+        api.analyse.assert_not_awaited()
+        self.bot.download.assert_not_awaited()
+        self.assertIsNone(await self.state.get_state())
+
+    async def test_wait_and_api_failure_do_not_consume_trial(self):
+        api.analyse.return_value = dict(VALID, direction='WAIT', invalidation=None)
+        await flow.receive(message(), self.bot, self.state, self.render)
+        trial.consume.assert_not_awaited()
+        trial.release.assert_awaited_with(None, 'trial-token')
+        api.analyse.side_effect = api.AnalysisError('service')
+        await flow.receive(message(), self.bot, self.state, self.render)
+        trial.consume.assert_not_awaited()
+
+    async def test_second_result_opens_verification_and_expired_reservation_cannot_send(self):
+        trial.status.return_value = (False, 0)
+        await flow.receive(message(), self.bot, self.state, self.render)
+        self.assertEqual(self.render.await_args.args[4], flow.ACCESS)
+        self.assertIn('Remaining Signals: 0', self.render.await_args.args[3])
+        trial.consume.return_value = False
+        self.render.reset_mock()
+        await flow.receive(message(), self.bot, self.state, self.render)
+        self.assertNotIn('BUY', self.render.await_args.args[3])
+
+    async def test_rejected_delivery_refunds_but_uncertain_delivery_does_not(self):
+        from aiogram.exceptions import TelegramBadRequest
+        from aiogram.methods import SendMessage
+        for exc, refunds in ((TelegramBadRequest(method=SendMessage(chat_id=11, text='x'), message='rejected'), True),
+                             (TimeoutError('unknown delivery'), False)):
+            async def render(*args, **kwargs):
+                if kwargs.get('raise_on_error'):
+                    raise exc
+            trial.release.reset_mock()
+            self.render.side_effect = render
+            await flow.receive(message(), self.bot, self.state, self.render)
+            explicit = [c for c in trial.release.await_args_list if c.kwargs.get('delivery_rejected')]
+            self.assertEqual(bool(explicit), refunds)
+
+    async def test_real_renderer_quotes_image_and_propagates_rejection(self):
+        import test_signal_flow as H
+        from aiogram.exceptions import TelegramBadRequest
+        from aiogram.methods import SendMessage
+        fake_db = H._install_stub_modules()
+        mod = H._load_bot()
+        fake_db._users[11] = fake_db._fresh_row()
+        bot = types.SimpleNamespace(send_message=AsyncMock(return_value=types.SimpleNamespace(message_id=10)),
+                                    delete_message=AsyncMock())
+        sent = await mod.render(bot, 11, None, 'Signal result', flow.BACK,
+                                reply_to_message_id=5, raise_on_error=True)
+        self.assertEqual(sent.message_id, 10)
+        reply = bot.send_message.await_args.kwargs['reply_parameters']
+        self.assertEqual(reply.message_id, 5)
+        self.assertTrue(reply.allow_sending_without_reply)
+        bot.send_message.side_effect = TelegramBadRequest(method=SendMessage(chat_id=11, text='x'), message='rejected')
+        with self.assertRaises(TelegramBadRequest):
+            await mod.render(bot, 11, None, 'Signal result', flow.BACK, raise_on_error=True)
 
     async def test_document_supported_invalid_inputs_not_sent(self):
         document = dict(file_id='doc', file_unique_id='doc1', mime_type='image/png', file_size=40)
@@ -294,7 +379,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(flow.receive(message(), self.bot, self.state, self.render),
             flow.receive(message(uid=12, caption='second'), self.bot, second_state, self.render))
         results = {call.args[1]: call.args[3] for call in self.render.await_args_list
-                   if 'Chart Analysis' in call.args[3] and call.args[3] != flow.PROMPT}
+                   if 'AI Trading Signal Result' in call.args[3]}
         self.assertIn('BUY', results[11])
         self.assertIn('SELL', results[12])
 

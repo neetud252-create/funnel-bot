@@ -5,16 +5,26 @@ import logging
 import secrets
 
 from aiogram.fsm.state import State, StatesGroup
+from aiogram import F
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 import chart_analysis as api
 import chart_strategy
+import chart_trial as trial
 import localization
 
-PROMPT = ('🎯 <b>Test Signals — Chart Analysis</b>\n\n'
+INTRO = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
+         'Try chart analysis for free before verifying your account.\n\n'
+         '📊 <b>Remaining Signals: {left}</b>\n\n'
+         'Tap Test Signals to upload your chart. 🚀')
+VERIFIED = ('🤖 <b>Go+ AI Chart Analysis</b>\n\n'
+            'Your account is verified. Tap Test Signals to upload your chart.')
+EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
+             'Verify your account to continue receiving chart analysis.\n'
+             'Tap Get Bot Access below to continue.')
+PROMPT = ('🎯 <b>AI Chart Analyzer</b>\n\n'
           'Send a clear screenshot of any trading chart. Include the latest candles, pair name and timeframe.\n\n'
-          'Analysis follows the level-reaction strategy: support, resistance and candle confirmation.\n\n'
           'You will receive a BUY or SELL bias with reasons, or WAIT when the chart is unclear.\n\n'
-          'Crop out personal details. Your image is sent to Google Gemini for analysis.\n'
-          'Free-tier submissions may be used by Google to improve its products.\n'
+          'Crop out personal details. Your image is sent to DeepSeek for analysis.\n'
           'Screenshot analysis is not a live price feed or a guaranteed prediction.')
 MESSAGES = {
     'configuration': 'Chart analysis is temporarily unavailable. Please try again later.',
@@ -27,13 +37,20 @@ MESSAGES = {
     'private': 'Open Test Signals in a private chat with the bot.',
     'working': '⏳ Analysing your chart…',
 }
-RESULT = ('🎯 <b>Chart Analysis</b>\n\n<b>{direction}</b>\n'
-          'Pair: <b>{asset}</b>\nChart timeframe: <b>{timeframe}</b>\n\n'
+RESULT = ('🤖 <b>AI Trading Signal Result</b>\n\n'
+          '📊 <b>Market Analysis:</b>\n'
+          '• <b>Trend:</b> {trend}\n• <b>Momentum:</b> {momentum}\n\n'
+          '🎯 <b>Recommendation:</b>\n'
+          '• <b>Prediction:</b> {direction}\n'
+          '• Pair: <b>{asset}</b>\n• Chart timeframe: <b>{timeframe}</b>\n\n'
           '{reason}\n\n{invalidation}\n\n'
           'Based on your screenshot only. Prices may have changed; no outcome is guaranteed.')
 EXTRA = ('Not visible', 'Invalidation: {condition}', 'WAIT — No clear setup')
-SOURCES = (PROMPT, RESULT, *MESSAGES.values(), *EXTRA, chart_strategy.WAIT_REASON)
+SOURCES = (INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
+           'Remaining Signals: {left}', 'New Analysis', chart_strategy.WAIT_REASON)
 BACK = [[('⬅️ Back', 'cb:home:back', 'success')]]
+UPLOAD = [[('🎯 Test Signals', 'cb:chart:upload', 'primary')], *BACK]
+ACCESS = [[('💎 Get Bot Access', 'cb:home:access', 'success')], *BACK]
 _inflight = set()
 
 
@@ -41,12 +58,20 @@ class Chart(StatesGroup):
     waiting_image = State()
 
 
-async def open_screen(cb, bot, state, render):
+async def open_screen(cb, bot, state, render, *, upload=False):
+    import db
     if cb.message.chat.type != 'private':
         await cb.answer(MESSAGES['private'], show_alert=True)
         return
     await cb.answer()
     await state.clear()
+    verified, left = await trial.status(db.pool, cb.from_user.id)
+    if not verified and not left:
+        await render(bot, cb.from_user.id, None, EXHAUSTED, ACCESS)
+        return
+    if not upload:
+        await render(bot, cb.from_user.id, None, VERIFIED if verified else INTRO.format(left=left), UPLOAD)
+        return
     if not api.configured():
         await render(bot, cb.from_user.id, None, MESSAGES['configuration'], BACK)
         return
@@ -66,6 +91,7 @@ def result_text(result, language):
     reason = (translate(chart_strategy.WAIT_REASON) if result['reason'] == chart_strategy.WAIT_REASON
               else result['reason'])
     return translate(RESULT).format(direction=direction,
+        trend=html.escape(result['trend']), momentum=html.escape(result['momentum']),
         asset=html.escape(result['asset'] or translate('Not visible')),
         timeframe=html.escape(result['timeframe'] or translate('Not visible')),
         reason=html.escape(reason), invalidation=invalidation)
@@ -92,12 +118,21 @@ async def receive(m, bot, state, render):
         return
     _inflight.add(tg_id)  # Publish before any await: one paid request per user.
     session = None
+    token = None
     async def active():
         return (await state.get_state() == Chart.waiting_image.state and
                 (await state.get_data()).get('chart_session') == session)
     try:
         session = (await state.get_data()).get('chart_session')
         if not session:
+            return
+        blocked, token = await trial.reserve(db.pool, tg_id, m.message_id)
+        if blocked:
+            if blocked == 'trial':
+                await state.clear()
+                await render(bot, tg_id, None, EXHAUSTED, ACCESS)
+            else:
+                await m.answer(MESSAGES[blocked])
             return
         with api.ImageBuffer() as image:
             async with asyncio.timeout(15):
@@ -117,8 +152,26 @@ async def receive(m, bot, state, render):
         await render(bot, tg_id, None, MESSAGES['working'], BACK)
         result = await api.analyse(data, language, m.caption or '')
         if await active():
-            await render(bot, tg_id, None, result_text(result, language),
-                         [[('🎯 Test Signals', 'cb:home:test', 'primary')], *BACK])
+            if result['direction'] in ('BUY', 'SELL'):
+                if not await trial.consume(db.pool, token):
+                    raise api.AnalysisError('service')
+            else:
+                await trial.release(db.pool, token)
+            verified, left = await trial.status(db.pool, tg_id)
+            text = result_text(result, language)
+            if not verified:
+                text += '\n\n' + localization.translate_parts('Remaining Signals: {left}', language).format(left=left)
+            keyboard = ACCESS if not verified and not left else [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]
+            if not await active():
+                await trial.release(db.pool, token, delivery_rejected=True)
+                return
+            try:
+                await render(bot, tg_id, None, text, keyboard,
+                             reply_to_message_id=m.message_id, raise_on_error=True)
+            except (TelegramBadRequest, TelegramForbiddenError):
+                # Telegram explicitly rejected the send, so no signal was delivered.
+                await trial.release(db.pool, token, delivery_rejected=True)
+                raise
     except api.AnalysisError as exc:
         code = str(exc)
         logging.warning('Chart analysis failed: code=%s', code)
@@ -130,10 +183,16 @@ async def receive(m, bot, state, render):
         if session and await active():
             await render(bot, tg_id, None, MESSAGES['service'], BACK)
     finally:
-        _inflight.discard(tg_id)
+        try:
+            await trial.release(db.pool, token)  # Releases pending only; used slots stay used.
+        finally:
+            _inflight.discard(tg_id)
 
 
 def install(dp, render):
     async def handle(m, bot, state):
         await receive(m, bot, state, render)
     dp.message.register(handle, Chart.waiting_image)
+    async def upload(cb, bot, state):
+        await open_screen(cb, bot, state, render, upload=True)
+    dp.callback_query.register(upload, F.data == 'chart:upload')

@@ -5,7 +5,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
-                           InlineKeyboardButton, FSInputFile, InputMediaPhoto)
+                           InlineKeyboardButton, FSInputFile, InputMediaPhoto, ReplyParameters)
 from aiogram.exceptions import TelegramBadRequest
 import uvicorn
 import db, config, panelbot
@@ -424,7 +424,8 @@ async def wipe(bot, tg_id):
                 pass
         await db.set_album(tg_id, None)
 
-async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
+async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
+                 reply_to_message_id=None, raise_on_error=False):
     if media_key == home_menu.ANIMATION and media_missing(media_key, 'mp4'):
         media_key, is_video = home_menu.PHOTO, False
     kb = build_kb(kb_rows)
@@ -447,8 +448,10 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
     try:
         if media_key is None:
             # Deliberately text-only, not a missing asset - nothing to warn about.
+            reply = {'reply_parameters': ReplyParameters(message_id=reply_to_message_id,
+                     allow_sending_without_reply=True)} if reply_to_message_id else {}
             m = await bot.send_message(tg_id, text, parse_mode="HTML",
-                                       reply_markup=kb)
+                                       reply_markup=kb, **reply)
         elif media_missing(media_key, "mp4" if is_video else "jpg"):
             # Text-only fallback: the user still gets the screen and its buttons
             # instead of a tap that does nothing.
@@ -473,6 +476,8 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
             else:
                 await remember(media_key, m)
     except Exception:
+        if raise_on_error:
+            raise
         # The old screen is already gone by now, so there is nothing left on
         # screen to fall back to. Say something rather than leave the user with
         # an empty chat and a tap that looks dead.
@@ -481,6 +486,7 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False):
         await _screen_error(bot, tg_id)
         return
     await db.set_ui_msg(tg_id, m.message_id)
+    return m
 
 async def _screen_error(bot, tg_id):
     # Plain text: no HTML, no entities, no keyboard. Whatever broke the screen
@@ -1686,7 +1692,8 @@ async def main():
         await conn.execute(broadcast.SCHEMA)
         await conn.execute(activity_stats.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
-    logging.info('Screenshot analysis ready; provider=Gemini; API configured=%s; model=%s; strategy=%s',
+        await conn.execute(chart_signals.trial.SCHEMA)
+    logging.info('Screenshot analysis ready; provider=DeepSeek; API configured=%s; model=%s; strategy=%s',
                  chart_signals.api.configured(), chart_signals.api.MODEL,
                  chart_signals.chart_strategy.VERSION)
     # Validate dashboard queries against the live schema before accepting commands.

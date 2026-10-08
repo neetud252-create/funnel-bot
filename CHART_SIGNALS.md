@@ -1,43 +1,55 @@
 # Screenshot Test Signals
 
-Home → Test Signals → upload one chart photo/image document → BUY/SELL directional
-bias based on the owner's level-reaction strategy, or WAIT if unconfirmed.
+Home → Test Signals → trial screen with remaining signals → Test Signals → upload
+one chart photo/image document → analysis replying to that image. Results show
+trend, momentum, BUY/SELL directional bias based on the owner's level-reaction
+strategy (or WAIT if unconfirmed), visible chart timeframe, reason and invalidation.
+The chart timeframe is not an invented one-minute expiry or recommended timer.
 The strategy requires readable candlesticks, the relevant level and left-side
 history. It works with screenshots from any market, including OTC; that is an
 input capability, not evidence of predictive accuracy across those markets.
 Existing verified-user signals remain separate and unchanged.
 
-Set `GEMINI_API_KEY` in Railway's service Variables (never commit it). An unset key
+Set `DEEPSEEK_API_KEY` in Railway's service Variables (never commit it). An unset key
 leaves a localized unavailable message; the rest of the bot still starts normally.
-`GEMINI_MODEL` defaults to `gemini-3.8-flash`. It uses the Google Interactions REST
-API with inline images, a JSON Schema response, low thinking and standard service
-tier. An override must support these capabilities. Google lists a free tier for
-this model as of 9 October 2026. Model/account access still requires a live test.
-Uses the existing httpx dependency. No OpenAI credential or fallback is used.
+`DEEPSEEK_MODEL` defaults to `deepseek-flash`. It uses DeepSeek's `/responses` REST
+API with inline images, a JSON Schema response and low reasoning effort. An
+override must support these capabilities. Uses the existing httpx dependency.
+No Gemini/OpenAI credential or provider fallback is used. DeepSeek API usage is
+billed to the owner under their provider plan; the user trial does not mean the
+API itself is free. The existing Railway credential was reused on 9 October 2026.
 
-To meet the owner's no-cost requirement, use an AI Studio project on the free
-tier. A key alone does not reveal billing status; the bot cannot certify that a
-project is free. Do not enable paid billing or paid fallback without the owner's
-instruction. Free-tier RPM/TPM/RPD limits are model/project-specific; look up the
-actual limits in AI Studio. Quota exhaustion returns a retry message, not another
-provider/model, key rotation, automatic upgrade or a made-up signal. Google resets
-daily provider quotas at midnight Pacific; the bot's own UTC budget is separate.
+Unverified users have **two lifetime free BUY/SELL signals**. The database's
+existing `users.verified` flag unlocks subsequent analysis; submitting an ID or
+tapping a button is not verification. After the second result, Get Bot Access
+replaces New Analysis. Both callback entry points and uploads check the limit.
+`/start`, a new day, Back and redeploying cannot reset it.
+
+`chart_trial_slots` reserves slots transactionally before image processing, using
+a shared PostgreSQL advisory lock. Duplicate Telegram message IDs cannot consume
+or produce another trial signal. Pending reservations expire after three minutes
+to recover from a process crash. A late response cannot consume an expired slot.
+WAIT, invalid uploads, API errors and cancelled sessions release pending slots.
+Confirmed signals commit a slot before Telegram delivery. Explicit Telegram
+rejections refund it; a timeout/unknown delivery retains it to prevent a third
+signal after an uncertain send. A crash between committing and sending can retain
+a slot without delivery; the ledger exposes that conservative limitation.
 
 Defaults: `CHART_DAILY_LIMIT=5` requests per user, `CHART_GLOBAL_DAILY_LIMIT=200`
 across all users, reset at 00:00 UTC. These budgets are separate from paid-tier
 signal counts and persist in Postgres `chart_analysis_usage`. Counts are reserved
 before an API attempt, including failed/cancelled attempts that might be billed.
 No automatic retries. A 30-second cooldown and four concurrent requests per
-process limit duplicate submissions. These are local controls, not a promise of
-200 free Gemini requests or a dollar budget.
+process limit duplicate submissions. These are separate abuse/spending controls:
+WAIT/errors do not use lifetime signal slots, but API attempts use daily budgets.
+Verified users retain these existing daily request limits.
 
 Only private chats; one JPEG/PNG/WebP, at most 8 MiB. Reject albums and unsupported
-documents. Bytes stay in memory and are sent as base64 to Google Gemini; no Telegram URL,
+documents. Bytes stay in memory and are sent as base64 to DeepSeek; no Telegram URL,
 bot token, username or chat history is sent. Caption context is capped at 500
-characters. `store=false` opts out of Interactions request/response storage; it
-does not override Google's free-tier data-use terms. The upload screen names
-Google Gemini, asks users to crop personal details and states that free-tier
-submissions may be used to improve Google's products.
+characters. DeepSeek documents Responses as stateless; this does not establish a
+provider-wide data-retention guarantee. The upload screen names DeepSeek and asks
+users to crop personal details.
 
 All UI labels/errors are translated into the 12 existing languages. Analysis
 prose is requested in the user's selected language. Model output is validated,
@@ -106,7 +118,7 @@ No arbitrary body-size or wick-ratio thresholds have been attributed to him.
 
 ### Validation boundary
 
-Gemini returns a setup code, direction, evidence, reason and boolean checks for
+DeepSeek returns a setup code, direction, trend, momentum, evidence, reason and boolean checks for
 readability, closed candle, established level, reaction, follow-through and
 conflict. The bot requires a direction matching the setup, all five positive
 checks, no conflict, and two distinct evidence statements. Contradictions become
@@ -118,15 +130,16 @@ Offline tests cover transport, limits, setup/direction consistency, incomplete
 confirmation, duplicate evidence, prompt isolation, translations and navigation.
 They do not measure trading accuracy. Before relying on results, evaluate a fixed
 set of timestamped screenshots with later outcomes withheld during inference.
-No such image/outcome evaluation or live Gemini call has been completed yet.
+A live DeepSeek call with the owner's chart passed image/schema validation on
+9 October 2026 and returned WAIT. That validates integration, not predictive
+accuracy. No image/outcome trading-accuracy evaluation has been completed.
 
 Checks: `python test_chart_signals.py`, `python test_home_menu.py`,
 `python test_localization.py`, `python test_uid_singleflight.py`.
+`CHART_TEST_DATABASE_URL=... python test_chart_trial_db.py` tests the real Postgres
+quota logic in an isolated temporary schema that is removed afterwards.
 
 API references:
-- https://ai.google.dev/gemini-api/docs/image-understanding
-- https://ai.google.dev/gemini-api/docs/structured-output
-- https://ai.google.dev/api/interactions-api
-- https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash
-- https://ai.google.dev/gemini-api/docs/pricing
-- https://ai.google.dev/gemini-api/docs/rate-limits
+- https://api-docs.deepseek.com/api/create-response/
+- https://api-docs.deepseek.com/guides/vision/
+- https://api-docs.deepseek.com/
