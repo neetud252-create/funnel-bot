@@ -12,11 +12,12 @@ ICONS = {
     'guide': '5222444124698853913',
     'access': '5427168083074628963',
     'assistant': '5773793517482546530',
+    'hello': '4942823933909926751',
     'bolt': '5456140674028019486',
     'chart': '5244837092042750681',
 }
 GLYPHS = {
-    '👋': 'assistant', '🤖': 'assistant',
+    '👋': 'hello', '🤖': 'assistant',
     '📈': 'chart', '📊': 'chart', '⚡️': 'bolt', '⚡': 'bolt',
     '💎': 'access', '📖': 'guide', '🎯': 'signal', '⭐': 'review',
     '☎️': 'support', '☎': 'support', '▶️': 'youtube',
