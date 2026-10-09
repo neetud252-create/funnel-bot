@@ -143,14 +143,15 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['direction'], 'BUY')
             self.assertEqual(result['setup'], 'directional_buy')
             self.assertEqual(result['checks'], checks)
-            self.assertIn(strategy.TENTATIVE_NOTE, flow.result_text(result, 'en'))
+            self.assertIn('(tentative)', flow.result_text(result, 'en'))
         unreadable = dict(VALID, direction=None, setup='unreadable', invalidation=None,
                           checks=dict(VALID['checks'], chart_readable=False))
         with self.assertRaisesRegex(api.AnalysisError, '^chart$'):
             api.parse_response(response(unreadable))
         for language in localization.CODES[1:]:
             rendered = flow.result_text(dict(VALID, setup='directional_buy'), language)
-            self.assertNotIn(strategy.TENTATIVE_NOTE, rendered)
+            self.assertIn(localization.translate_parts('(tentative)', language), rendered)
+            self.assertNotIn('(tentative)', rendered)
             self.assertNotIn('WAIT', rendered)
         self.assertNotIn('WAIT', json.dumps(api.RESULT_SCHEMA))
         self.assertNotIn('WAIT', strategy.INSTRUCTIONS)
@@ -180,8 +181,8 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                 buffer.write(b'xx')
 
     def test_escaped_output_and_all_languages(self):
-        malicious = dict(VALID, reason='<a href="https://bad.example">bad</a>',
-                         asset='<b>ABC</b>', invalidation='x & y')
+        malicious = dict(VALID, timeframe='<a href="https://bad.example">bad</a>',
+                         trend='<b>ABC</b>', momentum='x & y')
         for language in localization.CODES:
             rendered = flow.result_text(malicious, language)
             self.assertNotIn('<a ', rendered)
@@ -189,10 +190,18 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('x &amp; y', rendered)
             self.assertIn('BUY', rendered)
             if language != 'en':
-                self.assertNotIn('Based on your screenshot only.', rendered)
+                self.assertNotIn('Market Analysis:', rendered)
         with self.assertRaises(api.AnalysisError):
             flow.result_text(dict(VALID, direction='WAIT', invalidation=None), 'en')
-        self.assertNotIn(strategy.TENTATIVE_NOTE, flow.result_text(VALID, 'en'))
+        rendered = flow.result_text(VALID, 'en')
+        self.assertNotIn('(tentative)', rendered)
+        self.assertIn('- <b>Timer:</b> 1 minute', rendered)
+        self.assertNotIn(VALID['reason'], rendered)
+        self.assertNotIn(VALID['invalidation'], rendered)
+        for value, expected in (('M1', '1 minute'), ('5m', '5 minutes'),
+                                ('S30', '30 seconds'), ('1 hour', '1 hour'),
+                                (None, 'Not visible')):
+            self.assertEqual(flow.timer_text(value, 'en'), expected)
 
 
 class FlowTests(unittest.IsolatedAsyncioTestCase):
@@ -244,7 +253,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         trial.status.return_value = (False, 1)
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertIsNone(await self.state.get_state())
-        self.assertIn('Remaining Signals: 1', self.render.await_args.args[3])
+        self.assertIn('Remaining Signals:</b> 1', self.render.await_args.args[3])
+        self.assertIn('Accuracy:</b> Not yet verified', self.render.await_args.args[3])
         self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
         trial.status.return_value = (True, 0)
         await flow.open_screen(cb, self.bot, self.state, self.render)
@@ -282,14 +292,20 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         trial.consume.assert_awaited_once_with(None, 'trial-token')
         text = self.render.await_args.args[3]
         self.assertIn('BUY', text)
-        self.assertIn(strategy.TENTATIVE_NOTE, text)
+        self.assertIn('(tentative)', text)
         self.assertNotIn('WAIT', text)
 
-    async def test_second_result_opens_verification_and_expired_reservation_cannot_send(self):
+    async def test_second_result_gates_new_analysis_and_expired_reservation_cannot_send(self):
         trial.status.return_value = (False, 0)
         await flow.receive(message(), self.bot, self.state, self.render)
+        self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS)
+        self.assertNotIn('Remaining Signals:', self.render.await_args.args[3])
+        await self.open()
+        self.assertEqual(self.render.await_args.args[3], flow.EXHAUSTED)
         self.assertEqual(self.render.await_args.args[4], flow.ACCESS)
-        self.assertIn('Remaining Signals: 0', self.render.await_args.args[3])
+        self.assertIsNone(await self.state.get_state())
+        trial.status.return_value = (False, 2)
+        await self.open()
         trial.consume.return_value = False
         self.render.reset_mock()
         await flow.receive(message(), self.bot, self.state, self.render)

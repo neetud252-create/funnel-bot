@@ -2,6 +2,7 @@
 import asyncio
 import html
 import logging
+import re
 import secrets
 
 from aiogram.fsm.state import State, StatesGroup
@@ -13,19 +14,19 @@ import chart_trial as trial
 import localization
 
 INTRO = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
-         'Try chart analysis for free before verifying your account.\n\n'
-         '📊 <b>Remaining Signals: {left}</b>\n\n'
-         'Tap Test Signals to upload your chart. 🚀')
+         "You have been granted access to test the bot's signals.\n\n"
+         '📊 <b>Remaining Signals:</b> {left}\n'
+         '🎯 <b>Accuracy:</b> Not yet verified\n\n'
+         'Try it out now for free before verifying! 🚀')
 VERIFIED = ('🤖 <b>Go+ AI Chart Analysis</b>\n\n'
             'Your account is verified. Tap Test Signals to upload your chart.')
 EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
              'Verify your account to continue receiving chart analysis.\n'
              'Tap Get Bot Access below to continue.')
-PROMPT = ('🎯 <b>AI Chart Analyzer</b>\n\n'
-          'Send a clear screenshot of any trading chart. Include the latest candles, pair name and timeframe.\n\n'
-          'You will receive a BUY or SELL directional estimate with reasons and any missing confirmation.\n\n'
-          'Crop out personal details. Your image is sent to DeepSeek for analysis.\n'
-          'Screenshot analysis is not a live price feed or a guaranteed prediction.')
+PROMPT = ('🔲 AI Chart Analyzer\n\n'
+          '📊 Send your trading chart screenshot.\n'
+          '⚡ DeepSeek AI will analyse your chart and return BUY or SELL.\n\n'
+          '<i>Crop out personal details before sending. Timer shows the chart interval.</i>')
 MESSAGES = {
     'configuration': 'Chart analysis is temporarily unavailable. Please try again later.',
     'service': 'Analysis could not be completed. Please try again shortly.',
@@ -38,19 +39,20 @@ MESSAGES = {
     'private': 'Open Test Signals in a private chat with the bot.',
     'working': '⏳ Analysing your chart…',
 }
-RESULT = ('🤖 <b>AI Trading Signal Result</b>\n\n'
-          '📊 <b>Market Analysis:</b>\n'
-          '• <b>Trend:</b> {trend}\n• <b>Momentum:</b> {momentum}\n\n'
+RESULT = ('🔲 AI Trading Signal Result\n\n'
+          '💗 <b>Market Analysis:</b>\n'
+          '- 📈 <b>Trend:</b> {trend}\n- 🪙 <b>Momentum:</b> {momentum}\n\n'
           '🎯 <b>Recommendation:</b>\n'
-          '• <b>Prediction:</b> {direction}\n'
-          '• Pair: <b>{asset}</b>\n• Chart timeframe: <b>{timeframe}</b>\n\n'
-          '{reason}\n\n{invalidation}\n\n'
-          'Based on your screenshot only. Prices may have changed; no outcome is guaranteed.')
-EXTRA = ('Not visible', 'Invalidation: {condition}')
+          '- <b>Prediction:</b> {direction}\n'
+          '- <b>Timer:</b> {timer}')
+EXTRA = ('Not visible', '(tentative)', '{count} minute', '{count} minutes',
+         '{count} second', '{count} seconds', '{count} hour', '{count} hours',
+         '{count} day', '{count} days')
 SOURCES = (INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
-           'Remaining Signals: {left}', 'New Analysis', chart_strategy.TENTATIVE_NOTE)
-BACK = [[('⬅️ Back', 'cb:home:back', 'success')]]
+           'Remaining Signals: {left}', 'New Analysis')
+BACK = [[('🔙 Back', 'cb:home:back', 'success')]]
 UPLOAD = [[('🎯 Test Signals', 'cb:chart:upload', 'primary')], *BACK]
+NEW_ANALYSIS = [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]
 ACCESS = [[('💎 Get Bot Access', 'cb:home:access', 'success')], *BACK]
 _inflight = set()
 
@@ -81,6 +83,26 @@ async def open_screen(cb, bot, state, render, *, upload=False):
     await render(bot, cb.from_user.id, None, PROMPT, BACK)
 
 
+def timer_text(timeframe, language):
+    """The reference's Timer row displays the observed candle interval, not an expiry."""
+    if not timeframe:
+        return localization.translate_parts('Not visible', language)
+    value = timeframe.strip().lower()
+    match = re.fullmatch(r'(\d+)\s*(s|sec(?:ond)?s?|m|min(?:ute)?s?|h|hours?|d|days?)', value)
+    if not match:
+        match = re.fullmatch(r'([smhd])(\d+)', value)
+        if match:
+            count, unit = match[2], match[1]
+        else:
+            return html.escape(timeframe)
+    else:
+        count, unit = match[1], match[2]
+    number = int(count)
+    unit = {'s': 'second', 'm': 'minute', 'h': 'hour', 'd': 'day'}[unit[0]]
+    template = '{count} ' + unit + ('s' if number != 1 else '')
+    return localization.translate_parts(template, language).format(count=number)
+
+
 def result_text(result, language):
     # Translate labels BEFORE interpolation, so the model's explanation cannot
     # accidentally match/alter a built-in phrase. Escape every dynamic field.
@@ -88,17 +110,11 @@ def result_text(result, language):
     direction = result['direction']
     if direction not in ('BUY', 'SELL'):
         raise api.AnalysisError('response')
-    direction = '🟢 BUY' if direction == 'BUY' else '🔴 SELL'
-    condition = result['invalidation']
-    invalidation = translate(EXTRA[1]).format(condition=html.escape(condition)) if condition else ''
-    reason = html.escape(result['reason'])
     if not chart_strategy.confirmed_setup(result):
-        reason += '\n\n' + translate(chart_strategy.TENTATIVE_NOTE)
+        direction += ' ' + translate('(tentative)')
     return translate(RESULT).format(direction=direction,
         trend=html.escape(result['trend']), momentum=html.escape(result['momentum']),
-        asset=html.escape(result['asset'] or translate('Not visible')),
-        timeframe=html.escape(result['timeframe'] or translate('Not visible')),
-        reason=reason, invalidation=invalidation)
+        timer=timer_text(result['timeframe'], language))
 
 
 async def receive(m, bot, state, render):
@@ -161,15 +177,11 @@ async def receive(m, bot, state, render):
             text = result_text(result, language)
             if not await trial.consume(db.pool, token):
                 raise api.AnalysisError('service')
-            verified, left = await trial.status(db.pool, tg_id)
-            if not verified:
-                text += '\n\n' + localization.translate_parts('Remaining Signals: {left}', language).format(left=left)
-            keyboard = ACCESS if not verified and not left else [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]
             if not await active():
                 await trial.release(db.pool, token, delivery_rejected=True)
                 return
             try:
-                await render(bot, tg_id, None, text, keyboard,
+                await render(bot, tg_id, None, text, NEW_ANALYSIS,
                              reply_to_message_id=m.message_id, raise_on_error=True)
             except (TelegramBadRequest, TelegramForbiddenError):
                 # Telegram explicitly rejected the send, so no signal was delivered.

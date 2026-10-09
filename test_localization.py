@@ -25,7 +25,7 @@ def sample(source):
                   balance=12, needed=38, seconds=20, wait='00:30', pair='GBP/USD OTC',
                   expiry='M1', direction=config.SIGNAL_DIRECTIONS[0][0],
                   asset='GBP/USD OTC', timeframe='M1', reason='visible structure',
-                  trend='upward', momentum='buyers active',
+                  trend='upward', momentum='buyers active', timer='1 minute', count=2,
                   invalidation='visible support breaks', condition='visible support breaks',
                   status=config.MSG_PREMIUM_ACTIVE.format(limit=50),
                   ref='https://example.com/Start?click_id=abc_BUY&src=Guide')

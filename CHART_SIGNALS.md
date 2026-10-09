@@ -2,11 +2,15 @@
 
 Home → Test Signals → trial screen with remaining signals → Test Signals → upload
 one chart photo/image document → analysis replying to that image. Results show
-trend, momentum, BUY/SELL directional bias based on the owner's level-reaction
-strategy, visible chart timeframe, reason and invalidation. BUY and SELL are the
-only signal outcomes. Incomplete or conflicting confirmation is disclosed as a
-tentative bias; an unreadable chart produces an upload-retry error, not a signal.
-The chart timeframe is not an invented one-minute expiry or recommended timer.
+Trend, Momentum, BUY/SELL Prediction and Timer in the compact reference layout.
+Prediction uses the owner's level-reaction strategy. Incomplete or conflicting
+confirmation adds a translated `(tentative)` suffix; an unreadable chart produces
+an upload-retry error, not a signal. Reason and invalidation remain in the validated
+provider response but are not displayed as extra paragraphs. Timer displays the
+observed chart candle interval (for example, `1m` becomes `1 minute`), not an expiry
+recommendation; the upload screen explains this. An unreadable interval stays
+`Not visible`. The trial screen says `Accuracy: Not yet verified`; no measured
+accuracy supports a percentage or guarantee.
 The strategy requires readable candlesticks and enough visible history to compare
 price movements. It works with screenshots from any market, including OTC; that is an
 input capability, not evidence of predictive accuracy across those markets.
@@ -23,8 +27,9 @@ API itself is free. The existing Railway credential was reused on 9 October 2026
 
 Unverified users have **two lifetime free BUY/SELL signals**. The database's
 existing `users.verified` flag unlocks subsequent analysis; submitting an ID or
-tapping a button is not verification. After the second result, Get Bot Access
-replaces New Analysis. Both callback entry points and uploads check the limit.
+tapping a button is not verification. Results keep the blue New Analysis and green
+Back buttons. After the second result, New Analysis opens the exhausted-trial screen
+with Get Bot Access. Both callback entry points and uploads check the limit.
 `/start`, a new day, Back and redeploying cannot reset it.
 
 `chart_trial_slots` reserves slots transactionally before image processing, using
@@ -116,7 +121,8 @@ not a claim that the transcript specified a validated signal for every candle.
   It cannot by itself establish a confirmed BUY; reassess the remaining evidence.
 - Repeated dojis/downward-shifting closes can show weakness, but an unfinished
   candle is not confirmation. Mixed evidence produces a tentative direction with
-  the missing confirmation or opposing evidence stated in the explanation.
+  a tentative label; missing confirmation or opposing evidence remains in the
+  provider's internal explanation.
 - The numbers 10, 16, 20, 30, 36 and 40 are shortened prices from that chart.
   They are not hardcoded levels for other markets. Multiples of five only add
   context where the instrument's scale and actual reactions justify it.
@@ -139,8 +145,8 @@ readability, closed candle, established level, reaction, follow-through and
 conflict. The bot requires a readable chart, a BUY/SELL direction matching the
 setup and two distinct evidence statements. All five positive checks and no
 conflict are needed only to label an entry confirmed. Missing confirmation changes
-the setup to directional_buy/directional_sell and adds a translated tentative-bias
-note; it does not change the selected direction. An unreadable chart permits null
+the setup to directional_buy/directional_sell and adds a translated `(tentative)`
+suffix; it does not change the selected direction. An unreadable chart permits null
 in the provider schema solely to request a clearer image; null is never a signal.
 Contradictory direction/setup codes, truncated/blocked/malformed API output and
 legacy abstention outcomes produce errors, never an invented fallback direction.
