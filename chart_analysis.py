@@ -26,15 +26,15 @@ INSTRUCTIONS = chart_strategy.INSTRUCTIONS
 RESULT_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'properties': {
-        'direction': {'type': 'string', 'enum': ['BUY', 'SELL', 'WAIT']},
-        'asset': {'type': ['string', 'null']},
-        'timeframe': {'type': ['string', 'null']},
-        'reason': {'type': 'string'},
-        'trend': {'type': 'string'},
-        'momentum': {'type': 'string'},
-        'invalidation': {'type': ['string', 'null']},
+        'direction': {'type': ['string', 'null'], 'enum': ['BUY', 'SELL', None]},
+        'asset': {'type': ['string', 'null'], 'maxLength': 100},
+        'timeframe': {'type': ['string', 'null'], 'maxLength': 100},
+        'reason': {'type': 'string', 'minLength': 1, 'maxLength': 500},
+        'trend': {'type': 'string', 'minLength': 1, 'maxLength': 250},
+        'momentum': {'type': 'string', 'minLength': 1, 'maxLength': 250},
+        'invalidation': {'type': ['string', 'null'], 'maxLength': 300},
         'setup': {'type': 'string', 'enum': list(chart_strategy.SETUPS)},
-        'evidence': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 4},
+        'evidence': {'type': 'array', 'items': {'type': 'string', 'minLength': 1, 'maxLength': 350}, 'maxItems': 4},
         'checks': {'type': 'object', 'additionalProperties': False,
                    'properties': {name: {'type': 'boolean'} for name in chart_strategy.CHECKS},
                    'required': list(chart_strategy.CHECKS)},
@@ -101,7 +101,7 @@ def parse_response(payload):
         result = json.loads(''.join(part['text'] for part in parts))
         if not isinstance(result, dict) or set(result) != set(RESULT_SCHEMA['required']):
             raise ValueError('Invalid keys')
-        if result['direction'] not in ('BUY', 'SELL', 'WAIT'):
+        if result['direction'] not in ('BUY', 'SELL', None):
             raise ValueError('Invalid direction')
         for field, limit in (('asset', 100), ('timeframe', 100), ('reason', 500),
                              ('trend', 250), ('momentum', 250), ('invalidation', 300)):
@@ -110,7 +110,7 @@ def parse_response(payload):
                 continue
             if not isinstance(value, str) or not value.strip() or len(value) > limit:
                 raise ValueError('Invalid field')
-        if result['direction'] != 'WAIT' and not result['invalidation']:
+        if result['direction'] is not None and not result['invalidation']:
             raise ValueError('Missing invalidation')
         if result['setup'] not in chart_strategy.SETUPS:
             raise ValueError('Unknown setup')
@@ -122,11 +122,12 @@ def parse_response(payload):
         if (not isinstance(evidence, list) or len(evidence) > 4
                 or any(not isinstance(item, str) or not item.strip() or len(item) > 350 for item in evidence)):
             raise ValueError('Invalid evidence')
+        if not checks['chart_readable']:
+            raise AnalysisError('chart')
         if not chart_strategy.supports_signal(result):
-            result = dict(result, direction='WAIT', setup='none',
-                          reason=chart_strategy.WAIT_REASON, invalidation=None)
-        elif result['direction'] == 'WAIT':
-            result = dict(result, setup='none', invalidation=None)
+            raise ValueError('Unsupported directional result')
+        if not chart_strategy.confirmed_setup(result):
+            result = dict(result, setup='directional_buy' if result['direction'] == 'BUY' else 'directional_sell')
         return result
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise AnalysisError('response') from exc

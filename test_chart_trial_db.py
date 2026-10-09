@@ -34,7 +34,7 @@ async def main():
         assert await trial.status(pool, 11) == (False, 0)
         for token in tokens:
             assert await trial.consume(pool, token)
-        # A released pending slot (error/WAIT) is available, but a used slot is not.
+        # A released pending slot (invalid image/error) is available, but a used slot is not.
         blocked, free = await trial.reserve(pool, 12, 20)
         assert blocked is None
         await trial.release(pool, free)

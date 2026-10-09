@@ -23,7 +23,7 @@ EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
              'Tap Get Bot Access below to continue.')
 PROMPT = ('🎯 <b>AI Chart Analyzer</b>\n\n'
           'Send a clear screenshot of any trading chart. Include the latest candles, pair name and timeframe.\n\n'
-          'You will receive a BUY or SELL bias with reasons, or WAIT when the chart is unclear.\n\n'
+          'You will receive a BUY or SELL directional estimate with reasons and any missing confirmation.\n\n'
           'Crop out personal details. Your image is sent to DeepSeek for analysis.\n'
           'Screenshot analysis is not a live price feed or a guaranteed prediction.')
 MESSAGES = {
@@ -32,6 +32,7 @@ MESSAGES = {
     'response': 'No usable analysis was returned. Please try a clearer chart screenshot.',
     'busy': 'Chart analysis is busy. Please try again shortly.',
     'image': 'Send one JPG, PNG or WebP chart screenshot under 8 MB.',
+    'chart': 'The chart could not be read. Send a clearer screenshot with more candle history.',
     'limit': 'Daily chart analysis limit reached. Try again tomorrow (UTC).',
     'cooldown': 'Please wait 30 seconds between chart requests.',
     'private': 'Open Test Signals in a private chat with the bot.',
@@ -45,9 +46,9 @@ RESULT = ('🤖 <b>AI Trading Signal Result</b>\n\n'
           '• Pair: <b>{asset}</b>\n• Chart timeframe: <b>{timeframe}</b>\n\n'
           '{reason}\n\n{invalidation}\n\n'
           'Based on your screenshot only. Prices may have changed; no outcome is guaranteed.')
-EXTRA = ('Not visible', 'Invalidation: {condition}', 'WAIT — No clear setup')
+EXTRA = ('Not visible', 'Invalidation: {condition}')
 SOURCES = (INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
-           'Remaining Signals: {left}', 'New Analysis', chart_strategy.WAIT_REASON)
+           'Remaining Signals: {left}', 'New Analysis', chart_strategy.TENTATIVE_NOTE)
 BACK = [[('⬅️ Back', 'cb:home:back', 'success')]]
 UPLOAD = [[('🎯 Test Signals', 'cb:chart:upload', 'primary')], *BACK]
 ACCESS = [[('💎 Get Bot Access', 'cb:home:access', 'success')], *BACK]
@@ -85,16 +86,19 @@ def result_text(result, language):
     # accidentally match/alter a built-in phrase. Escape every dynamic field.
     translate = lambda s: localization.translate_parts(s, language)
     direction = result['direction']
-    direction = '🟢 BUY' if direction == 'BUY' else '🔴 SELL' if direction == 'SELL' else '⏸ ' + translate(EXTRA[2])
-    condition = result['invalidation'] if result['direction'] != 'WAIT' else None
+    if direction not in ('BUY', 'SELL'):
+        raise api.AnalysisError('response')
+    direction = '🟢 BUY' if direction == 'BUY' else '🔴 SELL'
+    condition = result['invalidation']
     invalidation = translate(EXTRA[1]).format(condition=html.escape(condition)) if condition else ''
-    reason = (translate(chart_strategy.WAIT_REASON) if result['reason'] == chart_strategy.WAIT_REASON
-              else result['reason'])
+    reason = html.escape(result['reason'])
+    if not chart_strategy.confirmed_setup(result):
+        reason += '\n\n' + translate(chart_strategy.TENTATIVE_NOTE)
     return translate(RESULT).format(direction=direction,
         trend=html.escape(result['trend']), momentum=html.escape(result['momentum']),
         asset=html.escape(result['asset'] or translate('Not visible')),
         timeframe=html.escape(result['timeframe'] or translate('Not visible')),
-        reason=html.escape(reason), invalidation=invalidation)
+        reason=reason, invalidation=invalidation)
 
 
 async def receive(m, bot, state, render):
@@ -152,13 +156,12 @@ async def receive(m, bot, state, render):
         await render(bot, tg_id, None, MESSAGES['working'], BACK)
         result = await api.analyse(data, language, m.caption or '')
         if await active():
-            if result['direction'] in ('BUY', 'SELL'):
-                if not await trial.consume(db.pool, token):
-                    raise api.AnalysisError('service')
-            else:
-                await trial.release(db.pool, token)
-            verified, left = await trial.status(db.pool, tg_id)
+            # Validate/render before consuming a slot: malformed provider data
+            # must never be coerced into a direction or charged as a signal.
             text = result_text(result, language)
+            if not await trial.consume(db.pool, token):
+                raise api.AnalysisError('service')
+            verified, left = await trial.status(db.pool, tg_id)
             if not verified:
                 text += '\n\n' + localization.translate_parts('Remaining Signals: {left}', language).format(left=left)
             keyboard = ACCESS if not verified and not left else [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]

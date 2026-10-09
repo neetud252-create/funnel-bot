@@ -3,10 +3,12 @@
 Home → Test Signals → trial screen with remaining signals → Test Signals → upload
 one chart photo/image document → analysis replying to that image. Results show
 trend, momentum, BUY/SELL directional bias based on the owner's level-reaction
-strategy (or WAIT if unconfirmed), visible chart timeframe, reason and invalidation.
+strategy, visible chart timeframe, reason and invalidation. BUY and SELL are the
+only signal outcomes. Incomplete or conflicting confirmation is disclosed as a
+tentative bias; an unreadable chart produces an upload-retry error, not a signal.
 The chart timeframe is not an invented one-minute expiry or recommended timer.
-The strategy requires readable candlesticks, the relevant level and left-side
-history. It works with screenshots from any market, including OTC; that is an
+The strategy requires readable candlesticks and enough visible history to compare
+price movements. It works with screenshots from any market, including OTC; that is an
 input capability, not evidence of predictive accuracy across those markets.
 Existing verified-user signals remain separate and unchanged.
 
@@ -29,8 +31,8 @@ replaces New Analysis. Both callback entry points and uploads check the limit.
 a shared PostgreSQL advisory lock. Duplicate Telegram message IDs cannot consume
 or produce another trial signal. Pending reservations expire after three minutes
 to recover from a process crash. A late response cannot consume an expired slot.
-WAIT, invalid uploads, API errors and cancelled sessions release pending slots.
-Confirmed signals commit a slot before Telegram delivery. Explicit Telegram
+Invalid uploads, API errors and cancelled sessions release pending slots.
+Both confirmed and tentative directional results commit a slot before Telegram delivery. Explicit Telegram
 rejections refund it; a timeout/unknown delivery retains it to prevent a third
 signal after an uncertain send. A crash between committing and sending can retain
 a slot without delivery; the ledger exposes that conservative limitation.
@@ -41,7 +43,7 @@ signal counts and persist in Postgres `chart_analysis_usage`. Counts are reserve
 before an API attempt, including failed/cancelled attempts that might be billed.
 No automatic retries. A 30-second cooldown and four concurrent requests per
 process limit duplicate submissions. These are separate abuse/spending controls:
-WAIT/errors do not use lifetime signal slots, but API attempts use daily budgets.
+Errors do not use lifetime signal slots, but API attempts use daily budgets.
 Verified users retain these existing daily request limits.
 
 Only private chats; one JPEG/PNG/WebP, at most 8 MiB. Reject albums and unsupported
@@ -56,7 +58,7 @@ prose is requested in the user's selected language. Model output is validated,
 length-limited and HTML-escaped. No numeric confidence scores or fabricated expiry.
 Back or /start abandons the session and suppresses late analysis results.
 
-## Strategy interpretation: level-reaction-v1
+## Strategy interpretation: level-reaction-v2-directional
 
 Source: the owner's Hindi trading-session transcript supplied on 9 October 2026
 (begins with an expanded candle described as exhaustion). The transcript contains
@@ -75,8 +77,9 @@ rate. We encode the observable price-action ideas below, not its performance cla
    repeated failed buyer bounces plus strong selling override an old support idea.
 4. Uses a prior support becoming resistance as a polarity change, then looks at
    how the next approach responds to the changed level.
-5. Sometimes waits after dojis or losses, despite earlier saying every candle
-   would be traded. The implemented version consistently waits for confirmation.
+5. Sometimes pauses after dojis or losses, despite earlier saying every candle
+   would be traded. At the owner's request, v2 nevertheless selects a direction
+   on readable charts and discloses missing confirmation rather than abstaining.
 
 ### Signal rules
 
@@ -91,17 +94,29 @@ rate. We encode the observable price-action ideas below, not its performance cla
 Mirrored cases (for example resistance becoming support and bearish exhaustion)
 are implementation generalizations of the same idea; not every mirrored case was
 explicitly demonstrated in the transcript. Requiring a completed confirmation
-candle is a conservative screenshot adaptation, not the narrator's exact timing.
+candle to label an entry confirmed is a screenshot adaptation, not the narrator's
+exact timing. A tentative estimate can be returned without full confirmation.
 No arbitrary body-size or wick-ratio thresholds have been attributed to him.
+
+When no full entry setup is visible, compare recent level reactions and failed
+follow-through, then recent completed-candle structure/net progress and momentum.
+Lower highs/lows and strong selling with weak bounces support SELL continuation;
+higher highs/lows and strong buying with weak pullbacks support BUY continuation.
+Do not invent an exhaustion reversal just because price has moved a long way.
+In a mixed range, prioritize the latest completed reaction, then net progress,
+then the latest clearly completed non-flat candle as a weak tie-breaker. Disclose
+that weak basis. This ordering is an explicit directional-selection adaptation,
+not a claim that the transcript specified a validated signal for every candle.
 
 ### Handling contradictions and missing information
 
 - A new swing high or a big green candle is not automatically SELL. A clean
   breakout and a failed breakout are different; require the stated reaction.
 - The narrator's failed dark-cloud example only removes bearish confirmation.
-  It cannot establish BUY without separate bullish confirmation at the level.
+  It cannot by itself establish a confirmed BUY; reassess the remaining evidence.
 - Repeated dojis/downward-shifting closes can show weakness, but an unfinished
-  candle is not confirmation. Mixed signals or strong opposing momentum → WAIT.
+  candle is not confirmation. Mixed evidence produces a tentative direction with
+  the missing confirmation or opposing evidence stated in the explanation.
 - The numbers 10, 16, 20, 30, 36 and 40 are shortened prices from that chart.
   They are not hardcoded levels for other markets. Multiples of five only add
   context where the instrument's scale and actual reactions justify it.
@@ -111,7 +126,8 @@ No arbitrary body-size or wick-ratio thresholds have been attributed to him.
   inferred from a still image. Do not implement an automatic BUY from that story.
 - A screenshot cannot show the full tick sequence or guarantee it is current.
   Use the most recent clearly completed candle; no timed entry, expiry, or claim
-  that the next candle must be green/red. Newer invalidating price action → WAIT.
+  that the next candle must be green/red. Newer invalidating price action requires
+  reassessing the current direction rather than repeating an obsolete setup.
 - The transcript's 'sure shot', 80–100%, repeated entries after losses and profit
   target are not implemented. A candle's final color alone also does not establish
   whether a trade placed partway through it won.
@@ -120,19 +136,23 @@ No arbitrary body-size or wick-ratio thresholds have been attributed to him.
 
 DeepSeek returns a setup code, direction, trend, momentum, evidence, reason and boolean checks for
 readability, closed candle, established level, reaction, follow-through and
-conflict. The bot requires a direction matching the setup, all five positive
-checks, no conflict, and two distinct evidence statements. Contradictions become
-WAIT with a translated explanation. Truncated/blocked/malformed API output is an
-error, never a signal. These checks validate the model's reported consistency;
+conflict. The bot requires a readable chart, a BUY/SELL direction matching the
+setup and two distinct evidence statements. All five positive checks and no
+conflict are needed only to label an entry confirmed. Missing confirmation changes
+the setup to directional_buy/directional_sell and adds a translated tentative-bias
+note; it does not change the selected direction. An unreadable chart permits null
+in the provider schema solely to request a clearer image; null is never a signal.
+Contradictory direction/setup codes, truncated/blocked/malformed API output and
+legacy abstention outcomes produce errors, never an invented fallback direction.
+These checks validate the model's reported consistency;
 they cannot independently prove its reading of image pixels is correct.
 
 Offline tests cover transport, limits, setup/direction consistency, incomplete
 confirmation, duplicate evidence, prompt isolation, translations and navigation.
 They do not measure trading accuracy. Before relying on results, evaluate a fixed
 set of timestamped screenshots with later outcomes withheld during inference.
-A live DeepSeek call with the owner's chart passed image/schema validation on
-9 October 2026 and returned WAIT. That validates integration, not predictive
-accuracy. No image/outcome trading-accuracy evaluation has been completed.
+A live API/schema check validates integration, not predictive accuracy.
+No image/outcome trading-accuracy evaluation has been completed.
 
 Checks: `python test_chart_signals.py`, `python test_home_menu.py`,
 `python test_localization.py`, `python test_uid_singleflight.py`.

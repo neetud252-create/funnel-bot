@@ -120,31 +120,41 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         for payload in bad:
             with self.assertRaises(api.AnalysisError):
                 api.parse_response(payload)
-        wait = dict(VALID, direction='WAIT', setup='none', asset=None, timeframe=None, invalidation=None)
-        self.assertEqual(api.parse_response(response(wait)), wait)
+        for removed_direction in ('WAIT', None, 'HOLD'):
+            with self.assertRaises(api.AnalysisError):
+                api.parse_response(response(dict(VALID, direction=removed_direction)))
         self.assertEqual(api.parse_response(response(dict(VALID, direction='SELL',
                          setup='resistance_rejection')))['direction'], 'SELL')
 
     def test_strategy_gates_all_directions_and_ambiguous_cases(self):
         for setup, direction in strategy.SETUPS.items():
-            if direction != 'WAIT':
+            if direction is not None:
                 self.assertEqual(api.parse_response(response(dict(VALID, setup=setup,
                                  direction=direction)))['direction'], direction)
         bad = [dict(VALID, setup='resistance_rejection'), dict(VALID, setup='none'),
                dict(VALID, evidence=[]), dict(VALID, evidence=['same', ' SAME '])]
-        for name in strategy.CHECKS:
+        for case in bad:
+            with self.assertRaises(api.AnalysisError):
+                api.parse_response(response(case))
+        for name in strategy.CHECKS[1:]:
             checks = dict(VALID['checks'])
             checks[name] = not checks[name]
-            bad.append(dict(VALID, checks=checks))
-        for case in bad:
-            result = api.parse_response(response(case))
-            self.assertEqual(result['direction'], 'WAIT')
-            self.assertEqual(result['reason'], strategy.WAIT_REASON)
-            self.assertIsNone(result['invalidation'])
-            self.assertEqual(result['setup'], 'none')
+            result = api.parse_response(response(dict(VALID, checks=checks)))
+            self.assertEqual(result['direction'], 'BUY')
+            self.assertEqual(result['setup'], 'directional_buy')
+            self.assertEqual(result['checks'], checks)
+            self.assertIn(strategy.TENTATIVE_NOTE, flow.result_text(result, 'en'))
+        unreadable = dict(VALID, direction=None, setup='unreadable', invalidation=None,
+                          checks=dict(VALID['checks'], chart_readable=False))
+        with self.assertRaisesRegex(api.AnalysisError, '^chart$'):
+            api.parse_response(response(unreadable))
         for language in localization.CODES[1:]:
-            rendered = flow.result_text(api.parse_response(response(bad[0])), language)
-            self.assertNotIn(strategy.WAIT_REASON, rendered)
+            rendered = flow.result_text(dict(VALID, setup='directional_buy'), language)
+            self.assertNotIn(strategy.TENTATIVE_NOTE, rendered)
+            self.assertNotIn('WAIT', rendered)
+        self.assertNotIn('WAIT', json.dumps(api.RESULT_SCHEMA))
+        self.assertNotIn('WAIT', strategy.INSTRUCTIONS)
+        self.assertNotIn('WAIT', ''.join(flow.SOURCES))
 
     def test_ignores_thought_steps_and_rejects_partial_or_multiple_outputs(self):
         valid = response()
@@ -180,9 +190,9 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('BUY', rendered)
             if language != 'en':
                 self.assertNotIn('Based on your screenshot only.', rendered)
-        wait = flow.result_text(dict(VALID, direction='WAIT', invalidation=None), 'en')
-        self.assertIn('WAIT', wait)
-        self.assertNotIn('Invalidation:', wait)
+        with self.assertRaises(api.AnalysisError):
+            flow.result_text(dict(VALID, direction='WAIT', invalidation=None), 'en')
+        self.assertNotIn(strategy.TENTATIVE_NOTE, flow.result_text(VALID, 'en'))
 
 
 class FlowTests(unittest.IsolatedAsyncioTestCase):
@@ -253,14 +263,27 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.bot.download.assert_not_awaited()
         self.assertIsNone(await self.state.get_state())
 
-    async def test_wait_and_api_failure_do_not_consume_trial(self):
+    async def test_removed_direction_and_api_failure_do_not_consume_trial(self):
         api.analyse.return_value = dict(VALID, direction='WAIT', invalidation=None)
         await flow.receive(message(), self.bot, self.state, self.render)
         trial.consume.assert_not_awaited()
+        self.assertNotIn('WAIT', self.render.await_args.args[3])
         trial.release.assert_awaited_with(None, 'trial-token')
-        api.analyse.side_effect = api.AnalysisError('service')
+        for error in ('service', 'chart'):
+            api.analyse.side_effect = api.AnalysisError(error)
+            await flow.receive(message(), self.bot, self.state, self.render)
+            trial.consume.assert_not_awaited()
+            self.assertEqual(self.render.await_args.args[3], flow.MESSAGES[error])
+
+    async def test_tentative_direction_consumes_one_trial_signal(self):
+        checks = dict(VALID['checks'], level_established=False, conflicting_evidence=True)
+        api.analyse.return_value = dict(VALID, setup='directional_buy', checks=checks)
         await flow.receive(message(), self.bot, self.state, self.render)
-        trial.consume.assert_not_awaited()
+        trial.consume.assert_awaited_once_with(None, 'trial-token')
+        text = self.render.await_args.args[3]
+        self.assertIn('BUY', text)
+        self.assertIn(strategy.TENTATIVE_NOTE, text)
+        self.assertNotIn('WAIT', text)
 
     async def test_second_result_opens_verification_and_expired_reservation_cannot_send(self):
         trial.status.return_value = (False, 0)
