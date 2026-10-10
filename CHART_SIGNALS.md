@@ -9,8 +9,10 @@ an upload-retry error, not a signal. Reason and invalidation remain in the valid
 provider response but are not displayed as extra paragraphs. Timer displays the
 observed chart candle interval (for example, `1m` becomes `1 minute`), not an expiry
 recommendation; the upload screen explains this. An unreadable interval stays
-`Not visible`. The trial screen says `Accuracy: Not yet verified`; no measured
-accuracy supports a percentage or guarantee.
+`Not visible`. The trial screen temporarily says
+`Accuracy: 95% Guaranteed (test placeholder)` for UI testing. This is sample copy;
+no measured accuracy supports a percentage or guarantee. Restore `Not yet verified`
+in the intro and its translations after testing.
 The strategy requires readable candlesticks and enough visible history to compare
 price movements. It works with screenshots from any market, including OTC; that is an
 input capability, not evidence of predictive accuracy across those markets.

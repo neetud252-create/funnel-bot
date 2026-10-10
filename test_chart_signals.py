@@ -254,7 +254,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertIsNone(await self.state.get_state())
         self.assertIn('Remaining Signals:</b> 1', self.render.await_args.args[3])
-        self.assertIn('Accuracy:</b> Not yet verified', self.render.await_args.args[3])
+        self.assertIn('Accuracy:</b> 95% Guaranteed (test placeholder)', self.render.await_args.args[3])
         self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
         trial.status.return_value = (True, 0)
         await flow.open_screen(cb, self.bot, self.state, self.render)

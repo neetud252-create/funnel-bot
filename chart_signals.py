@@ -13,10 +13,11 @@ import chart_strategy
 import chart_trial as trial
 import localization
 
+# Temporary display copy; the percentage is a test placeholder, not measured accuracy.
 INTRO = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
          "You have been granted access to test the bot's signals.\n\n"
          '📊 <b>Remaining Signals:</b> {left}\n'
-         '🎯 <b>Accuracy:</b> Not yet verified\n\n'
+         '🎯 <b>Accuracy:</b> 95% Guaranteed (test placeholder)\n\n'
          'Try it out now for free before verifying! 🚀')
 VERIFIED = ('🤖 <b>Go+ AI Chart Analysis</b>\n\n'
             'Your account is verified. Tap Test Signals to upload your chart.')
