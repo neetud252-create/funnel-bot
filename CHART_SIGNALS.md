@@ -15,9 +15,13 @@ to show `Accuracy: 95% + Guaranteed` without a visible placeholder suffix.
 This is sample copy; no measured accuracy supports a percentage or guarantee.
 Unset the variable or set it to `0` before launch to restore `Not yet verified`.
 This setting affects only the intro copy, not verification or signal limits.
-The strategy requires readable candlesticks and enough visible history to compare
-price movements. It works with screenshots from any market, including OTC; that is an
-input capability, not evidence of predictive accuracy across those markets.
+The strategy requires readable price history, not a specific broker layout.
+It accepts candlestick/OHLC, Heikin Ashi, line, area and Renko chart inputs from
+any market, including OTC. Missing asset/timeframe labels do not by themselves
+invalidate readable price structure. Non-OHLC styles use tentative directional
+adaptations, never invented wicks, closes or confirmed candlestick entries.
+These are supported input rules, not evidence of predictive accuracy across
+chart styles or markets. No implementation can reliably read every screenshot.
 Main menu → Get a signal now opens the same screenshot-upload prompt directly
 for verified users. It no longer opens the manual mode/pair/expiry selection.
 The button's text, style and `menu:signal` callback are unchanged. Any previous
@@ -75,7 +79,7 @@ prose is requested in the user's selected language. Model output is validated,
 length-limited and HTML-escaped. No numeric confidence scores or fabricated expiry.
 Back or /start abandons the session and suppresses late analysis results.
 
-## Strategy interpretation: level-reaction-v2-directional
+## Strategy interpretation: level-reaction-v3-chart-types
 
 Source: the owner's Hindi trading-session transcript supplied on 9 October 2026
 (begins with an expanded candle described as exhaustion). The transcript contains
@@ -97,6 +101,14 @@ rate. We encode the observable price-action ideas below, not its performance cla
 5. Sometimes pauses after dojis or losses, despite earlier saying every candle
    would be traded. At the owner's request, v2 nevertheless selects a direction
    on readable charts and discloses missing confirmation rather than abstaining.
+
+Version 3 preserves that directional selection and adapts the observable
+level-reaction principles to line/area swings and transformed Heikin Ashi/Renko
+structure. Those adaptations were requested for broader chart support; they
+are not additional claims from the original lesson. The prompt focuses on the
+main price panel and ignores surrounding broker/app UI. An ambiguous selection
+of multiple charts, unreadable history, oscillator-only image or non-chart is
+still invalid input. Successful signals are BUY or SELL; errors are not signals.
 
 ### Signal rules
 
@@ -155,8 +167,8 @@ not a claim that the transcript specified a validated signal for every candle.
 DeepSeek returns a setup code, direction, trend, momentum, evidence, reason and boolean checks for
 readability, closed candle, established level, reaction, follow-through and
 conflict. The bot requires a readable chart, a BUY/SELL direction matching the
-setup and two distinct evidence statements. All five positive checks and no
-conflict are needed only to label an entry confirmed. Missing confirmation changes
+setup and two distinct evidence statements. A candlestick/OHLC chart type, all
+five positive checks and no conflict are needed to label an entry confirmed. Missing confirmation changes
 the setup to directional_buy/directional_sell and adds a translated `(tentative)`
 suffix; it does not change the selected direction. An unreadable chart permits null
 in the provider schema solely to request a clearer image; null is never a signal.
@@ -166,11 +178,41 @@ These checks validate the model's reported consistency;
 they cannot independently prove its reading of image pixels is correct.
 
 Offline tests cover transport, limits, setup/direction consistency, incomplete
-confirmation, duplicate evidence, prompt isolation, translations and navigation.
+confirmation, chart-type handling, duplicate evidence, prompt isolation, translations and navigation.
 They do not measure trading accuracy. Before relying on results, evaluate a fixed
 set of timestamped screenshots with later outcomes withheld during inference.
 A live API/schema check validates integration, not predictive accuracy.
 No image/outcome trading-accuracy evaluation has been completed.
+
+On 10 October 2026, one owner-approved Quotex candlestick screenshot was tested
+against the configured provider with this implementation. The API returned HTTP
+200/completed, and the parser accepted a tentative SELL (`directional_sell`).
+This verifies that single sample's provider/format path, not the cause of the
+earlier rejection, other chart styles or the correctness of the prediction.
+
+### Response compatibility and diagnostics
+
+The parser accepts harmless whitespace/enum casing, a single whole JSON code
+fence, extra metadata (discarded), and omitted per-message status when the
+top-level response is explicitly completed. Missing chart-type metadata becomes
+`unknown`, never a confirmed candlestick setup. It does not extract BUY/SELL
+from arbitrary prose, repair truncated JSON, accept duplicate keys, override
+contradictory directions/setups, or invent missing evidence. Non-OHLC chart types
+always remain tentative even if the model incorrectly claims full confirmation.
+
+Rejections log a fixed reason code (for example `max_output_tokens`, `json`,
+`contradictory_direction`) and numeric token usage only, not model text, images,
+captions or credentials. A provider/format error now uses the existing service
+error wording instead of blaming screenshot clarity, and offers New Analysis.
+Neither an invalid response nor a failed API call consumes a lifetime signal.
+The existing daily request budgets, token ceiling, timeout and no-retry policy
+remain unchanged. More reliable parsing does not establish prediction accuracy.
+
+`python test_chart_live.py path/to/chart.png` is an optional **paid, single-request**
+diagnostic using `DEEPSEEK_API_KEY`. It sends that image to DeepSeek, so use only
+an approved sample, preferably cropped to exclude personal details. It prints
+safe response metadata and validation results; it does not touch Telegram or
+the database. With no argument it skips without making a request.
 
 Checks: `python test_chart_signals.py`, `python test_home_menu.py`,
 `python test_localization.py`, `python test_uid_singleflight.py`.

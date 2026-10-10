@@ -21,7 +21,7 @@ import chart_trial as trial
 import localization
 
 IMAGE = b'\x89PNG\r\n\x1a\n' + b'fixture'
-VALID = dict(direction='BUY', asset='EUR/USD', timeframe='1m',
+VALID = dict(chart_type='candlestick', direction='BUY', asset='EUR/USD', timeframe='1m',
              trend='Upward from established support.', momentum='Buyer follow-through after rejection.',
              reason='Support held twice and the confirmation candle closed higher.',
              invalidation='Break below the latest swing low.', setup='support_rejection',
@@ -126,6 +126,84 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(api.parse_response(response(dict(VALID, direction='SELL',
                          setup='resistance_rejection')))['direction'], 'SELL')
 
+    def test_harmless_formatting_does_not_discard_a_direction(self):
+        formatted = dict(VALID, direction=' buy ', setup=' SUPPORT_REJECTION ',
+                         chart_type=' CANDLESTICK ', asset=' ', timeframe='',
+                         extra_metadata='not used')
+        payload = response(formatted)
+        del payload['output'][0]['status']
+        text = payload['output'][0]['content'][0]['text']
+        payload['output'][0]['content'][0]['text'] = '```json\n' + text + '\n```'
+        result = api.parse_response(payload)
+        self.assertEqual(result['direction'], 'BUY')
+        self.assertEqual(result['setup'], 'support_rejection')
+        self.assertEqual(result['chart_type'], 'candlestick')
+        self.assertIsNone(result['asset'])
+        self.assertIsNone(result['timeframe'])
+        self.assertNotIn('extra_metadata', result)
+        self.assertTrue(strategy.confirmed_setup(result))
+        missing_type = dict(VALID)
+        del missing_type['chart_type']
+        result = api.parse_response(response(missing_type))
+        self.assertEqual(result['direction'], 'BUY')
+        self.assertEqual(result['chart_type'], 'unknown')
+        self.assertFalse(strategy.confirmed_setup(result))
+
+    def test_common_chart_types_return_only_evidenced_buy_or_sell(self):
+        for chart_type in strategy.CHART_TYPES:
+            for direction, setup in (('BUY', 'support_rejection'), ('SELL', 'resistance_rejection')):
+                with self.subTest(chart_type=chart_type, direction=direction):
+                    result = api.parse_response(response(dict(VALID, chart_type=chart_type,
+                                                        direction=direction, setup=setup)))
+                    self.assertEqual(result['direction'], direction)
+                    self.assertEqual(strategy.confirmed_setup(result), chart_type in ('candlestick', 'ohlc'))
+                    if chart_type not in ('candlestick', 'ohlc'):
+                        self.assertEqual(result['setup'], 'directional_' + direction.lower())
+                        self.assertIn('(tentative)', flow.result_text(result, 'en'))
+        for chart_type in ('line', 'area', 'heikin_ashi', 'renko'):
+            self.assertIn(chart_type, strategy.INSTRUCTIONS)
+        self.assertIn('not a balance curve or an oscillator', strategy.INSTRUCTIONS)
+        self.assertNotIn('Non-candlestick, unreadable', strategy.INSTRUCTIONS)
+
+    def test_parser_does_not_repair_ambiguous_or_partial_predictions(self):
+        payloads = []
+        for text in ('BUY', '{"direction":"BUY"}',
+                     'Here is JSON: ' + json.dumps(VALID),
+                     json.dumps(VALID) + '\n' + json.dumps(VALID),
+                     json.dumps(VALID)[:-1] + ',"direction":"SELL"}'):
+            payload = response()
+            payload['output'][0]['content'][0]['text'] = text
+            payloads.append(payload)
+        payloads += [None, [], response(dict(VALID, direction='BUY OR SELL')),
+                     response(dict(VALID, chart_type='made-up')),
+                     response(dict(VALID, setup='resistance_rejection')),
+                     response(dict(VALID, evidence=['same', 'SAME']))]
+        for payload in payloads:
+            with self.assertRaises(api.AnalysisError):
+                api.parse_response(payload)
+        incomplete = response(status='incomplete')
+        incomplete['incomplete_details'] = {'reason': 'max_output_tokens'}
+        with self.assertRaises(api.AnalysisError) as rejected:
+            api.parse_response(incomplete)
+        self.assertEqual(rejected.exception.detail, 'max_output_tokens')
+        self.assertEqual(str(rejected.exception), 'response')
+
+    async def test_rejection_logs_reason_without_provider_or_image_text(self):
+        payload = response(dict(VALID, setup='resistance_rejection', reason='PRIVATE_SENTINEL'))
+        payload['usage'] = {'output_tokens': 1500}
+        def handler(request):
+            return httpx.Response(200, json=payload)
+        with patch.dict(os.environ, DEEPSEEK_API_KEY='SECRET_SENTINEL'), \
+             self.assertLogs(level='WARNING') as logs:
+            with self.assertRaises(api.AnalysisError):
+                await api.analyse(IMAGE, 'en', 'CAPTION_SENTINEL', transport=httpx.MockTransport(handler))
+        logged = '\n'.join(logs.output)
+        self.assertIn('detail=contradictory_direction', logged)
+        self.assertIn('output_tokens=1500', logged)
+        for private in ('PRIVATE_SENTINEL', 'SECRET_SENTINEL', 'CAPTION_SENTINEL', 'base64'):
+            self.assertNotIn(private, logged)
+        self.assertEqual(api.AnalysisError('response', 'untrusted\nSECRET').detail, 'unspecified')
+
     def test_strategy_gates_all_directions_and_ambiguous_cases(self):
         for setup, direction in strategy.SETUPS.items():
             if direction is not None:
@@ -164,6 +242,12 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         for status in ('incomplete', 'failed', 'requires_action', 'cancelled'):
             with self.assertRaises(api.AnalysisError):
                 api.parse_response(response(status=status))
+        for status in (None, 'incomplete', 'failed', 'in_progress'):
+            partial = response()
+            partial['output'][0]['status'] = status
+            with self.assertRaises(api.AnalysisError) as rejected:
+                api.parse_response(partial)
+            self.assertEqual(rejected.exception.detail, 'message_status')
         duplicate = response()
         duplicate['output'] *= 2
         with self.assertRaises(api.AnalysisError):
@@ -433,6 +517,17 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         await flow.receive(message(), self.bot, self.state, self.render)
         self.assertEqual(self.render.await_args.args[3], flow.MESSAGES['service'])
         self.assertFalse(flow._inflight)
+
+    async def test_invalid_response_offers_retry_without_consuming_lifetime_signal(self):
+        api.analyse.side_effect = api.AnalysisError('response', 'max_output_tokens')
+        await flow.receive(message(), self.bot, self.state, self.render)
+        self.assertEqual(self.render.await_args.args[3], flow.MESSAGES['service'])
+        self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS)
+        trial.consume.assert_not_awaited()
+        trial.release.assert_awaited_once_with(None, 'trial-token')
+        self.assertNotIn('clearer', self.render.await_args.args[3])
+        self.assertNotIn('BUY', self.render.await_args.args[3])
+        self.assertNotIn('SELL', self.render.await_args.args[3])
 
     async def test_different_users_do_not_share_results(self):
         second_state = FSMContext(MemoryStorage(), StorageKey(bot_id=1, chat_id=12, user_id=12))

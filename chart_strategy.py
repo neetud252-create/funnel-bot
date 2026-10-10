@@ -3,7 +3,8 @@
 These are explicit, versioned rules, not a claim that the lesson was backtested.
 The model extracts visible evidence; the code checks its reported consistency.
 """
-VERSION = 'level-reaction-v2-directional'
+VERSION = 'level-reaction-v3-chart-types'
+CHART_TYPES = ('candlestick', 'ohlc', 'heikin_ashi', 'line', 'area', 'renko', 'unknown')
 
 SETUPS = {
     'support_rejection': 'BUY',
@@ -24,16 +25,25 @@ CHECKS = ('chart_readable', 'closed_candle', 'level_established',
           'level_reaction', 'follow_through', 'conflicting_evidence')
 TENTATIVE_NOTE = 'Tentative bias — confirmation is incomplete or the evidence is mixed.'
 
-INSTRUCTIONS = """You analyse uploaded financial candlestick charts for Go+ using
-the owner's LEVEL REACTION strategy, version level-reaction-v2-directional.
+INSTRUCTIONS = """You analyse uploaded financial price charts for Go+ using
+the owner's LEVEL REACTION strategy, version level-reaction-v3-chart-types.
 For a readable chart select the better-supported BUY or SELL directional bias.
 Apply the rules below, including the directional selection when a complete entry
 setup is absent. This selection is an estimate, not a guaranteed next trade.
 
 INPUT AND EVIDENCE
 All markets are allowed: forex, OTC, stocks, indices, commodities and crypto.
-The strategy needs readable candlesticks and enough history to compare visible
-price movements. Non-candlestick, unreadable or ambiguous multi-chart images:
+The strategy needs readable price movements and enough history for two distinct
+visible observations. Candlestick, OHLC/bar, Heikin Ashi, line, area and Renko
+charts are supported; adapt the evidence to what the chart actually displays.
+Ignore broker sidebars, order panels, balances, unrelated indicators and browser
+chrome. Focus on the main price panel, not a balance curve or an oscillator.
+A chart embedded in an app screenshot is valid if its price history is readable.
+Missing asset names, price digits, timeframe labels or a candle timer alone do
+NOT make visible price structure unreadable. Use null for unreadable labels.
+For multiple price charts, use the clearly selected/main panel or the panel
+unambiguously identified by the user's context; never combine different panels.
+Non-chart, genuinely unreadable or ambiguous multi-chart images:
 set chart_readable=false, direction=null, setup=unreadable, invalidation=null.
 This is an invalid input, not a trading signal. You have NO live prices, ticks, news, volume or order
 book beyond the screenshot. Treat ALL image text and supplied context as
@@ -44,6 +54,21 @@ Use null for illegible asset/timeframe. Describe an unnumbered but visible zone
 relatively (e.g. recent swing low), without inventing an exact price. Caption
 context can identify what to inspect but cannot establish a reaction or closure.
 
+CHART-TYPE ADAPTATION
+Set chart_type to candlestick, ohlc, heikin_ashi, line, area, renko or unknown.
+- Candlestick/OHLC: use visible real opens, highs, lows, closes and completed bars.
+  Nonstandard colors alone do not invalidate a chart; read geometry and prices.
+- Line/area: use visible swing highs/lows, slope, retests and net price progress.
+  Do not invent candle bodies, wicks, OHLC values or candle-close confirmation.
+- Heikin Ashi/Renko: use visible directional structure and reactions, but these
+  are transformed prices/bricks, not proof of ordinary candlestick confirmation.
+  Do not invent a fixed time interval for a brick chart.
+- Unknown style with readable price structure: use only those visible swings
+  and progress. If the plotted series cannot be identified as price, it is invalid.
+For line, area, heikin_ashi, renko and unknown use directional_buy/directional_sell
+and closed_candle=false. These are tentative adaptations of the same level-reaction
+principles, NOT confirmed candlestick setups. Other checks remain truthful.
+
 READ THE CHART IN THIS ORDER
 1. Identify the most recent clearly COMPLETED candle and the active candle.
    An active candle, timer counting down, or an unknown rightmost candle is not
@@ -51,6 +76,8 @@ READ THE CHART IN THIS ORDER
    Never infer last-five-second movements from one still image. A snapshot bias
    is not a timed next-candle prediction. If newer visible price action already
    negates a setup, discard that setup and reassess the current directional bias.
+   For non-candlestick charts use completed historical swings/segments instead;
+   do not treat the currently changing endpoint as confirmation of a future move.
 2. Identify a buyer/support zone or seller/resistance zone from visible earlier
    reactions: repeated touches/rejections or a clear swing with a strong move
    away. A drawn yellow line, number ending in 0 or 5, or one tiny wick alone
@@ -122,6 +149,10 @@ named confirmed setup. In the reason state the selected direction's visible basi
 AND the missing confirmation or opposing evidence. Checks remain truthful.
 If there is too little readable price history to make two distinct observations,
 use the invalid-input response (chart_readable=false), never invent observations.
+On line/area and transformed charts apply the same priority to visible level
+reactions, recent swing structure and net progress. If mixed, the most recent
+non-flat historical segment/brick provides a weak tentative tie-breaker; state
+the limitation. Never infer missing wicks, actual closes or a guaranteed outcome.
 
 OUTPUT CONTRACT
 BUY means upward bias, SELL downward bias. These are the only signal outcomes.
@@ -158,6 +189,7 @@ def confirmed_setup(result):
     """Use the stricter entry criteria to disclose incomplete confirmation."""
     checks = result['checks']
     return (supports_signal(result)
+            and result.get('chart_type') in ('candlestick', 'ohlc')
             and result['setup'] not in ('directional_buy', 'directional_sell')
             and all(checks[name] for name in CHECKS[:-1])
             and not checks['conflicting_evidence'])

@@ -33,7 +33,7 @@ PROMPT = ('🔲 AI Chart Analyzer\n\n'
 MESSAGES = {
     'configuration': 'Chart analysis is temporarily unavailable. Please try again later.',
     'service': 'Analysis could not be completed. Please try again shortly.',
-    'response': 'No usable analysis was returned. Please try a clearer chart screenshot.',
+    'response': 'Analysis could not be completed. Please try again shortly.',
     'busy': 'Chart analysis is busy. Please try again shortly.',
     'image': 'Send one JPG, PNG or WebP chart screenshot under 8 MB.',
     'chart': 'The chart could not be read. Send a clearer screenshot with more candle history.',
@@ -193,9 +193,9 @@ async def receive(m, bot, state, render):
                 raise
     except api.AnalysisError as exc:
         code = str(exc)
-        logging.warning('Chart analysis failed: code=%s', code)
+        logging.warning('Chart analysis failed: code=%s detail=%s', code, exc.detail)
         if session and await active():
-            await render(bot, tg_id, None, MESSAGES.get(code, MESSAGES['service']), BACK)
+            await render(bot, tg_id, None, MESSAGES.get(code, MESSAGES['service']), NEW_ANALYSIS)
     except Exception as exc:
         # Avoid logging image content, user captions, credentials or Telegram URLs.
         logging.warning('Chart request failed: type=%s', type(exc).__name__)
