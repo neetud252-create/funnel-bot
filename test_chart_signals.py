@@ -5,7 +5,7 @@ import os
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 os.environ.setdefault('DATABASE_URL', 'postgresql://unused')
 import httpx
@@ -477,6 +477,47 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             await mod.dp.feed_update(bot, Update(update_id=1, message=message(photo=None, text='123456789')))
             receive.assert_awaited_once()
         await bot.session.close()
+
+    async def test_main_menu_dispatch_requires_screenshot_and_reuses_analysis(self):
+        import test_signal_flow as H
+        from aiogram.types import CallbackQuery, Update
+        fake_db = H._install_stub_modules()
+        fake_db.pool = None
+        fake_db._users[11] = dict(fake_db._fresh_row(), verified=True)
+        mod = H._load_bot()
+        bot = Bot('123456:TEST')
+        state = mod.dp.fsm.get_context(bot=bot, chat_id=11, user_id=11)
+        trial.status.return_value = (True, 0)
+        trial.reserve.return_value = (None, None)
+        old = types.SimpleNamespace(cancel=Mock())
+        other = types.SimpleNamespace(cancel=Mock())
+        mod._signal_tasks.update({11: old, 12: other})
+        cb = CallbackQuery(id='menu-upload', from_user=message().from_user,
+                           chat_instance='private', data='menu:signal',
+                           message=message(photo=None, text='Main menu'))
+        try:
+            with patch.object(mod, 'render', self.render), \
+                 patch.object(CallbackQuery, 'answer', AsyncMock()) as answer, \
+                 patch.object(mod, '_start_signal', AsyncMock()) as legacy:
+                await mod.dp.feed_update(bot, Update(update_id=2, callback_query=cb))
+                answer.assert_awaited_once()
+                self.assertEqual(self.render.await_args.args[3], flow.PROMPT)
+                self.assertEqual(await state.get_state(), flow.Chart.waiting_image.state)
+                self.assertTrue((await state.get_data())['chart_session'])
+                old.cancel.assert_called_once()
+                other.cancel.assert_not_called()
+                self.assertNotIn(11, mod._signal_tasks)
+                legacy.assert_not_awaited()
+                api.analyse.assert_not_awaited()
+                trial.reserve.assert_not_awaited()
+                await flow.receive(message(), self.bot, state, self.render)
+                api.analyse.assert_awaited_once_with(IMAGE, 'en', '')
+                api.reserve.assert_awaited_once_with(None, 11)
+                self.assertIn('AI Trading Signal Result', self.render.await_args.args[3])
+                self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS)
+                self.assertEqual(self.render.await_args.kwargs['reply_to_message_id'], 5)
+        finally:
+            await bot.session.close()
 
 
 if __name__ == '__main__':

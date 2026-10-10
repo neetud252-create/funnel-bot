@@ -18,7 +18,12 @@ This setting affects only the intro copy, not verification or signal limits.
 The strategy requires readable candlesticks and enough visible history to compare
 price movements. It works with screenshots from any market, including OTC; that is an
 input capability, not evidence of predictive accuracy across those markets.
-Existing verified-user signals remain separate and unchanged.
+Main menu → Get a signal now opens the same screenshot-upload prompt directly
+for verified users. It no longer opens the manual mode/pair/expiry selection.
+The button's text, style and `menu:signal` callback are unchanged. Any previous
+manual countdown is cancelled when opening the uploader. Existing chart request
+budgets and tier signal counters are unchanged; screenshot analysis still uses
+the separate chart budget described below, not the main menu's 30/70 allowance.
 
 Set `DEEPSEEK_API_KEY` in Railway's service Variables (never commit it). An unset key
 leaves a localized unavailable message; the rest of the bot still starts normally.

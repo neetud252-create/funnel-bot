@@ -32,7 +32,12 @@ class SignalAccessTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(data=data):
                 self.register.reset_mock()
                 cb = H.FakeCB(self.tg_id, data, 700)
-                await handler(cb, self.bot)
+                if data == 'menu:signal':
+                    state = H.FakeState('old-state')
+                    await handler(cb, self.bot, state)
+                    self.assertIsNone(state.state)
+                else:
+                    await handler(cb, self.bot)
                 self.assertEqual(cb.answers, [(None, False)])
                 self.register.assert_awaited_once_with(self.bot, self.tg_id)
                 self.assertNotIn(self.tg_id, self.mod._signal_tasks)
@@ -59,13 +64,18 @@ class SignalAccessTests(unittest.IsolatedAsyncioTestCase):
         await self.blocked_callbacks()
         self.assertFalse(self.row['verified'])
 
-    async def test_verified_user_keeps_menu_pair_picker_and_signal_entry(self):
+    async def test_verified_menu_opens_chart_upload_and_old_callbacks_stay_protected(self):
         self.row['verified'] = True
         show = self.mock(self.mod, 'show')
+        chart = self.mock(self.mod.chart_signals, 'open_screen')
         pairs = self.mock(self.mod, 'show_pairs')
         run = self.mock(self.mod, '_run_signal')
-        await self.mod.menu_signal(H.FakeCB(self.tg_id, 'menu:signal', 700), self.bot)
-        show.assert_awaited_once_with(self.bot, self.tg_id, 'mode')
+        cb = H.FakeCB(self.tg_id, 'menu:signal', 700)
+        state = H.FakeState()
+        await self.mod.menu_signal(cb, self.bot, state)
+        chart.assert_awaited_once_with(cb, self.bot, state, self.mod.render, upload=True)
+        show.assert_not_awaited()
+        run.assert_not_awaited()
         await self.mod.new_signal(H.FakeCB(self.tg_id, 'new_signal', 700), self.bot)
         pairs.assert_awaited_once_with(self.bot, self.tg_id, 0)
         await self.mod.m_action(H.FakeCB(self.tg_id, 'm:5', 700), self.bot)

@@ -908,11 +908,15 @@ async def _require_signal_verification(bot, tg_id, cb=None):
 # Must stay above menu_action: aiogram matches handlers in definition order and
 # that one swallows every "menu:" callback.
 @dp.callback_query(F.data == "menu:signal")
-async def menu_signal(cb: CallbackQuery, bot: Bot):
+async def menu_signal(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if not await _require_signal_verification(bot, cb.from_user.id, cb):
+        await state.clear()
         return
-    await cb.answer()
-    await show(bot, cb.from_user.id, "mode")
+    # Reuse Test Signals' upload/analysis flow, not the old pair/expiry generator.
+    old = _signal_tasks.pop(cb.from_user.id, None)
+    if old:
+        old.cancel()
+    await chart_signals.open_screen(cb, bot, state, render, upload=True)
 
 # Must stay above mode_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "mode:manual")

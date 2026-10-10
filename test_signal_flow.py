@@ -1083,7 +1083,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
                                        limit=30))
 
     # --- regression: "tap a button, the menu vanishes, nothing appears" -----
-    # The exact production failure: menu:signal -> show("mode") -> render(),
+    # The original production failure: menu:signal -> show("mode") -> render(),
     # where render() deleted the menu and THEN failed to send, because a
     # <tg-emoji> wrapping an em dash is rejected as ENTITY_TEXT_INVALID.
     print("\n[regression] a failed screen must never blank the chat")
@@ -1102,14 +1102,26 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         _fresh_user(fake_db, tg)
         fake_db._users[tg]["ui_msg_id"] = 4500          # the menu on screen
         fb = FakeBot()
-        if fail_on_send:
-            async def boom(*a, **k):
-                raise _Boom("Bad Request: ENTITY_TEXT_INVALID")
-            fb.send_photo = boom
         cb = FakeCB(tg, "menu:signal", 4500)
+        cb.message.chat = types.SimpleNamespace(type='private')
+        real_send = fb.send_message
+        async def send(chat_id, text, **kwargs):
+            check("chart callback acknowledged before sending", bool(cb.answers))
+            if fail_on_send and text == bot_mod.chart_signals.PROMPT:
+                raise _Boom("Bad Request: ENTITY_TEXT_INVALID")
+            return await real_send(chat_id, text, **kwargs)
+        fb.send_message = send
+        from unittest.mock import AsyncMock, patch
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.base import StorageKey
+        from aiogram.fsm.storage.memory import MemoryStorage
+        state = FSMContext(MemoryStorage(), StorageKey(bot_id=1, chat_id=tg, user_id=tg))
+        fake_db.pool = None
         raised = None
         try:
-            await bot_mod.menu_signal(cb, fb)
+            with patch.object(bot_mod.chart_signals.trial, 'status', AsyncMock(return_value=(True, 0))), \
+                 patch.object(bot_mod.chart_signals.api, 'configured', return_value=True):
+                await bot_mod.menu_signal(cb, fb, state)
         except Exception as exc:                        # noqa: BLE001 - recorded
             raised = exc
         return tg, fb, cb, raised
@@ -1122,14 +1134,11 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("it is registered above the 'menu:' catch-all",
           _src.index('F.data == "menu:signal"')
           < _src.index('F.data.startswith("menu:")'))
-    # Scoped to menu_signal's own body - "await cb.answer()" appears in many
-    # handlers, so a whole-file index would match a different one.
+    # Callback acknowledgement now belongs to the shared upload handler.
     _body = _src.split("async def menu_signal", 1)[1].split("\n@dp.", 1)[0]
-    check("menu_signal acknowledges the callback BEFORE rendering",
-          "await cb.answer()" in _body
-          and _body.index("await cb.answer()")
-          < _body.index('await show(bot, cb.from_user.id, "mode")'),
-          "cb.answer() must not sit behind the render: " + repr(_body))
+    check("menu_signal delegates to the existing chart-upload handler",
+          'await chart_signals.open_screen(cb, bot, state, render, upload=True)' in _body
+          and 'await show(bot, cb.from_user.id, "mode")' not in _body, repr(_body))
 
     # 1. The happy path still works and still swaps the screen.
     tg, fb, cb, raised = await _drive_menu_signal(fail_on_send=False)
@@ -1142,8 +1151,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           cb.answers[0] == (None, False), str(cb.answers))
     check("the handler does not raise on the happy path", raised is None,
           repr(raised))
-    check("Get a signal opens the trading-mode screen",
-          sends and "Select trading mode" in (sends[-1]["body"] or ""),
+    check("Get a signal asks for a chart screenshot",
+          sends and sends[-1]["body"] == bot_mod.chart_signals.PROMPT,
           str([c["kind"] for c in fb.calls]))
     check("the old menu is deleted as part of the transition",
           4500 in deletes, str(deletes))
