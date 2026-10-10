@@ -2,6 +2,7 @@
 import asyncio
 import html
 import logging
+import os
 import re
 import secrets
 
@@ -13,12 +14,13 @@ import chart_strategy
 import chart_trial as trial
 import localization
 
-# Temporary display copy; the percentage is a test placeholder, not measured accuracy.
 INTRO = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
          "You have been granted access to test the bot's signals.\n\n"
          '📊 <b>Remaining Signals:</b> {left}\n'
-         '🎯 <b>Accuracy:</b> 95% Guaranteed (test placeholder)\n\n'
+         '🎯 <b>Accuracy:</b> Not yet verified\n\n'
          'Try it out now for free before verifying! 🚀')
+# Opt-in UI preview only; this sample percentage is not measured accuracy.
+TEST_INTRO = INTRO.replace('Not yet verified', '95% + Guaranteed')
 VERIFIED = ('🤖 <b>Go+ AI Chart Analysis</b>\n\n'
             'Your account is verified. Tap Test Signals to upload your chart.')
 EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
@@ -49,7 +51,7 @@ RESULT = ('🔲 AI Trading Signal Result\n\n'
 EXTRA = ('Not visible', '(tentative)', '{count} minute', '{count} minutes',
          '{count} second', '{count} seconds', '{count} hour', '{count} hours',
          '{count} day', '{count} days')
-SOURCES = (INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
+SOURCES = (INTRO, TEST_INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
            'Remaining Signals: {left}', 'New Analysis')
 BACK = [[('🔙 Back', 'cb:home:back', 'success')]]
 UPLOAD = [[('🎯 Test Signals', 'cb:chart:upload', 'primary')], *BACK]
@@ -74,7 +76,8 @@ async def open_screen(cb, bot, state, render, *, upload=False):
         await render(bot, cb.from_user.id, None, EXHAUSTED, ACCESS)
         return
     if not upload:
-        await render(bot, cb.from_user.id, None, VERIFIED if verified else INTRO.format(left=left), UPLOAD)
+        intro = TEST_INTRO if os.getenv('CHART_UI_TEST_COPY', '').strip() == '1' else INTRO
+        await render(bot, cb.from_user.id, None, VERIFIED if verified else intro.format(left=left), UPLOAD)
         return
     if not api.configured():
         await render(bot, cb.from_user.id, None, MESSAGES['configuration'], BACK)

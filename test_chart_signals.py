@@ -215,7 +215,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         async def download(media, destination, **kw):
             destination.write(IMAGE)
         self.bot = types.SimpleNamespace(download=AsyncMock(side_effect=download))
-        self.patches = [patch.object(api, 'configured', return_value=True),
+        self.patches = [patch.dict(os.environ, CHART_UI_TEST_COPY=''),
+            patch.object(api, 'configured', return_value=True),
             patch.object(trial, 'status', AsyncMock(return_value=(False, 2))),
             patch.object(trial, 'reserve', AsyncMock(return_value=(None, 'trial-token'))),
             patch.object(trial, 'consume', AsyncMock(return_value=True)),
@@ -254,11 +255,37 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertIsNone(await self.state.get_state())
         self.assertIn('Remaining Signals:</b> 1', self.render.await_args.args[3])
-        self.assertIn('Accuracy:</b> 95% Guaranteed (test placeholder)', self.render.await_args.args[3])
+        self.assertIn('Accuracy:</b> Not yet verified', self.render.await_args.args[3])
         self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
         trial.status.return_value = (True, 0)
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertEqual(self.render.await_args.args[3], flow.VERIFIED)
+
+    async def test_temporary_intro_copy_is_opt_in_and_preserves_trial_gates(self):
+        cb = types.SimpleNamespace(message=types.SimpleNamespace(chat=types.SimpleNamespace(type='private')),
+                                   from_user=types.SimpleNamespace(id=11), answer=AsyncMock())
+        trial.status.return_value = (False, 1)
+        expected = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
+                    "You have been granted access to test the bot's signals.\n\n"
+                    '📊 <b>Remaining Signals:</b> 1\n'
+                    '🎯 <b>Accuracy:</b> 95% + Guaranteed\n\n'
+                    'Try it out now for free before verifying! 🚀')
+        with patch.dict(os.environ, CHART_UI_TEST_COPY='1'):
+            await flow.open_screen(cb, self.bot, self.state, self.render)
+            self.assertEqual(self.render.await_args.args[3], expected)
+            self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
+            self.assertIsNone(await self.state.get_state())
+            trial.status.return_value = (True, 0)
+            await flow.open_screen(cb, self.bot, self.state, self.render)
+            self.assertEqual(self.render.await_args.args[3], flow.VERIFIED)
+            trial.status.return_value = (False, 0)
+            await flow.open_screen(cb, self.bot, self.state, self.render)
+            self.assertEqual(self.render.await_args.args[3], flow.EXHAUSTED)
+            self.assertEqual(self.render.await_args.args[4], flow.ACCESS)
+        trial.status.return_value = (False, 1)
+        with patch.dict(os.environ, CHART_UI_TEST_COPY='0'):
+            await flow.open_screen(cb, self.bot, self.state, self.render)
+            self.assertEqual(self.render.await_args.args[3], flow.INTRO.format(left=1))
 
     async def test_exhausted_trial_blocks_buttons_and_stale_upload(self):
         trial.status.return_value = (False, 0)
