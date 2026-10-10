@@ -35,6 +35,9 @@ tapping a button is not verification. Results keep the blue New Analysis and gre
 Back buttons. After the second result, New Analysis opens the exhausted-trial screen
 with Get Bot Access. Both callback entry points and uploads check the limit.
 `/start`, a new day, Back and redeploying cannot reset it.
+The older/manual signal flow requires the same stored verification flag at entry
+and again before delivering a result. Old buttons, Premium status and token
+balances cannot bypass the lifetime trial by opening a separate daily allowance.
 
 `chart_trial_slots` reserves slots transactionally before image processing, using
 a shared PostgreSQL advisory lock. Duplicate Telegram message IDs cannot consume

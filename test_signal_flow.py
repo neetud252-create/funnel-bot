@@ -489,9 +489,10 @@ def assert_layout(label, calls, config, wait_label):
 # --- levels, limits and the daily rollover ----------------------------------
 
 def _fresh_user(fake_db, tg_id, premium=False, used=0, day=None):
-    """Put one user in a known quota state and return their row."""
+    """Put a verified trader in a known quota state and return their row."""
     fake_db._users[tg_id] = {
         "ui_msg_id": None, "album_ids": None, "is_premium": premium,
+        "verified": True,
         "signals_used_today": used,
         "last_reset_date": day if day is not None else fake_db._today[0],
     }
@@ -1589,7 +1590,7 @@ async def main():
             tg_id = 5000 + n
             fake_bot = FakeBot()
             cb = FakeCB(tg_id, "m:%d" % n, message_id=900 + n)
-            fake_db._users[tg_id] = {"ui_msg_id": 900 + n, "album_ids": None}
+            fake_db._users[tg_id] = {"ui_msg_id": 900 + n, "album_ids": None, "verified": True}
             calls = await drive(bot_mod, fake_bot, cb, sleeps)
             assert_layout("M%d" % n, calls, config, wait_label)
             check("M%d: waited the full countdown, not the expiration" % n,
@@ -1607,7 +1608,7 @@ async def main():
         print("\n[path] new_signal - opens the pair picker at page 1")
         tg_id = 6001
         fake_bot = FakeBot()
-        fake_db._users[tg_id] = {"ui_msg_id": 950, "album_ids": None}
+        fake_db._users[tg_id] = {"ui_msg_id": 950, "album_ids": None, "verified": True}
         sleeps.clear()
         cb = FakeCB(tg_id, "new_signal", message_id=950)
         await bot_mod.new_signal(cb, fake_bot)
@@ -1637,7 +1638,7 @@ async def main():
         print("\n[edge] new_signal still respects the daily cap")
         tg_id = 6002
         fake_bot = FakeBot()
-        fake_db._users[tg_id] = {"ui_msg_id": 951, "album_ids": None}
+        fake_db._users[tg_id] = {"ui_msg_id": 951, "album_ids": None, "verified": True}
         # fake_db is the same module object as sys.modules["db"], which the
         # later cap test reaches for as db_mod - that name is not bound yet here.
         real_state = fake_db.signal_state
@@ -1679,7 +1680,7 @@ async def main():
             word = want_label.split()[0]
             tg_id = 9100 + idx
             fake_bot = FakeBot()
-            fake_db._users[tg_id] = {"ui_msg_id": 990 + idx, "album_ids": None}
+            fake_db._users[tg_id] = {"ui_msg_id": 990 + idx, "album_ids": None, "verified": True}
             # Force the draw so both branches are exercised, not just whichever
             # one random happened to pick.
             bot_mod.random = types.SimpleNamespace(choice=lambda seq, i=idx: seq[i])
@@ -1713,7 +1714,7 @@ async def main():
         print("\n[edge] daily limit screen stays text-only")
         tg_id = 9300
         fake_bot = FakeBot()
-        fake_db._users[tg_id] = {"ui_msg_id": 995, "album_ids": None}
+        fake_db._users[tg_id] = {"ui_msg_id": 995, "album_ids": None, "verified": True}
         db_mod = sys.modules["db"]
         real_consume = db_mod.consume_signal
 
@@ -1741,7 +1742,7 @@ async def main():
         for i, pair in enumerate(pairs):
             tg_id = 20000 + i
             fake_bot = FakeBot()
-            fake_db._users[tg_id] = {"ui_msg_id": 800 + i, "album_ids": None}
+            fake_db._users[tg_id] = {"ui_msg_id": 800 + i, "album_ids": None, "verified": True}
             bot_mod._pair_choice[tg_id] = pair
             calls = await drive(bot_mod, fake_bot, FakeCB(tg_id, "m:1", 800 + i),
                                 sleeps)
@@ -1759,7 +1760,7 @@ async def main():
         print("\n[edge] tapped screen is removed before the wait screen goes up")
         tg_id = 8002
         fake_bot = FakeBot()
-        fake_db._users[tg_id] = {"ui_msg_id": 980, "album_ids": None}
+        fake_db._users[tg_id] = {"ui_msg_id": 980, "album_ids": None, "verified": True}
         calls = await drive(bot_mod, fake_bot, FakeCB(tg_id, "m:1", 980), sleeps)
         first = calls[0]
         check("tapped screen deleted first",

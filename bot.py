@@ -893,10 +893,24 @@ async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await show(bot, cb.from_user.id, key)
         await state.clear()
 
+async def _require_signal_verification(bot, tg_id, cb=None):
+    # Only the screenshot trial grants unverified signals (two lifetime slots).
+    # Old/manual buttons must not unlock a separate, daily-resetting allowance.
+    user = await db.get_user(tg_id)
+    if user and user.get("verified"):
+        return True
+    if cb is not None:
+        await cb.answer()
+    await _show_register(bot, tg_id)
+    return False
+
+
 # Must stay above menu_action: aiogram matches handlers in definition order and
 # that one swallows every "menu:" callback.
 @dp.callback_query(F.data == "menu:signal")
 async def menu_signal(cb: CallbackQuery, bot: Bot):
+    if not await _require_signal_verification(bot, cb.from_user.id, cb):
+        return
     await cb.answer()
     await show(bot, cb.from_user.id, "mode")
 
@@ -1035,6 +1049,9 @@ async def _run_signal(bot, tg_id, msg_id, expiry):
             # Another screen took over the chat while we counted down; it owns
             # ui_msg_id now, so dropping the signal beats clobbering it.
             return
+        # Re-check after the countdown: verification may have been revoked.
+        if not await _require_signal_verification(bot, tg_id):
+            return
         # The quota is spent here, at delivery, not at the tap: a countdown
         # that got cancelled or superseded never cost the user a signal, and
         # this single atomic UPDATE is what actually enforces the cap.
@@ -1081,6 +1098,8 @@ async def _start_signal(bot, cb, expiry):
     # limit alert or an empty ack) - callers must not answer first, or Telegram
     # discards the alert as a duplicate.
     tg_id = cb.from_user.id
+    if not await _require_signal_verification(bot, tg_id, cb):
+        return
     _, limit = await _user_quota(tg_id)
     used, left = await db.signal_state(tg_id, limit)
     if left <= 0:
@@ -1116,6 +1135,8 @@ async def new_signal(cb: CallbackQuery, bot: Bot):
         await cb.answer()
         return
     tg_id = cb.from_user.id
+    if not await _require_signal_verification(bot, tg_id, cb):
+        return
     # Per-user, like the other two cap checks: reading the global Start limit
     # here would hold a Premium user to 30 on this path alone.
     _, limit = await _user_quota(tg_id)
