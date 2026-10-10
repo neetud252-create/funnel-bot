@@ -28,7 +28,7 @@ EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
              'Tap Get Bot Access below to continue.')
 PROMPT = ('🔲 AI Chart Analyzer\n\n'
           '📊 Send your trading chart screenshot.\n'
-          '⚡ DeepSeek AI will analyse your chart and return BUY or SELL.\n\n'
+          '⚡ Gemini AI will analyse your chart and return BUY or SELL.\n\n'
           '<i>Crop out personal details before sending. Timer shows the chart interval.</i>')
 MESSAGES = {
     'configuration': 'Chart analysis is temporarily unavailable. Please try again later.',

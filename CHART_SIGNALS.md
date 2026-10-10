@@ -29,14 +29,25 @@ manual countdown is cancelled when opening the uploader. Existing chart request
 budgets and tier signal counters are unchanged; screenshot analysis still uses
 the separate chart budget described below, not the main menu's 30/70 allowance.
 
-Set `DEEPSEEK_API_KEY` in Railway's service Variables (never commit it). An unset key
+Set `GEMINI_API_KEY` in Railway's service Variables (never commit it). An unset key
 leaves a localized unavailable message; the rest of the bot still starts normally.
-`DEEPSEEK_MODEL` defaults to `deepseek-flash`. It uses DeepSeek's `/responses` REST
-API with inline images, a JSON Schema response and low reasoning effort. An
-override must support these capabilities. Uses the existing httpx dependency.
-No Gemini/OpenAI credential or provider fallback is used. DeepSeek API usage is
-billed to the owner under their provider plan; the user trial does not mean the
-API itself is free. The existing Railway credential was reused on 9 October 2026.
+The provider is Google Gemini, pinned to `gemini-3.8-flash`, through the
+`v1beta/models/gemini-3.8-flash:generateContent` REST endpoint. It sends inline
+image bytes with a JSON Schema response, high media resolution and low thinking
+level. Uses the existing httpx dependency; no new SDK is required. The key goes
+only in the `x-goog-api-key` header, never the URL, logs or Telegram messages.
+No DeepSeek/OpenAI credential, alternate model, paid tool or provider fallback is
+used. Old `DEEPSEEK_*` variables are ignored, not deleted from Railway.
+
+**Free-only deployment:** use a Google AI Studio project with billing disabled.
+There is no per-request switch that makes a paid project's key free; the bot
+cannot establish billing status from the key. Do not enable Cloud Billing or
+assume an existing key belongs to a free project. Check its active quotas in
+AI Studio. Google's shared project quotas also cover other apps using that key;
+the bot's 200/day local cap is not a promise of 200 free Gemini requests. A 429
+returns the existing localized busy message with New Analysis, without retries,
+spend increases or a paid fallback. Google may have different daily reset times
+from the bot's local UTC counters.
 
 Unverified users have **two lifetime free BUY/SELL signals**. The database's
 existing `users.verified` flag unlocks subsequent analysis; submitting an ID or
@@ -68,11 +79,14 @@ Errors do not use lifetime signal slots, but API attempts use daily budgets.
 Verified users retain these existing daily request limits.
 
 Only private chats; one JPEG/PNG/WebP, at most 8 MiB. Reject albums and unsupported
-documents. Bytes stay in memory and are sent as base64 to DeepSeek; no Telegram URL,
+documents. Bytes stay in memory and are sent as base64 to Google Gemini; no Telegram URL,
 bot token, username or chat history is sent. Caption context is capped at 500
-characters. DeepSeek documents Responses as stateless; this does not establish a
-provider-wide data-retention guarantee. The upload screen names DeepSeek and asks
-users to crop personal details.
+characters. The upload screen names Gemini and asks users to crop personal
+details. Google's unpaid-services terms allow content use for product improvement
+and human review (with regional exceptions). Do not send sensitive, confidential
+or personal information: use chart-only images without balances/account details.
+No conversation history or Files API upload is used; this is not a provider-wide
+data-retention guarantee.
 
 All UI labels/errors are translated into the 12 existing languages. Analysis
 prose is requested in the user's selected language. Model output is validated,
@@ -164,7 +178,7 @@ not a claim that the transcript specified a validated signal for every candle.
 
 ### Validation boundary
 
-DeepSeek returns a setup code, direction, trend, momentum, evidence, reason and boolean checks for
+Gemini returns a setup code, direction, trend, momentum, evidence, reason and boolean checks for
 readability, closed candle, established level, reaction, follow-through and
 conflict. The bot requires a readable chart, a BUY/SELL direction matching the
 setup and two distinct evidence statements. A candlestick/OHLC chart type, all
@@ -185,16 +199,25 @@ A live API/schema check validates integration, not predictive accuracy.
 No image/outcome trading-accuracy evaluation has been completed.
 
 On 10 October 2026, one owner-approved Quotex candlestick screenshot was tested
-against the configured provider with this implementation. The API returned HTTP
+against the previous DeepSeek implementation. The API returned HTTP
 200/completed, and the parser accepted a tentative SELL (`directional_sell`).
 This verifies that single sample's provider/format path, not the cause of the
 earlier rejection, other chart styles or the correctness of the prediction.
+It is not a Gemini integration test.
+
+On 10 October 2026, after the owner confirmed free-tier use, one anonymous
+synthetic candlestick chart passed a live Gemini 3.8 Flash integration check.
+The production request/parser returned a valid BUY/SELL result and the Telegram
+result formatter accepted it in 7.2 seconds. No personal screenshot was sent.
+This checks API/schema/rendering compatibility, not real-market accuracy.
 
 ### Response compatibility and diagnostics
 
-The parser accepts harmless whitespace/enum casing, a single whole JSON code
-fence, extra metadata (discarded), and omitted per-message status when the
-top-level response is explicitly completed. Missing chart-type metadata becomes
+The parser requires exactly one Gemini candidate with `finishReason=STOP` and
+no prompt block. It ignores thought-summary text, and rejects tool/image output,
+missing finish reasons, safety/refusal blocks and `MAX_TOKENS` truncation. It
+accepts harmless whitespace/enum casing, a single whole JSON code fence and
+extra result metadata (discarded). Missing chart-type metadata becomes
 `unknown`, never a confirmed candlestick setup. It does not extract BUY/SELL
 from arbitrary prose, repair truncated JSON, accept duplicate keys, override
 contradictory directions/setups, or invent missing evidence. Non-OHLC chart types
@@ -205,12 +228,22 @@ Rejections log a fixed reason code (for example `max_output_tokens`, `json`,
 captions or credentials. A provider/format error now uses the existing service
 error wording instead of blaming screenshot clarity, and offers New Analysis.
 Neither an invalid response nor a failed API call consumes a lifetime signal.
-The existing daily request budgets, token ceiling, timeout and no-retry policy
-remain unchanged. More reliable parsing does not establish prediction accuracy.
+The existing daily request budgets and no-retry policy remain unchanged.
+More reliable parsing does not establish prediction accuracy.
 
-`python test_chart_live.py path/to/chart.png` is an optional **paid, single-request**
-diagnostic using `DEEPSEEK_API_KEY`. It sends that image to DeepSeek, so use only
-an approved sample, preferably cropped to exclude personal details. It prints
+On 10 October 2026 at 15:38 IST, the previous DeepSeek deployment logged
+`detail=max_output_tokens output_tokens=4000`: the provider had exhausted the
+combined reasoning/final-answer allowance, not rejected the image as unreadable.
+The Gemini request permits 8,192 output tokens with low thinking level and the
+same strategy/validation. The HTTP timeout is 80 seconds with a 90-second
+overall provider deadline, still below the existing three-minute trial lease.
+This does not increase the user's daily request count, add automatic retries,
+or accept partial JSON. Responses remain bounded; exhaustion is still an error.
+
+`python test_chart_live.py path/to/chart.png` is an optional **single-request**
+diagnostic using `GEMINI_API_KEY` and the same HTTP path as production. First
+confirm billing is disabled. It sends that image to Google, so use only an
+approved chart-only sample with all personal/account details removed. It prints
 safe response metadata and validation results; it does not touch Telegram or
 the database. With no argument it skips without making a request.
 
@@ -220,6 +253,9 @@ Checks: `python test_chart_signals.py`, `python test_home_menu.py`,
 quota logic in an isolated temporary schema that is removed afterwards.
 
 API references:
-- https://api-docs.deepseek.com/api/create-response/
-- https://api-docs.deepseek.com/guides/vision/
-- https://api-docs.deepseek.com/
+- https://ai.google.dev/api/generate-content
+- https://ai.google.dev/gemini-api/docs/generate-content/structured-output
+- https://ai.google.dev/gemini-api/docs/generate-content/thinking
+- https://ai.google.dev/gemini-api/docs/pricing
+- https://ai.google.dev/gemini-api/docs/rate-limits
+- https://ai.google.dev/gemini-api/terms

@@ -1,14 +1,14 @@
-"""Opt-in provider diagnostic: one paid request, no bot/database changes.
+"""Opt-in Gemini diagnostic: one request, no bot/database changes.
 
 Run: python test_chart_live.py path/to/chart.png
-Requires DEEPSEEK_API_KEY. Logs only bounded metadata, never image/model text.
+Requires GEMINI_API_KEY from a billing-disabled project for free-only use.
+Use an approved chart-only image; never send private account or chat details.
 """
 import asyncio
-import os
 import sys
+import time
 from pathlib import Path
 
-import httpx
 import chart_analysis as api
 
 
@@ -18,38 +18,33 @@ def known(value, values):
 
 async def main(path):
     if not api.configured():
-        raise SystemExit('DEEPSEEK_API_KEY is not configured')
+        raise SystemExit('GEMINI_API_KEY is not configured')
+    if Path(path).stat().st_size > api.MAX_IMAGE_BYTES:
+        raise SystemExit('Image exceeds the 8 MiB limit')
     data = Path(path).read_bytes()
-    body = api.request_body(data, 'en')
-    async with httpx.AsyncClient(timeout=45) as client:
-        response = await client.post('https://api.deepseek.com/responses',
-            headers={'Authorization': 'Bearer ' + os.environ['DEEPSEEK_API_KEY'].strip()}, json=body)
-    print('http_status:', response.status_code)
-    if response.status_code != 200:
-        return
-    payload = response.json()
-    print('status:', known(payload.get('status'), ('completed', 'incomplete', 'failed', 'in_progress')))
-    details = payload.get('incomplete_details') or {}
-    print('incomplete_reason:', known(details.get('reason'), ('max_output_tokens', 'content_filter')))
-    usage = payload.get('usage') or {}
-    print('usage:', {k: v for k, v in usage.items()
-                     if k in ('input_tokens', 'output_tokens', 'total_tokens') and type(v) is int})
-    messages = [item for item in payload.get('output', []) if item.get('type') == 'message']
-    print('message_count:', len(messages))
-    print('message_statuses:', [known(m.get('status'), ('completed', 'incomplete', 'in_progress')) for m in messages])
+    started = time.monotonic()
     try:
+        # Same transport, credentials, payload and deadlines as the Telegram flow.
+        payload = await api.request_response(data, 'en')
+        print('elapsed_seconds:', round(time.monotonic() - started, 2))
+        print('max_output_tokens:', api.MAX_OUTPUT_TOKENS)
+        usage = payload.get('usageMetadata') if isinstance(payload, dict) else None
+        if isinstance(usage, dict):
+            print('usage:', {k: v for k, v in usage.items() if k in (
+                'promptTokenCount', 'candidatesTokenCount', 'thoughtsTokenCount',
+                'totalTokenCount') and type(v) is int})
         result = api.parse_response(payload)
     except api.AnalysisError as exc:
-        print('analysis_error:', known(str(exc), ('response', 'chart', 'service', 'configuration')))
+        print('analysis_error:', known(str(exc), ('response', 'chart', 'service', 'configuration', 'busy', 'image')))
         print('rejection:', exc.detail)
-        return
+        raise SystemExit(1)
     print('parsed_direction:', known(result.get('direction'), ('BUY', 'SELL')))
     print('parsed_setup:', known(result.get('setup'), api.chart_strategy.SETUPS))
 
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
-        print('SKIP: pass an image path to make one paid provider request')
+        print('SKIP: pass an approved chart-only image path to make one Gemini request')
     else:
         try:
             asyncio.run(main(sys.argv[1]))

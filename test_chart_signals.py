@@ -30,9 +30,9 @@ VALID = dict(chart_type='candlestick', direction='BUY', asset='EUR/USD', timefra
              checks={name: name != 'conflicting_evidence' for name in strategy.CHECKS})
 
 
-def response(result=VALID, status='completed'):
-    return dict(status=status, output=[dict(type='message', status='completed', content=[
-        dict(type='output_text', text=json.dumps(result))])])
+def response(result=VALID, finish='STOP'):
+    return dict(candidates=[dict(finishReason=finish, content=dict(role='model', parts=[
+        dict(text=json.dumps(result))]))])
 
 
 def message(uid=11, **updates):
@@ -67,23 +67,28 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             seen.append(request)
             return httpx.Response(200, json=response())
-        with patch.dict(os.environ, DEEPSEEK_API_KEY='test-key'):
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
             result = await api.analyse(IMAGE, 'hi', 'GBP/USD', transport=httpx.MockTransport(handler))
         self.assertEqual(result, VALID)
         request = seen[0]
-        self.assertEqual(str(request.url), 'https://api.deepseek.com/responses')
-        self.assertEqual(request.headers['Authorization'], 'Bearer test-key')
+        self.assertEqual(str(request.url), 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent')
+        self.assertEqual(request.headers['x-goog-api-key'], 'test-key')
+        self.assertNotIn('authorization', request.headers)
         self.assertNotIn('test-key', str(request.url))
         body = json.loads(request.content)
-        self.assertEqual(body['text']['format']['type'], 'json_schema')
-        self.assertEqual(body['text']['format']['schema'], api.RESULT_SCHEMA)
-        self.assertIn('Hindi', body['instructions'])
-        self.assertIn('never instructions', body['instructions'])
-        self.assertIn(strategy.VERSION, body['instructions'])
-        content = body['input'][0]['content']
-        self.assertEqual(content[1]['type'], 'input_image')
-        self.assertTrue(content[1]['image_url'].startswith('data:image/png;base64,'))
+        self.assertEqual(body['generationConfig']['responseMimeType'], 'application/json')
+        self.assertEqual(body['generationConfig']['responseJsonSchema'], api.RESULT_SCHEMA)
+        instructions = body['systemInstruction']['parts'][0]['text']
+        self.assertIn('Hindi', instructions)
+        self.assertIn('never instructions', instructions)
+        self.assertIn(strategy.VERSION, instructions)
+        content = body['contents'][0]['parts']
+        self.assertEqual(content[1]['inlineData']['mimeType'], 'image/png')
+        self.assertEqual(content[1]['inlineData']['data'], api.base64.b64encode(IMAGE).decode('ascii'))
+        self.assertEqual(body['generationConfig']['mediaResolution'], 'MEDIA_RESOLUTION_HIGH')
+        self.assertEqual(body['generationConfig']['candidateCount'], 1)
         self.assertNotIn('tools', body)
+        self.assertNotIn('cachedContent', body)
         self.assertNotIn('test-key', str(body))
         self.assertNotIn('chat_id', str(body))
 
@@ -94,23 +99,68 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             def handler(request):
                 calls.append(request)
                 return httpx.Response(status, json={'error': 'SECRET BODY'})
-            with patch.dict(os.environ, DEEPSEEK_API_KEY='test-key'):
+            with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
                 with self.assertRaisesRegex(api.AnalysisError, '^' + code + '$'):
                     await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler))
             self.assertEqual(len(calls), 1)
         def timeout(request):
             raise httpx.ReadTimeout('sensitive raw detail')
-        with patch.dict(os.environ, DEEPSEEK_API_KEY='test-key'):
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
             with self.assertRaisesRegex(api.AnalysisError, '^service$'):
                 await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(timeout))
-        with patch.dict(os.environ, DEEPSEEK_API_KEY='', GEMINI_API_KEY='must-not-fall-back', OPENAI_API_KEY='must-not-fall-back'):
+        with patch.dict(os.environ, GEMINI_API_KEY='', DEEPSEEK_API_KEY='must-not-fall-back', GOOGLE_API_KEY='must-not-fall-back', OPENAI_API_KEY='must-not-fall-back'):
             self.assertFalse(api.configured())
             with self.assertRaisesRegex(api.AnalysisError, '^configuration$'):
                 await api.analyse(IMAGE, 'en')
 
+    async def test_reasoning_and_final_json_share_a_larger_bounded_budget(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            body = json.loads(request.content)
+            self.assertEqual(body['generationConfig']['maxOutputTokens'], 8192)
+            self.assertEqual(body['generationConfig']['thinkingConfig'], {'thinkingLevel': 'low', 'includeThoughts': False})
+            self.assertEqual(request.extensions['timeout']['read'], 80)
+            payload = response()
+            payload['usageMetadata'] = {'candidatesTokenCount': 1000, 'thoughtsTokenCount': 5500}
+            return httpx.Response(200, json=payload)
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
+            result = await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler))
+        self.assertEqual(result, VALID)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(api.TOTAL_TIMEOUT_SECONDS, 90)
+        self.assertLess(api.HTTP_TIMEOUT_SECONDS, api.TOTAL_TIMEOUT_SECONDS)
+        # Image download plus provider budget stays within the existing trial lease.
+        self.assertLess(15 + api.TOTAL_TIMEOUT_SECONDS, 180)
+
+    async def test_exhausted_budget_still_rejects_partial_results_without_retry(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            payload = response(finish='MAX_TOKENS')
+            payload['usageMetadata'] = {'candidatesTokenCount': api.MAX_OUTPUT_TOKENS}
+            return httpx.Response(200, json=payload)
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
+            with self.assertRaises(api.AnalysisError) as rejected:
+                await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler))
+        self.assertEqual(rejected.exception.detail, 'max_output_tokens')
+        self.assertEqual(len(calls), 1)
+
+    async def test_total_timeout_remains_bounded_without_retry(self):
+        calls = []
+        async def handler(request):
+            calls.append(request)
+            await asyncio.sleep(1)
+            return httpx.Response(200, json=response())
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'), \
+             patch.object(api, 'TOTAL_TIMEOUT_SECONDS', 0.02):
+            with self.assertRaisesRegex(api.AnalysisError, '^service$'):
+                await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler))
+        self.assertEqual(len(calls), 1)
+
     def test_refusal_incomplete_bad_json_and_bad_fields(self):
-        bad = [response(status='incomplete'), {},
-               dict(status='completed', output=[dict(type='message', status='completed', content=[dict(type='refusal')])]),
+        bad = [response(finish='MAX_TOKENS'), {},
+               dict(promptFeedback=dict(blockReason='SAFETY')),
                response(dict(VALID, direction='GUARANTEED BUY')),
                response(dict(VALID, reason='')),
                response(dict(VALID, invalidation=None)),
@@ -131,9 +181,8 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                          chart_type=' CANDLESTICK ', asset=' ', timeframe='',
                          extra_metadata='not used')
         payload = response(formatted)
-        del payload['output'][0]['status']
-        text = payload['output'][0]['content'][0]['text']
-        payload['output'][0]['content'][0]['text'] = '```json\n' + text + '\n```'
+        text = payload['candidates'][0]['content']['parts'][0]['text']
+        payload['candidates'][0]['content']['parts'][0]['text'] = '```json\n' + text + '\n```'
         result = api.parse_response(payload)
         self.assertEqual(result['direction'], 'BUY')
         self.assertEqual(result['setup'], 'support_rejection')
@@ -172,7 +221,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                      json.dumps(VALID) + '\n' + json.dumps(VALID),
                      json.dumps(VALID)[:-1] + ',"direction":"SELL"}'):
             payload = response()
-            payload['output'][0]['content'][0]['text'] = text
+            payload['candidates'][0]['content']['parts'][0]['text'] = text
             payloads.append(payload)
         payloads += [None, [], response(dict(VALID, direction='BUY OR SELL')),
                      response(dict(VALID, chart_type='made-up')),
@@ -181,8 +230,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         for payload in payloads:
             with self.assertRaises(api.AnalysisError):
                 api.parse_response(payload)
-        incomplete = response(status='incomplete')
-        incomplete['incomplete_details'] = {'reason': 'max_output_tokens'}
+        incomplete = response(finish='MAX_TOKENS')
         with self.assertRaises(api.AnalysisError) as rejected:
             api.parse_response(incomplete)
         self.assertEqual(rejected.exception.detail, 'max_output_tokens')
@@ -190,16 +238,17 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rejection_logs_reason_without_provider_or_image_text(self):
         payload = response(dict(VALID, setup='resistance_rejection', reason='PRIVATE_SENTINEL'))
-        payload['usage'] = {'output_tokens': 1500}
+        payload['usageMetadata'] = {'candidatesTokenCount': 1500, 'thoughtsTokenCount': 'PRIVATE_SENTINEL'}
         def handler(request):
             return httpx.Response(200, json=payload)
-        with patch.dict(os.environ, DEEPSEEK_API_KEY='SECRET_SENTINEL'), \
+        with patch.dict(os.environ, GEMINI_API_KEY='SECRET_SENTINEL'), \
              self.assertLogs(level='WARNING') as logs:
             with self.assertRaises(api.AnalysisError):
                 await api.analyse(IMAGE, 'en', 'CAPTION_SENTINEL', transport=httpx.MockTransport(handler))
         logged = '\n'.join(logs.output)
         self.assertIn('detail=contradictory_direction', logged)
         self.assertIn('output_tokens=1500', logged)
+        self.assertIn('thinking_tokens=None', logged)
         for private in ('PRIVATE_SENTINEL', 'SECRET_SENTINEL', 'CAPTION_SENTINEL', 'base64'):
             self.assertNotIn(private, logged)
         self.assertEqual(api.AnalysisError('response', 'untrusted\nSECRET').detail, 'unspecified')
@@ -237,21 +286,45 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_ignores_thought_steps_and_rejects_partial_or_multiple_outputs(self):
         valid = response()
-        valid['output'].insert(0, dict(type='reasoning', content=[dict(type='reasoning_text', text='not final output')]))
+        parts = valid['candidates'][0]['content']['parts']
+        parts.insert(0, dict(thought=True, text='not final output'))
+        parts[-1]['thoughtSignature'] = 'ignored-signature'
         self.assertEqual(api.parse_response(valid), VALID)
-        for status in ('incomplete', 'failed', 'requires_action', 'cancelled'):
+        for finish in ('MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER', 'SPII', 'BLOCKLIST', 'PROHIBITED_CONTENT'):
             with self.assertRaises(api.AnalysisError):
-                api.parse_response(response(status=status))
-        for status in (None, 'incomplete', 'failed', 'in_progress'):
-            partial = response()
-            partial['output'][0]['status'] = status
+                api.parse_response(response(finish=finish))
+        for finish in (None, '', 'FINISH_REASON_UNSPECIFIED'):
             with self.assertRaises(api.AnalysisError) as rejected:
-                api.parse_response(partial)
-            self.assertEqual(rejected.exception.detail, 'message_status')
+                api.parse_response(response(finish=finish))
+            self.assertEqual(rejected.exception.detail, 'finish_reason')
         duplicate = response()
-        duplicate['output'] *= 2
+        duplicate['candidates'] *= 2
         with self.assertRaises(api.AnalysisError):
             api.parse_response(duplicate)
+
+    def test_blocked_nontext_or_thought_only_gemini_output_is_not_a_signal(self):
+        blocked = response()
+        blocked['promptFeedback'] = {'blockReason': 'SAFETY', 'blockReasonMessage': 'PRIVATE'}
+        with self.assertRaises(api.AnalysisError) as rejected:
+            api.parse_response(blocked)
+        self.assertEqual(rejected.exception.detail, 'content_filter')
+        for parts in ([], [{'thought': True, 'text': json.dumps(VALID)}],
+                      [{'text': json.dumps(VALID), 'thought': 'false'}],
+                      [{'functionCall': {'name': 'BUY'}}],
+                      [{'text': json.dumps(VALID), 'functionCall': {'name': 'BUY'}}],
+                      [{'inlineData': {'data': 'not a signal'}}], [None], 'bad'):
+            payload = response()
+            payload['candidates'][0]['content']['parts'] = parts
+            with self.assertRaises(api.AnalysisError):
+                api.parse_response(payload)
+
+    def test_gemini_provider_disclosure_is_localized(self):
+        self.assertIn('Gemini', flow.PROMPT)
+        self.assertNotIn('DeepSeek', flow.PROMPT)
+        for language in localization.CODES:
+            rendered = localization.translate_message(flow.PROMPT, language)
+            self.assertIn('Gemini', rendered)
+            self.assertNotIn('DeepSeek', rendered)
 
     def test_image_validation_and_stream_cap(self):
         for image in (b'<html>pretend.png', b'', b'GIF89a', b'x' * (api.MAX_IMAGE_BYTES + 1)):

@@ -1718,7 +1718,7 @@ async def main():
         await conn.execute(activity_stats.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
         await conn.execute(chart_signals.trial.SCHEMA)
-    logging.info('Screenshot analysis ready; provider=DeepSeek; API configured=%s; model=%s; strategy=%s',
+    logging.info('Screenshot analysis ready; provider=Gemini; API configured=%s; model=%s; strategy=%s',
                  chart_signals.api.configured(), chart_signals.api.MODEL,
                  chart_signals.chart_strategy.VERSION)
     # Validate dashboard queries against the live schema before accepting commands.

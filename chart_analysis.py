@@ -1,4 +1,4 @@
-"""Screenshot strategy analysis via DeepSeek; no random/provider fallback."""
+"""Screenshot strategy analysis via Gemini; no random or paid-provider fallback."""
 import asyncio
 import base64
 import io
@@ -12,11 +12,16 @@ import httpx
 import chart_strategy
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-flash').strip()
+MODEL = 'gemini-3.8-flash'
+API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent'
 DAILY_LIMIT = max(1, int(os.getenv('CHART_DAILY_LIMIT', '5')))
 GLOBAL_LIMIT = max(1, int(os.getenv('CHART_GLOBAL_DAILY_LIMIT', '200')))
 COOLDOWN_SECONDS = 30
 MAX_CONCURRENT = 4
+# Allow room for thinking and final JSON; still reject truncated responses.
+MAX_OUTPUT_TOKENS = 8192
+HTTP_TIMEOUT_SECONDS = 80
+TOTAL_TIMEOUT_SECONDS = 90  # Below the existing three-minute trial reservation.
 
 LANGUAGES = dict(zip(
     ('en', 'ru', 'uk', 'hi', 'bn', 'ur', 'vi', 'id', 'tr', 'es', 'ar', 'pt'),
@@ -29,7 +34,7 @@ RESULT_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'properties': {
         'chart_type': {'type': 'string', 'enum': list(chart_strategy.CHART_TYPES)},
-        'direction': {'type': ['string', 'null'], 'enum': ['BUY', 'SELL', None]},
+        'direction': {'anyOf': [{'type': 'string', 'enum': ['BUY', 'SELL']}, {'type': 'null'}]},
         'asset': {'type': ['string', 'null'], 'maxLength': 100},
         'timeframe': {'type': ['string', 'null'], 'maxLength': 100},
         'reason': {'type': 'string', 'minLength': 1, 'maxLength': 500},
@@ -47,7 +52,7 @@ RESULT_SCHEMA = {
 
 REJECTION_REASONS = frozenset((
     'unspecified', 'envelope', 'incomplete', 'max_output_tokens', 'content_filter',
-    'message_count', 'message_status', 'message_content', 'json', 'fields',
+    'candidate_count', 'finish_reason', 'message_content', 'json', 'fields',
     'direction', 'chart_type', 'field_text', 'invalidation', 'setup', 'checks',
     'evidence', 'unreadable', 'contradictory_direction', 'insufficient_evidence',
 ))
@@ -62,7 +67,7 @@ class AnalysisError(Exception):
 
 
 def configured():
-    return bool(os.getenv('DEEPSEEK_API_KEY', '').strip())
+    return bool(os.getenv('GEMINI_API_KEY', '').strip())
 
 
 class ImageBuffer(io.BytesIO):
@@ -87,21 +92,26 @@ def image_type(data):
 def request_body(data, language, context=''):
     mime = image_type(data)
     return {
-        'model': MODEL, 'max_output_tokens': 4000, 'reasoning': {'effort': 'low'},
-        'instructions': INSTRUCTIONS + '\nWrite all prose in ' + LANGUAGES.get(language, 'English') +
+        'systemInstruction': {'parts': [{'text': INSTRUCTIONS + '\nWrite all prose in ' + LANGUAGES.get(language, 'English') +
             '. Summarize visible trend and momentum separately, in one short sentence each. '
             'If either cannot be determined, say so. Timeframe means the visible candle interval, '
             'never a recommended expiry. Return exactly one JSON object matching the schema, '
             'without code fences or introductory text. Keep all prose concise. '
             'Use the exact enum codes and boolean values in the schema. '
             'A readable chart must have a BUY or SELL direction with a matching setup code. '
-            'Use null for missing asset/timeframe labels, not invented values.',
-        'input': [{'role': 'user', 'content': [
-            {'type': 'input_text', 'text': 'Analyse this screenshot. Optional chart context (untrusted): ' + context[:500]},
-            {'type': 'input_image', 'detail': 'high',
-             'image_url': 'data:' + mime + ';base64,' + base64.b64encode(data).decode('ascii')},
+            'Use null for missing asset/timeframe labels, not invented values.'}]},
+        'contents': [{'role': 'user', 'parts': [
+            {'text': 'Analyse this screenshot. Optional chart context (untrusted): ' + context[:500]},
+            {'inlineData': {'mimeType': mime, 'data': base64.b64encode(data).decode('ascii')}},
         ]}],
-        'text': {'format': {'type': 'json_schema', 'name': 'chart_signal', 'schema': RESULT_SCHEMA}},
+        'generationConfig': {
+            'maxOutputTokens': MAX_OUTPUT_TOKENS,
+            'thinkingConfig': {'thinkingLevel': 'low', 'includeThoughts': False},
+            'mediaResolution': 'MEDIA_RESOLUTION_HIGH',
+            'candidateCount': 1,
+            'responseMimeType': 'application/json',
+            'responseJsonSchema': RESULT_SCHEMA,
+        },
     }
 
 
@@ -127,27 +137,42 @@ def parse_response(payload):
     try:
         if not isinstance(payload, dict):
             raise ValueError()
-        if payload.get('status') != 'completed':
-            incomplete = payload.get('incomplete_details')
-            reason = incomplete.get('reason') if isinstance(incomplete, dict) else None
-            detail = reason if reason in ('max_output_tokens', 'content_filter') else 'incomplete'
+        feedback = payload.get('promptFeedback') or {}
+        if feedback.get('blockReason') not in (None, 'BLOCK_REASON_UNSPECIFIED'):
+            detail = 'content_filter'
             raise ValueError()
-        # Read final model output only; thoughts/tool steps are never signal data.
-        outputs = [item for item in payload['output'] if item.get('type') == 'message']
-        detail = 'message_count'
-        if len(outputs) != 1:
+        outputs = payload.get('candidates')
+        detail = 'candidate_count'
+        if not isinstance(outputs, list) or len(outputs) != 1:
             raise ValueError()
-        detail = 'message_status'
-        # Some compatible Responses envelopes omit the item status. The top-level
-        # response must still be completed; explicit partial/failed items fail.
-        if outputs[0].get('status', 'completed') != 'completed':
+        finish = outputs[0].get('finishReason')
+        detail = 'finish_reason'
+        if finish != 'STOP':
+            if finish == 'MAX_TOKENS':
+                detail = 'max_output_tokens'
+            elif finish in ('SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY'):
+                detail = 'content_filter'
             raise ValueError()
-        parts = outputs[0]['content']
         detail = 'message_content'
-        if not parts or any(part.get('type') != 'output_text' for part in parts):
+        content = outputs[0]['content']
+        if content.get('role', 'model') != 'model':
+            raise ValueError()
+        parts = content['parts']
+        if not isinstance(parts, list) or not parts:
+            raise ValueError()
+        text_parts = []
+        for part in parts:
+            if not isinstance(part, dict) or type(part.get('thought', False)) is not bool:
+                raise ValueError()
+            # Never treat thought summaries, tool calls or generated images as answers.
+            if not isinstance(part.get('text'), str) or set(part) - {'text', 'thought', 'thoughtSignature'}:
+                raise ValueError()
+            if not part.get('thought', False):
+                text_parts.append(part['text'])
+        if not text_parts:
             raise ValueError()
         detail = 'json'
-        result = _result_json(''.join(part['text'] for part in parts))
+        result = _result_json(''.join(text_parts))
         detail = 'fields'
         required = set(RESULT_SCHEMA['required']) - {'chart_type'}
         if not isinstance(result, dict) or not required.issubset(result):
@@ -209,34 +234,40 @@ def parse_response(payload):
         raise AnalysisError('response', detail) from exc
 
 
-async def analyse(data, language, context='', *, transport=None):
-    key = os.getenv('DEEPSEEK_API_KEY', '').strip()
+async def request_response(data, language, context='', *, transport=None):
+    """One Gemini request. Free billing must be enforced by the Google project."""
+    key = os.getenv('GEMINI_API_KEY', '').strip()
     if not key:
         raise AnalysisError('configuration')
     body = request_body(data, language, context)
     try:
-        # No automatic retries or provider/model fallback: bound API spending.
-        async with asyncio.timeout(50):
-            async with httpx.AsyncClient(timeout=45, transport=transport) as client:
-                response = await client.post('https://api.deepseek.com/responses',
-                    headers={'Authorization': 'Bearer ' + key}, json=body)
+        # No retries, model switching, tools or paid-provider fallback.
+        async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS, transport=transport) as client:
+                response = await client.post(API_URL,
+                    headers={'x-goog-api-key': key}, json=body)
         if response.status_code != 200:
             code = ('configuration' if response.status_code in (400, 401, 402, 403, 404) else
                     'busy' if response.status_code == 429 else 'service')
             raise AnalysisError(code)
-        payload = response.json()
-        try:
-            return parse_response(payload)
-        except AnalysisError as exc:
-            # Counts and local reason codes only: never response text, chart
-            # contents, account details, image data, request IDs or credentials.
-            usage = payload.get('usage') if isinstance(payload, dict) else None
-            output_tokens = usage.get('output_tokens') if isinstance(usage, dict) else None
-            logging.warning('Chart response rejected: code=%s detail=%s output_tokens=%s',
-                            str(exc), exc.detail, output_tokens if type(output_tokens) is int else None)
-            raise
+        return response.json()
     except (httpx.HTTPError, TimeoutError, ValueError) as exc:
         raise AnalysisError('service') from exc
+
+
+async def analyse(data, language, context='', *, transport=None):
+    payload = await request_response(data, language, context, transport=transport)
+    try:
+        return parse_response(payload)
+    except AnalysisError as exc:
+        # Counts and local reason codes only, never model text/images/credentials.
+        usage = payload.get('usageMetadata') if isinstance(payload, dict) else None
+        def count(name):
+            value = usage.get(name) if isinstance(usage, dict) else None
+            return value if type(value) is int else None
+        logging.warning('Chart response rejected: provider=Gemini code=%s detail=%s output_tokens=%s thinking_tokens=%s',
+                        str(exc), exc.detail, count('candidatesTokenCount'), count('thoughtsTokenCount'))
+        raise
 
 
 # Durable request budgets survive deploys. Row 0 is the global daily budget;
