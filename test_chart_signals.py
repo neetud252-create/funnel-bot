@@ -407,12 +407,12 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(api.AnalysisError):
                 api.parse_response(payload)
 
-    def test_gemini_provider_disclosure_is_localized(self):
-        self.assertIn('Gemini', flow.PROMPT)
+    def test_provider_neutral_prompt_is_localized(self):
+        self.assertNotIn('Gemini', flow.PROMPT)
         self.assertNotIn('DeepSeek', flow.PROMPT)
         for language in localization.CODES:
             rendered = localization.translate_message(flow.PROMPT, language)
-            self.assertIn('Gemini', rendered)
+            self.assertNotIn('Gemini', rendered)
             self.assertNotIn('DeepSeek', rendered)
 
     def test_image_validation_and_stream_cap(self):
