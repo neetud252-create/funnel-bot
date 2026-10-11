@@ -1,4 +1,4 @@
-"""Screenshot strategy analysis via Gemini; no random or paid-provider fallback."""
+"""Screenshot analysis with explicit provider selection; no cross-provider fallback."""
 import asyncio
 import base64
 import io
@@ -99,8 +99,17 @@ class AnalysisError(Exception):
         self.detail = detail if isinstance(detail, str) and detail in REJECTION_REASONS else 'unspecified'
 
 
+def provider():
+    return os.getenv('CHART_PROVIDER', 'gemini').strip().lower()
+
+
+def model():
+    return 'gpt-6-luna' if provider() == 'openai' else MODEL
+
+
 def configured():
-    return bool(os.getenv('GEMINI_API_KEY', '').strip())
+    name = {'gemini': 'GEMINI_API_KEY', 'openai': 'OPENAI_API_KEY'}.get(provider())
+    return bool(name and os.getenv(name, '').strip())
 
 
 class ImageBuffer(io.BytesIO):
@@ -210,7 +219,14 @@ def parse_response(payload):
             raise ValueError()
         detail = 'json'
         result = _result_json(''.join(text_parts))
-        detail = 'fields'
+        return validate_result(result)
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise AnalysisError('response', detail) from exc
+
+
+def validate_result(result):
+    detail = 'fields'
+    try:
         required = set(RESULT_SCHEMA['required']) - {'chart_type'}
         if not isinstance(result, dict) or not required.issubset(result):
             raise ValueError()
@@ -289,15 +305,20 @@ def retry_delay(attempt, response=None):
 
 
 async def request_response(data, language, context='', *, transport=None, before_retry=None):
-    """Recover transient Gemini failures within one deadline, using the same model.
-
-    Production supplies before_retry to reserve each additional API attempt and
-    stop abandoned sessions. Free billing remains enforced by the Google project.
-    """
-    key = os.getenv('GEMINI_API_KEY', '').strip()
+    """Retry transient failures within one deadline and the durable request budget."""
+    selected = provider()
+    key_name = {'gemini': 'GEMINI_API_KEY', 'openai': 'OPENAI_API_KEY'}.get(selected)
+    key = os.getenv(key_name, '').strip() if key_name else ''
     if not key:
         raise AnalysisError('configuration')
     body = request_body(data, language, context)
+    url = API_URL
+    headers = {'x-goog-api-key': key}
+    if selected == 'openai':
+        import chart_openai
+        body = chart_openai.request_body(body, model())
+        url = 'https://api.openai.com/v1/responses'
+        headers = {'Authorization': 'Bearer ' + key}
     started = time.monotonic()
     attempt = 0
     outcome = 'failed'
@@ -308,32 +329,27 @@ async def request_response(data, language, context='', *, transport=None, before
                     response = None
                     attempt_started = time.monotonic()
                     try:
-                        response = await client.post(API_URL,
-                            headers={'x-goog-api-key': key}, json=body)
+                        response = await client.post(url, headers=headers, json=body)
                     except httpx.TransportError as exc:
                         detail = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'transport'
                         failure = AnalysisError('service', detail)
-                        logging.warning('Chart provider failed: provider=Gemini attempt=%s detail=%s', attempt, detail)
+                        logging.warning('Chart provider failed: provider=%s attempt=%s detail=%s', selected, attempt, detail)
                     else:
                         status = response.status_code
                         if status == 200:
                             payload = response.json()
                             outcome = 'received'
-                            usage = payload.get('usageMetadata', {}) if isinstance(payload, dict) else {}
-                            if not isinstance(usage, dict):
-                                usage = {}
-                            counts = [usage.get(name) for name in ('candidatesTokenCount', 'thoughtsTokenCount')]
-                            counts = [n if type(n) is int else None for n in counts]
+                            counts = usage_counts(payload, selected)
                             logging.info('Chart provider timing: attempt=%s elapsed_ms=%s output_tokens=%s thinking_tokens=%s',
                                          attempt, round((time.monotonic() - attempt_started) * 1000), *counts)
                             if attempt > 1:
-                                logging.info('Chart provider recovered: provider=Gemini attempt=%s', attempt)
+                                logging.info('Chart provider recovered: provider=%s attempt=%s', selected, attempt)
                             return payload
                         code = ('configuration' if status in (400, 401, 402, 403, 404) else
                                 'busy' if status == 429 else 'service')
                         failure = AnalysisError(code, 'http_status')
                         # Log only status/attempt, never response bodies or headers.
-                        logging.warning('Chart provider failed: provider=Gemini attempt=%s status=%s', attempt, status)
+                        logging.warning('Chart provider failed: provider=%s attempt=%s status=%s', selected, attempt, status)
                         if status not in RETRYABLE_HTTP_STATUS:
                             raise failure
                     if attempt == MAX_REQUEST_ATTEMPTS:
@@ -355,18 +371,29 @@ async def request_response(data, language, context='', *, transport=None, before
                      outcome, attempt, round((time.monotonic() - started) * 1000))
 
 
+def usage_counts(payload, selected):
+    usage = payload.get('usage' if selected == 'openai' else 'usageMetadata', {}) if isinstance(payload, dict) else {}
+    if not isinstance(usage, dict):
+        return [None, None]
+    if selected == 'openai':
+        details = usage.get('output_tokens_details') or {}
+        values = [usage.get('output_tokens'), details.get('reasoning_tokens') if isinstance(details, dict) else None]
+    else:
+        values = [usage.get('candidatesTokenCount'), usage.get('thoughtsTokenCount')]
+    return [value if type(value) is int else None for value in values]
+
+
 async def analyse(data, language, context='', *, transport=None, before_retry=None):
     payload = await request_response(data, language, context, transport=transport, before_retry=before_retry)
     try:
+        if provider() == 'openai':
+            import chart_openai
+            return chart_openai.parse_response(payload)
         return parse_response(payload)
     except AnalysisError as exc:
         # Counts and local reason codes only, never model text/images/credentials.
-        usage = payload.get('usageMetadata') if isinstance(payload, dict) else None
-        def count(name):
-            value = usage.get(name) if isinstance(usage, dict) else None
-            return value if type(value) is int else None
-        logging.warning('Chart response rejected: provider=Gemini code=%s detail=%s output_tokens=%s thinking_tokens=%s',
-                        str(exc), exc.detail, count('candidatesTokenCount'), count('thoughtsTokenCount'))
+        logging.warning('Chart response rejected: provider=%s code=%s detail=%s output_tokens=%s thinking_tokens=%s',
+                        provider(), str(exc), exc.detail, *usage_counts(payload, provider()))
         raise
 
 

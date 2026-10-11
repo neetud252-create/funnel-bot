@@ -1717,8 +1717,8 @@ async def main():
         await conn.execute(activity_stats.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
         await conn.execute(chart_signals.trial.SCHEMA)
-    logging.info('Screenshot analysis ready; provider=Gemini; API configured=%s; model=%s; strategy=%s',
-                 chart_signals.api.configured(), chart_signals.api.MODEL,
+    logging.info('Screenshot analysis ready; provider=%s; API configured=%s; model=%s; strategy=%s',
+                 chart_signals.api.provider(), chart_signals.api.configured(), chart_signals.api.model(),
                  chart_signals.chart_strategy.VERSION)
     logging.info('Verified chart quota ready; Start=%s/day; Premium=%s/day; reset=00:00 UTC',
                  config.daily_limit(False), config.daily_limit(True))
