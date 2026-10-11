@@ -8,6 +8,8 @@ import math
 import os
 import re
 import secrets
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -27,6 +29,31 @@ HTTP_TIMEOUT_SECONDS = 80
 TOTAL_TIMEOUT_SECONDS = 90  # Below the existing three-minute trial reservation.
 MAX_REQUEST_ATTEMPTS = 3
 RETRYABLE_HTTP_STATUS = frozenset((500, 502, 503, 504))
+_clients = {}
+
+
+@asynccontextmanager
+async def provider_client(transport=None):
+    """Reuse connections between uploads; mock transports stay isolated."""
+    if transport is not None:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS, transport=transport) as client:
+            yield client
+        return
+    loop = asyncio.get_running_loop()
+    client = _clients.get(loop)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS,
+            limits=httpx.Limits(max_connections=MAX_CONCURRENT,
+                               max_keepalive_connections=MAX_CONCURRENT,
+                               keepalive_expiry=120))
+        _clients[loop] = client
+    yield client
+
+
+async def close_provider_client():
+    client = _clients.pop(asyncio.get_running_loop(), None)
+    if client is not None:
+        await client.aclose()
 
 LANGUAGES = dict(zip(
     ('en', 'ru', 'uk', 'hi', 'bn', 'ur', 'vi', 'id', 'tr', 'es', 'ar', 'pt'),
@@ -102,7 +129,11 @@ def request_body(data, language, context=''):
             '. Summarize visible trend and momentum separately, in one short sentence each. '
             'If either cannot be determined, say so. Timeframe means the visible candle interval, '
             'never a recommended expiry. Return exactly one JSON object matching the schema, '
-            'without code fences or introductory text. Keep all prose concise. '
+            'without code fences, indentation or introductory text. '
+            'For concise output, use at most 12 words each for trend and momentum, '
+            'at most 35 words for reason, and at most 18 words for invalidation. '
+            'Return exactly two distinct evidence observations of at most 18 words each. '
+            'Retain the visible basis and any missing confirmation or opposing evidence. '
             'Use the exact enum codes and boolean values in the schema. '
             'A readable chart must have a BUY or SELL direction with a matching setup code. '
             'Use null for missing asset/timeframe labels, not invented values.'}]},
@@ -267,11 +298,15 @@ async def request_response(data, language, context='', *, transport=None, before
     if not key:
         raise AnalysisError('configuration')
     body = request_body(data, language, context)
+    started = time.monotonic()
+    attempt = 0
+    outcome = 'failed'
     try:
         async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS) as deadline:
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS, transport=transport) as client:
+            async with provider_client(transport) as client:
                 for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
                     response = None
+                    attempt_started = time.monotonic()
                     try:
                         response = await client.post(API_URL,
                             headers={'x-goog-api-key': key}, json=body)
@@ -283,6 +318,14 @@ async def request_response(data, language, context='', *, transport=None, before
                         status = response.status_code
                         if status == 200:
                             payload = response.json()
+                            outcome = 'received'
+                            usage = payload.get('usageMetadata', {}) if isinstance(payload, dict) else {}
+                            if not isinstance(usage, dict):
+                                usage = {}
+                            counts = [usage.get(name) for name in ('candidatesTokenCount', 'thoughtsTokenCount')]
+                            counts = [n if type(n) is int else None for n in counts]
+                            logging.info('Chart provider timing: attempt=%s elapsed_ms=%s output_tokens=%s thinking_tokens=%s',
+                                         attempt, round((time.monotonic() - attempt_started) * 1000), *counts)
                             if attempt > 1:
                                 logging.info('Chart provider recovered: provider=Gemini attempt=%s', attempt)
                             return payload
@@ -307,6 +350,9 @@ async def request_response(data, language, context='', *, transport=None, before
         raise AnalysisError('service', 'transport') from exc
     except ValueError as exc:
         raise AnalysisError('response', 'json') from exc
+    finally:
+        logging.info('Chart provider total: outcome=%s attempts=%s elapsed_ms=%s',
+                     outcome, attempt, round((time.monotonic() - started) * 1000))
 
 
 async def analyse(data, language, context='', *, transport=None, before_retry=None):

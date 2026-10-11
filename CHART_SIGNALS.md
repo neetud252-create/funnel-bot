@@ -320,3 +320,23 @@ or alter signal accounting. Rate limits delay further edits by Retry-After.
 Validation: `python test_chart_progress.py`, `python test_chart_signals.py`, and
 `python test_localization.py` cover animation lifecycle, retries, cancellation,
 rate limits, delivery errors, quotas and translated labels without live AI calls.
+
+## 12 October 2026: reduce request overhead and response verbosity
+
+The Gemini HTTP client now reuses a bounded connection pool across uploads in
+the same event loop, retaining idle connections for up to 120 seconds. Requests
+keep their own image, context and language; no model output is cached. The pool
+closes on application shutdown. Test transports remain isolated.
+
+The prompt requests compact JSON and shorter prose: trend/momentum up to 12
+words each, reason up to 35, invalidation up to 18, and two distinct evidence
+observations up to 18 words each. Strategy rules, all schema fields, high image
+resolution, low thinking, the 8,192-token ceiling, retries and validation remain
+in place. The token ceiling is not reduced because it also covers thinking.
+
+Logs now include per-successful-attempt latency, total provider latency/attempts,
+and output/thinking token counts, without chart content or credentials. These
+changes reduce avoidable connection and generation work; they do not establish
+a measured end-to-end speedup or eliminate Gemini congestion. Validation passed:
+52 chart/transport tests, six loader tests, and five signal-access tests. No live
+AI benchmark request was made.
