@@ -506,6 +506,30 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         trial.consume.assert_awaited_once_with(None, 'trial-token')
         self.assertEqual(len([c for c in self.render.await_args_list if c.kwargs.get('raise_on_error')]), 1)
 
+    async def test_loading_animation_stops_before_success_or_error(self):
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                await self.open()
+                edited = asyncio.Event()
+                async def edit(**kwargs):
+                    edited.set()
+                self.bot.edit_message_text = AsyncMock(side_effect=edit)
+                self.render.return_value = types.SimpleNamespace(message_id=22, reply_markup=None)
+                async def analyse(*args, **kwargs):
+                    await asyncio.wait_for(edited.wait(), 1)
+                    if fail:
+                        raise api.AnalysisError('service')
+                    return VALID
+                api.analyse.side_effect = analyse
+                with patch.object(flow.chart_progress, 'FRAME_SECONDS', 0.001):
+                    await flow.receive(message(), self.bot, self.state, self.render)
+                edit_count = self.bot.edit_message_text.await_count
+                await asyncio.sleep(0.01)
+                self.assertEqual(self.bot.edit_message_text.await_count, edit_count)
+                final_text = self.render.await_args.args[3]
+                self.assertEqual('Analysis complete' in final_text, not fail)
+                self.assertFalse(flow._inflight)
+
     async def test_cancel_during_retry_stops_provider_and_releases_slot(self):
         async def cancelled(*args, before_retry):
             await self.state.clear()

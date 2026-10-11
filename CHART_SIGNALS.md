@@ -302,3 +302,21 @@ Logs record attempt number, HTTP status or a fixed transport/timeout reason,
 without provider bodies, credentials, captions or images. A successful later
 attempt logs provider recovery. Validation still rejects contradictory, truncated
 and unsupported results.
+
+## 12 October 2026: animated chart progress
+
+Screenshot analysis displays one text loader with a moving block bar and spinner.
+The same Telegram message is edited every three seconds while Gemini works;
+internal retries change its status to “Reconnecting to AI…”. The animation uses
+no additional model requests. Gemini provides no percentage progress, so the bar
+is indeterminate until a validated result is delivered with a full completion bar.
+All labels support the existing 12 languages. Back remains available.
+
+Each animation owns its message ID and upload session. Navigation stops edits,
+and the animation task is cancelled and awaited before success/error rendering.
+Deleted messages, edit timeouts and Telegram rate limits cannot fail the analysis
+or alter signal accounting. Rate limits delay further edits by Retry-After.
+
+Validation: `python test_chart_progress.py`, `python test_chart_signals.py`, and
+`python test_localization.py` cover animation lifecycle, retries, cancellation,
+rate limits, delivery errors, quotas and translated labels without live AI calls.

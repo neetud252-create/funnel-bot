@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 import chart_analysis as api
 import chart_strategy
 import chart_trial as trial
+import chart_progress
 import config
 import localization
 
@@ -56,7 +57,7 @@ DAILY_STATUS = ('\n\n⚡ <b>Signals</b>\n'
                 '— Available today: {limit} signals\n'
                 '— Used: {used}\n— Left: {left}')
 SOURCES = (INTRO, TEST_INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
-           DAILY_STATUS, 'Remaining Signals: {left}', 'New Analysis')
+           DAILY_STATUS, 'Remaining Signals: {left}', 'New Analysis', *chart_progress.SOURCES)
 BACK = [[('🔙 Back', 'cb:home:back', 'success')]]
 VERIFIED_BACK = [[('🔙 Back', 'cb:home:access', 'success')]]
 UPLOAD = [[('🎯 Test Signals', 'cb:chart:upload', 'primary')], *BACK]
@@ -168,6 +169,7 @@ async def receive(m, bot, state, render):
     _inflight.add(tg_id)  # Publish before any await: one active analysis per user.
     session = None
     token = None
+    progress = None
     consumed = delivery_attempted = False
     back = BACK
     async def active():
@@ -176,6 +178,8 @@ async def receive(m, bot, state, render):
     async def before_retry():
         if not await active():
             raise api.AnalysisError('cancelled')
+        if progress is not None:
+            progress.retrying = True
         blocked = await api.reserve(db.pool, tg_id, retry=True)
         if blocked:
             raise api.AnalysisError(blocked)
@@ -213,12 +217,19 @@ async def receive(m, bot, state, render):
             return
         if not await active():
             return
-        await render(bot, tg_id, None, MESSAGES['working'], back)
-        result = await api.analyse(data, language, m.caption or '', before_retry=before_retry)
+        loading = await render(bot, tg_id, None, chart_progress.frame(language), back)
+        progress = chart_progress.Progress(bot, tg_id, loading, language, active)
+        progress.start()
+        try:
+            result = await api.analyse(data, language, m.caption or '', before_retry=before_retry)
+        finally:
+            # Await cancellation before any result/error render, so an old edit
+            # cannot overwrite a finished result or a replacement upload session.
+            await progress.stop()
         if await active():
             # Validate/render before consuming a slot: malformed provider data
             # must never be coerced into a direction or charged as a signal.
-            text = result_text(result, language)
+            text = chart_progress.completed(language) + result_text(result, language)
             if not await trial.consume(db.pool, token):
                 verified, left = await trial.status(db.pool, tg_id)
                 if verified and not left:
@@ -253,6 +264,8 @@ async def receive(m, bot, state, render):
             await render(bot, tg_id, None, MESSAGES['service'], back)
     finally:
         try:
+            if progress is not None:
+                await progress.stop()
             if consumed and not delivery_attempted:
                 await trial.release(db.pool, token, delivery_rejected=True)
             else:
