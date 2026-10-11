@@ -576,6 +576,7 @@ _CONSUME_SQL = """
            END,
            last_reset_date = CURRENT_DATE
      WHERE tg_id = $1
+       AND $2 > 0
        AND (last_reset_date IS DISTINCT FROM CURRENT_DATE
             OR signals_used_today < $2)
     RETURNING signals_used_today

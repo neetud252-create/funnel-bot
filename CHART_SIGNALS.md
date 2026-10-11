@@ -25,9 +25,16 @@ chart styles or markets. No implementation can reliably read every screenshot.
 Main menu → Get a signal now opens the same screenshot-upload prompt directly
 for verified users. It no longer opens the manual mode/pair/expiry selection.
 The button's text, style and `menu:signal` callback are unchanged. Any previous
-manual countdown is cancelled when opening the uploader. Existing chart request
-budgets and tier signal counters are unchanged; screenshot analysis still uses
-the separate chart budget described below, not the main menu's 30/70 allowance.
+manual countdown is cancelled when opening the uploader. Verified chart results
+now use the same daily allowance as the main menu: Start defaults to 30/day and
+Premium retains `PREMIUM_DAILY_SIGNALS` (default 70). `START_DAILY_SIGNALS` controls
+the Start allowance. Every delivered result updates `users.signals_used_today`;
+the upload screen, result footer and main menu show the same Used/Left totals.
+Back from a verified chart returns to the main menu and refreshes the totals.
+The allowance resets at midnight UTC (05:30 IST), persists across restarts, and
+is enforced before analysis and again at delivery. Old manual buttons share it.
+Verification grants access without resetting an existing daily count. Earlier
+uncounted chart results cannot be reconstructed and are not retroactively charged.
 
 Set `GEMINI_API_KEY` in Railway's service Variables (never commit it). An unset key
 leaves a localized unavailable message; the rest of the bot still starts normally.
@@ -59,24 +66,31 @@ The older/manual signal flow requires the same stored verification flag at entry
 and again before delivering a result. Old buttons, Premium status and token
 balances cannot bypass the lifetime trial by opening a separate daily allowance.
 
-`chart_trial_slots` reserves slots transactionally before image processing, using
-a shared PostgreSQL advisory lock. Duplicate Telegram message IDs cannot consume
-or produce another trial signal. Pending reservations expire after three minutes
+`chart_trial_slots` reserves slots transactionally before image processing, locking
+the user's row. `quota_date IS NULL` identifies the existing lifetime previews;
+a date identifies a verified daily result. The additive migration preserves old
+rows and counters. Duplicate Telegram message IDs cannot consume or produce
+another signal. Pending reservations expire after three minutes
 to recover from a process crash. A late response cannot consume an expired slot.
 Invalid uploads, API errors and cancelled sessions release pending slots.
 Both confirmed and tentative directional results commit a slot before Telegram delivery. Explicit Telegram
-rejections refund it; a timeout/unknown delivery retains it to prevent a third
-signal after an uncertain send. A crash between committing and sending can retain
+rejections refund it exactly once; old-day refunds cannot reduce a new day's usage.
+A timeout/unknown delivery retains it to prevent extra signals after an uncertain
+send. A crash between committing and sending can retain
 a slot without delivery; the ledger exposes that conservative limitation.
 
-Defaults: `CHART_DAILY_LIMIT=5` requests per user, `CHART_GLOBAL_DAILY_LIMIT=200`
+Defaults: `CHART_DAILY_LIMIT=5` requests per unverified user, `CHART_GLOBAL_DAILY_LIMIT=200`
 across all users, reset at 00:00 UTC. These budgets are separate from paid-tier
 signal counts and persist in Postgres `chart_analysis_usage`. Counts are reserved
 before an API attempt, including failed/cancelled attempts that might be billed.
 No automatic retries. A 30-second cooldown and four concurrent requests per
 process limit duplicate submissions. These are separate abuse/spending controls:
 Errors do not use lifetime signal slots, but API attempts use daily budgets.
-Verified users retain these existing daily request limits.
+Verified users use the delivered-signal allowance instead of the five-request
+trial cap, so failed analyses do not consume their daily signal allowance.
+The global provider-request cap, cooldown and concurrency controls still apply
+to everyone; provider availability or the global cap may stop analysis earlier.
+No provider/model fallback or billing configuration is changed.
 
 Only private chats; one JPEG/PNG/WebP, at most 8 MiB. Reject albums and unsupported
 documents. Bytes stay in memory and are sent as base64 to Google Gemini; no Telegram URL,
@@ -249,6 +263,10 @@ the database. With no argument it skips without making a request.
 
 Checks: `python test_chart_signals.py`, `python test_home_menu.py`,
 `python test_localization.py`, `python test_uid_singleflight.py`.
+`CHART_TEST_DATABASE_URL=... python test_chart_daily_db.py` checks the 30/31
+boundary, shared counters, concurrent reservations, refunds, restart, daily
+rollover, Premium, verification changes and the provider-request gates in a
+temporary schema. Use a test database; it never calls Telegram or Gemini.
 `CHART_TEST_DATABASE_URL=... python test_chart_trial_db.py` tests the real Postgres
 quota logic in an isolated temporary schema that is removed afterwards.
 

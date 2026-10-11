@@ -289,7 +289,8 @@ async def reserve(pool, tg_id):
             now = await conn.fetchval('SELECT clock_timestamp()')
             day = now.astimezone(timezone.utc).date()
             rows = await conn.fetch('SELECT * FROM chart_analysis_usage WHERE tg_id IN (0, $1)', tg_id)
-            blocked = reservation_refusal(rows, tg_id, now)
+            verified = bool(await conn.fetchval('SELECT verified FROM users WHERE tg_id=$1', tg_id))
+            blocked = reservation_refusal(rows, tg_id, now, verified=verified)
             if blocked:
                 return blocked
             for key in (0, tg_id):
@@ -301,10 +302,14 @@ async def reserve(pool, tg_id):
     return None
 
 
-def reservation_refusal(rows, tg_id, now):
+def reservation_refusal(rows, tg_id, now, *, verified=False):
     day = now.astimezone(timezone.utc).date()
     usage = {row['tg_id']: row for row in rows}
     for key, limit in ((tg_id, DAILY_LIMIT), (0, GLOBAL_LIMIT)):
+        # Verified users are capped by delivered signals, not the trial's
+        # five API attempts. The global provider cap and cooldown still apply.
+        if key == tg_id and verified:
+            continue
         row = usage.get(key)
         if row and row['usage_day'] == day and row['requests'] >= limit:
             return 'limit'

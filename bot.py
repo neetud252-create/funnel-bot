@@ -400,8 +400,7 @@ async def _user_quota(tg_id):
     # (is_premium, that tier's daily limit). Resolved from the database on
     # every call rather than cached, so a /premium grant - or a restart that
     # picked up a new PREMIUM_DAILY_SIGNALS - applies to the very next tap.
-    # This is the ONLY place a limit is chosen; nothing downstream names a
-    # number of its own.
+    # Chart analysis uses the same config.daily_limit and persisted counter.
     user = await db.get_user(tg_id)
     premium = bool(_row_field(user, "is_premium", False)) if user else False
     return premium, config.daily_limit(premium)
@@ -1721,6 +1720,8 @@ async def main():
     logging.info('Screenshot analysis ready; provider=Gemini; API configured=%s; model=%s; strategy=%s',
                  chart_signals.api.configured(), chart_signals.api.MODEL,
                  chart_signals.chart_strategy.VERSION)
+    logging.info('Verified chart quota ready; Start=%s/day; Premium=%s/day; reset=00:00 UTC',
+                 config.daily_limit(False), config.daily_limit(True))
     # Validate dashboard queries against the live schema before accepting commands.
     await activity_stats.report()
     activity_middleware = activity_stats.ActivityMiddleware()

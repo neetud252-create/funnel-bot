@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 import chart_analysis as api
 import chart_strategy
 import chart_trial as trial
+import config
 import localization
 
 INTRO = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
@@ -51,13 +52,30 @@ RESULT = ('🔲 AI Trading Signal Result\n\n'
 EXTRA = ('Not visible', '(tentative)', '{count} minute', '{count} minutes',
          '{count} second', '{count} seconds', '{count} hour', '{count} hours',
          '{count} day', '{count} days')
+DAILY_STATUS = ('\n\n⚡ <b>Signals</b>\n'
+                '— Available today: {limit} signals\n'
+                '— Used: {used}\n— Left: {left}')
 SOURCES = (INTRO, TEST_INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
-           'Remaining Signals: {left}', 'New Analysis')
+           DAILY_STATUS, 'Remaining Signals: {left}', 'New Analysis')
 BACK = [[('🔙 Back', 'cb:home:back', 'success')]]
+VERIFIED_BACK = [[('🔙 Back', 'cb:home:access', 'success')]]
 UPLOAD = [[('🎯 Test Signals', 'cb:chart:upload', 'primary')], *BACK]
 NEW_ANALYSIS = [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]
 ACCESS = [[('💎 Get Bot Access', 'cb:home:access', 'success')], *BACK]
 _inflight = set()
+
+
+async def usage_text(tg_id):
+    """Use the same persisted totals and tier as the main menu."""
+    import db
+    user = await db.get_user(tg_id)
+    if not user or not user['verified']:
+        return ''
+    limit = config.daily_limit(user['is_premium'])
+    used, left = await db.signal_state(tg_id, limit)
+    language = await localization.language_for(tg_id)
+    return localization.translate_parts(DAILY_STATUS, language).format(
+        limit=limit, used=used, left=left)
 
 
 class Chart(StatesGroup):
@@ -72,19 +90,26 @@ async def open_screen(cb, bot, state, render, *, upload=False):
     await cb.answer()
     await state.clear()
     verified, left = await trial.status(db.pool, cb.from_user.id)
+    back = VERIFIED_BACK if verified else BACK
+    usage = await usage_text(cb.from_user.id) if verified else ''
+    if verified and not left:
+        await render(bot, cb.from_user.id, None, MESSAGES['limit'] + usage, back)
+        return
     if not verified and not left:
         await render(bot, cb.from_user.id, None, EXHAUSTED, ACCESS)
         return
     if not upload:
         intro = TEST_INTRO if os.getenv('CHART_UI_TEST_COPY', '').strip() == '1' else INTRO
-        await render(bot, cb.from_user.id, None, VERIFIED if verified else intro.format(left=left), UPLOAD)
+        await render(bot, cb.from_user.id, None,
+                     VERIFIED + usage if verified else intro.format(left=left),
+                     UPLOAD[:1] + back)
         return
     if not api.configured():
-        await render(bot, cb.from_user.id, None, MESSAGES['configuration'], BACK)
+        await render(bot, cb.from_user.id, None, MESSAGES['configuration'], back)
         return
     await state.set_state(Chart.waiting_image.state)
-    await state.update_data(chart_session=secrets.token_hex(12))
-    await render(bot, cb.from_user.id, None, PROMPT, BACK)
+    await state.update_data(chart_session=secrets.token_hex(12), chart_verified=verified)
+    await render(bot, cb.from_user.id, None, PROMPT + usage, back)
 
 
 def timer_text(timeframe, language):
@@ -143,11 +168,15 @@ async def receive(m, bot, state, render):
     _inflight.add(tg_id)  # Publish before any await: one paid request per user.
     session = None
     token = None
+    consumed = delivery_attempted = False
+    back = BACK
     async def active():
         return (await state.get_state() == Chart.waiting_image.state and
                 (await state.get_data()).get('chart_session') == session)
     try:
         session = (await state.get_data()).get('chart_session')
+        if (await state.get_data()).get('chart_verified'):
+            back = VERIFIED_BACK
         if not session:
             return
         blocked, token = await trial.reserve(db.pool, tg_id, m.message_id)
@@ -155,6 +184,9 @@ async def receive(m, bot, state, render):
             if blocked == 'trial':
                 await state.clear()
                 await render(bot, tg_id, None, EXHAUSTED, ACCESS)
+            elif blocked == 'limit':
+                await state.clear()
+                await render(bot, tg_id, None, MESSAGES['limit'] + await usage_text(tg_id), VERIFIED_BACK)
             else:
                 await m.answer(MESSAGES[blocked])
             return
@@ -173,19 +205,29 @@ async def receive(m, bot, state, render):
             return
         if not await active():
             return
-        await render(bot, tg_id, None, MESSAGES['working'], BACK)
+        await render(bot, tg_id, None, MESSAGES['working'], back)
         result = await api.analyse(data, language, m.caption or '')
         if await active():
             # Validate/render before consuming a slot: malformed provider data
             # must never be coerced into a direction or charged as a signal.
             text = result_text(result, language)
             if not await trial.consume(db.pool, token):
+                verified, left = await trial.status(db.pool, tg_id)
+                if verified and not left:
+                    await state.clear()
+                    await render(bot, tg_id, None, MESSAGES['limit'] + await usage_text(tg_id), VERIFIED_BACK)
+                    return
                 raise api.AnalysisError('service')
+            consumed = True
+            usage = await usage_text(tg_id)
+            if usage:
+                text += usage
+                back = VERIFIED_BACK
             if not await active():
-                await trial.release(db.pool, token, delivery_rejected=True)
                 return
             try:
-                await render(bot, tg_id, None, text, NEW_ANALYSIS,
+                delivery_attempted = True
+                await render(bot, tg_id, None, text, NEW_ANALYSIS[:1] + back,
                              reply_to_message_id=m.message_id, raise_on_error=True)
             except (TelegramBadRequest, TelegramForbiddenError):
                 # Telegram explicitly rejected the send, so no signal was delivered.
@@ -195,15 +237,18 @@ async def receive(m, bot, state, render):
         code = str(exc)
         logging.warning('Chart analysis failed: code=%s detail=%s', code, exc.detail)
         if session and await active():
-            await render(bot, tg_id, None, MESSAGES.get(code, MESSAGES['service']), NEW_ANALYSIS)
+            await render(bot, tg_id, None, MESSAGES.get(code, MESSAGES['service']), NEW_ANALYSIS[:1] + back)
     except Exception as exc:
         # Avoid logging image content, user captions, credentials or Telegram URLs.
         logging.warning('Chart request failed: type=%s', type(exc).__name__)
         if session and await active():
-            await render(bot, tg_id, None, MESSAGES['service'], BACK)
+            await render(bot, tg_id, None, MESSAGES['service'], back)
     finally:
         try:
-            await trial.release(db.pool, token)  # Releases pending only; used slots stay used.
+            if consumed and not delivery_attempted:
+                await trial.release(db.pool, token, delivery_rejected=True)
+            else:
+                await trial.release(db.pool, token)  # Keep successful/uncertain sends counted.
         finally:
             _inflight.discard(tg_id)
 

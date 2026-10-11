@@ -61,6 +61,11 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         # Local timezone must not shift the UTC quota boundary.
         local = now.astimezone(timezone(timedelta(hours=-7)))
         self.assertEqual(api.reservation_refusal([row(0, api.GLOBAL_LIMIT)], 11, local), 'limit')
+        # A verified user can request their full daily signal allowance, while
+        # trial attempts, the global cap, and the cooldown remain enforced.
+        self.assertIsNone(api.reservation_refusal([row(11, 29)], 11, now, verified=True))
+        self.assertEqual(api.reservation_refusal([row(0, api.GLOBAL_LIMIT)], 11, now, verified=True), 'limit')
+        self.assertEqual(api.reservation_refusal([row(11, 29, ago=10)], 11, now, verified=True), 'cooldown')
 
     async def test_request_image_language_schema_and_no_identity(self):
         seen = []
@@ -414,7 +419,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Remaining Signals:</b> 1', self.render.await_args.args[3])
         self.assertIn('Accuracy:</b> Not yet verified', self.render.await_args.args[3])
         self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
-        trial.status.return_value = (True, 0)
+        trial.status.return_value = (True, 30)
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertEqual(self.render.await_args.args[3], flow.VERIFIED)
 
@@ -432,7 +437,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.render.await_args.args[3], expected)
             self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
             self.assertIsNone(await self.state.get_state())
-            trial.status.return_value = (True, 0)
+            trial.status.return_value = (True, 30)
             await flow.open_screen(cb, self.bot, self.state, self.render)
             self.assertEqual(self.render.await_args.args[3], flow.VERIFIED)
             trial.status.return_value = (False, 0)
@@ -655,8 +660,11 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         mod = H._load_bot()
         bot = Bot('123456:TEST')
         state = mod.dp.fsm.get_context(bot=bot, chat_id=11, user_id=11)
-        trial.status.return_value = (True, 0)
-        trial.reserve.return_value = (None, None)
+        trial.status.return_value = (True, 30)
+        trial.reserve.return_value = (None, 'daily-token')
+        async def consume_daily(*args):
+            return (await fake_db.consume_signal(11, 30))[0]
+        trial.consume.side_effect = consume_daily
         old = types.SimpleNamespace(cancel=Mock())
         other = types.SimpleNamespace(cancel=Mock())
         mod._signal_tasks.update({11: old, 12: other})
@@ -669,7 +677,9 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
                  patch.object(mod, '_start_signal', AsyncMock()) as legacy:
                 await mod.dp.feed_update(bot, Update(update_id=2, callback_query=cb))
                 answer.assert_awaited_once()
-                self.assertEqual(self.render.await_args.args[3], flow.PROMPT)
+                self.assertTrue(self.render.await_args.args[3].startswith(flow.PROMPT))
+                self.assertIn('Used: 0', self.render.await_args.args[3])
+                self.assertIn('Left: 30', self.render.await_args.args[3])
                 self.assertEqual(await state.get_state(), flow.Chart.waiting_image.state)
                 self.assertTrue((await state.get_data())['chart_session'])
                 old.cancel.assert_called_once()
@@ -682,10 +692,45 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
                 api.analyse.assert_awaited_once_with(IMAGE, 'en', '')
                 api.reserve.assert_awaited_once_with(None, 11)
                 self.assertIn('AI Trading Signal Result', self.render.await_args.args[3])
-                self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS)
+                self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS[:1] + flow.VERIFIED_BACK)
+                self.assertIn('Used: 1', self.render.await_args.args[3])
+                self.assertIn('Left: 29', self.render.await_args.args[3])
                 self.assertEqual(self.render.await_args.kwargs['reply_to_message_id'], 5)
+                # Returning from the chart shows those same persisted counters.
+                await mod._show_menu(bot, 11)
+                self.assertIn('Used: 1', self.render.await_args.args[3])
+                self.assertIn('Left: 29', self.render.await_args.args[3])
         finally:
             await bot.session.close()
+
+    async def test_verified_daily_exhaustion_blocks_button_and_stale_upload(self):
+        import db
+        db._users[11] = dict(db._fresh_row(), verified=True,
+            signals_used_today=30, last_reset_date=db._today[0])
+        trial.status.return_value = (True, 0)
+        await self.open()
+        self.assertIsNone(await self.state.get_state())
+        self.assertIn('Used: 30', self.render.await_args.args[3])
+        self.assertIn('Left: 0', self.render.await_args.args[3])
+        self.assertEqual(self.render.await_args.args[4], flow.VERIFIED_BACK)
+        await self.state.set_state(flow.Chart.waiting_image.state)
+        await self.state.update_data(chart_session='old')
+        trial.reserve.return_value = ('limit', None)
+        await flow.receive(message(), self.bot, self.state, self.render)
+        api.analyse.assert_not_awaited()
+        self.assertIsNone(await self.state.get_state())
+
+    async def test_quota_taken_by_other_flow_while_analysing_cannot_send(self):
+        trial.consume.return_value = False
+        trial.status.return_value = (True, 0)
+        await flow.receive(message(), self.bot, self.state, self.render)
+        self.assertIn(flow.MESSAGES['limit'], self.render.await_args.args[3])
+        self.assertNotIn('BUY', self.render.await_args.args[3])
+
+    async def test_failure_before_delivery_refunds_committed_signal(self):
+        with patch.object(flow, 'usage_text', AsyncMock(side_effect=RuntimeError('database'))):
+            await flow.receive(message(), self.bot, self.state, self.render)
+        trial.release.assert_awaited_with(None, 'trial-token', delivery_rejected=True)
 
 
 if __name__ == '__main__':

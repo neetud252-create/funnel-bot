@@ -1107,7 +1107,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         real_send = fb.send_message
         async def send(chat_id, text, **kwargs):
             check("chart callback acknowledged before sending", bool(cb.answers))
-            if fail_on_send and text == bot_mod.chart_signals.PROMPT:
+            if fail_on_send and text.startswith(bot_mod.chart_signals.PROMPT):
                 raise _Boom("Bad Request: ENTITY_TEXT_INVALID")
             return await real_send(chat_id, text, **kwargs)
         fb.send_message = send
@@ -1119,7 +1119,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         fake_db.pool = None
         raised = None
         try:
-            with patch.object(bot_mod.chart_signals.trial, 'status', AsyncMock(return_value=(True, 0))), \
+            with patch.object(bot_mod.chart_signals.trial, 'status', AsyncMock(return_value=(True, 30))), \
                  patch.object(bot_mod.chart_signals.api, 'configured', return_value=True):
                 await bot_mod.menu_signal(cb, fb, state)
         except Exception as exc:                        # noqa: BLE001 - recorded
@@ -1152,7 +1152,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("the handler does not raise on the happy path", raised is None,
           repr(raised))
     check("Get a signal asks for a chart screenshot",
-          sends and sends[-1]["body"] == bot_mod.chart_signals.PROMPT,
+          sends and sends[-1]["body"].startswith(bot_mod.chart_signals.PROMPT),
           str([c["kind"] for c in fb.calls]))
     check("the old menu is deleted as part of the transition",
           4500 in deletes, str(deletes))
