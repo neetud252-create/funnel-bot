@@ -21,7 +21,6 @@ MODEL = 'gemini-3.8-flash'
 API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent'
 DAILY_LIMIT = max(1, int(os.getenv('CHART_DAILY_LIMIT', '5')))
 GLOBAL_LIMIT = max(1, int(os.getenv('CHART_GLOBAL_DAILY_LIMIT', '200')))
-COOLDOWN_SECONDS = 30
 MAX_CONCURRENT = 4
 # Allow room for thinking and final JSON; still reject truncated responses.
 MAX_OUTPUT_TOKENS = 8192
@@ -434,14 +433,12 @@ def reservation_refusal(rows, tg_id, now, *, verified=False, retry=False):
     usage = {row['tg_id']: row for row in rows}
     for key, limit in ((tg_id, DAILY_LIMIT), (0, GLOBAL_LIMIT)):
         # Verified users are capped by delivered signals, not the trial's
-        # five API attempts. The global provider cap and cooldown still apply.
+        # five API attempts. The global provider cap still applies.
         if key == tg_id and verified:
             continue
         row = usage.get(key)
         if row and row['usage_day'] == day and row['requests'] >= limit:
             return 'limit'
-    user = usage.get(tg_id)
-    # An internal retry belongs to the same upload, but still spends API budget.
-    if not retry and user and (now - user['last_request']).total_seconds() < COOLDOWN_SECONDS:
-        return 'cooldown'
+    # Active uploads are guarded by the handler and durable trial slots.
+    # A completed or failed request must not impose an extra waiting period.
     return None

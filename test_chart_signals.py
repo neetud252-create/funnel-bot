@@ -44,7 +44,7 @@ def message(uid=11, **updates):
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
-    def test_durable_budget_decisions_utc_rollover_and_cooldown(self):
+    def test_durable_budgets_allow_immediate_next_request(self):
         now = datetime(2026, 10, 9, tzinfo=timezone.utc)
         def row(uid, count, day=None, ago=60):
             return dict(tg_id=uid, requests=count, usage_day=day or now.date(),
@@ -53,7 +53,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(api.reservation_refusal([row(11, api.DAILY_LIMIT)], 11, now), 'limit')
         self.assertEqual(api.reservation_refusal([row(0, api.GLOBAL_LIMIT)], 11, now), 'limit')
         self.assertIsNone(api.reservation_refusal([row(11, api.DAILY_LIMIT)], 12, now))
-        self.assertEqual(api.reservation_refusal([row(11, 1, ago=29)], 11, now), 'cooldown')
+        self.assertIsNone(api.reservation_refusal([row(11, 1, ago=0)], 11, now))
         self.assertIsNone(api.reservation_refusal([row(11, 1, ago=30)], 11, now))
         yesterday = (now - timedelta(days=1)).date()
         rows = [row(11, api.DAILY_LIMIT, yesterday), row(0, api.GLOBAL_LIMIT, yesterday)]
@@ -62,10 +62,10 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         local = now.astimezone(timezone(timedelta(hours=-7)))
         self.assertEqual(api.reservation_refusal([row(0, api.GLOBAL_LIMIT)], 11, local), 'limit')
         # A verified user can request their full daily signal allowance, while
-        # trial attempts, the global cap, and the cooldown remain enforced.
+        # trial attempts and the global cap remain enforced.
         self.assertIsNone(api.reservation_refusal([row(11, 29)], 11, now, verified=True))
         self.assertEqual(api.reservation_refusal([row(0, api.GLOBAL_LIMIT)], 11, now, verified=True), 'limit')
-        self.assertEqual(api.reservation_refusal([row(11, 29, ago=10)], 11, now, verified=True), 'cooldown')
+        self.assertIsNone(api.reservation_refusal([row(11, 29, ago=0)], 11, now, verified=True))
 
     async def test_request_image_language_schema_and_no_identity(self):
         seen = []
@@ -214,10 +214,10 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                     await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler), before_retry=budget)
             self.assertEqual(len(calls), 1)
 
-    def test_retry_bypasses_only_cooldown_not_durable_budgets(self):
+    def test_immediate_requests_and_retries_still_obey_budgets(self):
         now = datetime.now(timezone.utc)
         row = dict(tg_id=11, usage_day=now.date(), requests=1, last_request=now)
-        self.assertEqual(api.reservation_refusal([row], 11, now), 'cooldown')
+        self.assertIsNone(api.reservation_refusal([row], 11, now))
         self.assertIsNone(api.reservation_refusal([row], 11, now, retry=True))
         self.assertEqual(api.reservation_refusal([dict(row, requests=api.DAILY_LIMIT)], 11, now, retry=True), 'limit')
         self.assertEqual(api.reservation_refusal([dict(row, tg_id=0, requests=api.GLOBAL_LIMIT)], 11, now, retry=True, verified=True), 'limit')
