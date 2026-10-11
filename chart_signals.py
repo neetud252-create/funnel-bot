@@ -165,7 +165,7 @@ async def receive(m, bot, state, render):
     if not api.configured():
         await m.answer(MESSAGES['configuration'])
         return
-    _inflight.add(tg_id)  # Publish before any await: one paid request per user.
+    _inflight.add(tg_id)  # Publish before any await: one active analysis per user.
     session = None
     token = None
     consumed = delivery_attempted = False
@@ -173,6 +173,14 @@ async def receive(m, bot, state, render):
     async def active():
         return (await state.get_state() == Chart.waiting_image.state and
                 (await state.get_data()).get('chart_session') == session)
+    async def before_retry():
+        if not await active():
+            raise api.AnalysisError('cancelled')
+        blocked = await api.reserve(db.pool, tg_id, retry=True)
+        if blocked:
+            raise api.AnalysisError(blocked)
+        if not await active():
+            raise api.AnalysisError('cancelled')
     try:
         session = (await state.get_data()).get('chart_session')
         if (await state.get_data()).get('chart_verified'):
@@ -206,7 +214,7 @@ async def receive(m, bot, state, render):
         if not await active():
             return
         await render(bot, tg_id, None, MESSAGES['working'], back)
-        result = await api.analyse(data, language, m.caption or '')
+        result = await api.analyse(data, language, m.caption or '', before_retry=before_retry)
         if await active():
             # Validate/render before consuming a slot: malformed provider data
             # must never be coerced into a direction or charged as a signal.

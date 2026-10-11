@@ -5,7 +5,7 @@ import os
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 os.environ.setdefault('DATABASE_URL', 'postgresql://unused')
 import httpx
@@ -97,9 +97,9 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('test-key', str(body))
         self.assertNotIn('chat_id', str(body))
 
-    async def test_errors_never_turn_into_random_signals_or_retries(self):
+    async def test_permanent_errors_never_turn_into_random_signals_or_retries(self):
         for status, code in ((400, 'configuration'), (401, 'configuration'), (402, 'configuration'), (403, 'configuration'),
-                             (404, 'configuration'), (429, 'busy'), (500, 'service')):
+                             (404, 'configuration'), (429, 'busy')):
             calls = []
             def handler(request):
                 calls.append(request)
@@ -110,7 +110,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(calls), 1)
         def timeout(request):
             raise httpx.ReadTimeout('sensitive raw detail')
-        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'), patch.object(api, 'retry_delay', return_value=0):
             with self.assertRaisesRegex(api.AnalysisError, '^service$'):
                 await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(timeout))
         with patch.dict(os.environ, GEMINI_API_KEY='', DEEPSEEK_API_KEY='must-not-fall-back', GOOGLE_API_KEY='must-not-fall-back', OPENAI_API_KEY='must-not-fall-back'):
@@ -137,6 +137,90 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(api.HTTP_TIMEOUT_SECONDS, api.TOTAL_TIMEOUT_SECONDS)
         # Image download plus provider budget stays within the existing trial lease.
         self.assertLess(15 + api.TOTAL_TIMEOUT_SECONDS, 180)
+
+    async def test_transient_failures_recover_on_same_model_and_reserve_each_retry(self):
+        for first in (500, 502, 503, 504, 'timeout', 'connection'):
+            with self.subTest(first=first):
+                calls, reservations = [], []
+                async def budget():
+                    reservations.append(len(calls))
+                def handler(request):
+                    calls.append(request)
+                    if len(calls) == 1:
+                        if first == 'timeout':
+                            raise httpx.ReadTimeout('PRIVATE')
+                        if first == 'connection':
+                            raise httpx.ConnectError('PRIVATE')
+                        return httpx.Response(first, text='PRIVATE')
+                    if len(calls) == 2:
+                        return httpx.Response(503, text='PRIVATE')
+                    return httpx.Response(200, json=response())
+                with patch.dict(os.environ, GEMINI_API_KEY='test-key'), patch.object(api, 'retry_delay', return_value=0):
+                    result = await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler), before_retry=budget)
+                self.assertEqual(result, VALID)
+                self.assertEqual(reservations, [1, 2])
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(len({str(c.url) for c in calls}), 1)
+                self.assertEqual(len({c.content for c in calls}), 1)
+
+    async def test_outage_is_bounded_and_does_not_log_private_values(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(503, text='PRIVATE_BODY', headers={'secret': 'PRIVATE_HEADER'})
+        with patch.dict(os.environ, GEMINI_API_KEY='PRIVATE_KEY'), patch.object(api, 'retry_delay', return_value=0), self.assertLogs(level='WARNING') as logs:
+            with self.assertRaisesRegex(api.AnalysisError, '^service$') as error:
+                await api.analyse(IMAGE, 'en', 'PRIVATE_CAPTION', transport=httpx.MockTransport(handler))
+        self.assertEqual(len(calls), api.MAX_REQUEST_ATTEMPTS)
+        self.assertEqual(error.exception.detail, 'http_status')
+        self.assertIn('status=503', '\n'.join(logs.output))
+        self.assertNotIn('PRIVATE', '\n'.join(logs.output))
+
+    async def test_exhausted_retry_budget_prevents_next_http_call(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(503)
+        budget = AsyncMock(side_effect=api.AnalysisError('limit'))
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'), patch.object(api, 'retry_delay', return_value=0):
+            with self.assertRaisesRegex(api.AnalysisError, '^limit$'):
+                await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler), before_retry=budget)
+        self.assertEqual(len(calls), 1)
+        budget.assert_awaited_once()
+
+    async def test_retry_after_beyond_deadline_does_not_retry_early(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(503, headers={'Retry-After': '120'})
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'):
+            with self.assertRaisesRegex(api.AnalysisError, '^service$'):
+                await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler))
+        self.assertEqual(len(calls), 1)
+        for value in ('invalid', 'NaN', 'Infinity', '-1'):
+            self.assertGreaterEqual(api.retry_delay(1, httpx.Response(503, headers={'Retry-After': value})), 2)
+        self.assertEqual(api.retry_delay(1, httpx.Response(503, headers={'Retry-After': '10'})), 10)
+
+    async def test_deadline_includes_backoff_and_budget_callback(self):
+        for during_budget in (False, True):
+            calls = []
+            def handler(request):
+                calls.append(request)
+                return httpx.Response(503)
+            async def budget():
+                await asyncio.sleep(1)
+            with patch.dict(os.environ, GEMINI_API_KEY='test-key'), patch.object(api, 'TOTAL_TIMEOUT_SECONDS', 0.02), patch.object(api, 'retry_delay', return_value=0 if during_budget else 0.015):
+                with self.assertRaisesRegex(api.AnalysisError, '^service$'):
+                    await api.analyse(IMAGE, 'en', transport=httpx.MockTransport(handler), before_retry=budget)
+            self.assertEqual(len(calls), 1)
+
+    def test_retry_bypasses_only_cooldown_not_durable_budgets(self):
+        now = datetime.now(timezone.utc)
+        row = dict(tg_id=11, usage_day=now.date(), requests=1, last_request=now)
+        self.assertEqual(api.reservation_refusal([row], 11, now), 'cooldown')
+        self.assertIsNone(api.reservation_refusal([row], 11, now, retry=True))
+        self.assertEqual(api.reservation_refusal([dict(row, requests=api.DAILY_LIMIT)], 11, now, retry=True), 'limit')
+        self.assertEqual(api.reservation_refusal([dict(row, tg_id=0, requests=api.GLOBAL_LIMIT)], 11, now, retry=True, verified=True), 'limit')
 
     async def test_exhausted_budget_still_rejects_partial_results_without_retry(self):
         calls = []
@@ -403,12 +487,47 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_button_upload_and_result(self):
         self.assertEqual(await self.state.get_state(), flow.Chart.waiting_image.state)
         await flow.receive(message(), self.bot, self.state, self.render)
-        api.analyse.assert_awaited_once_with(IMAGE, 'en', '')
+        api.analyse.assert_awaited_once_with(IMAGE, 'en', '', before_retry=ANY)
         api.reserve.assert_awaited_once()
         self.assertIn('BUY', self.render.await_args.args[3])
         self.assertEqual(self.render.await_args.kwargs['reply_to_message_id'], 5)
         trial.consume.assert_awaited_once_with(None, 'trial-token')
         self.assertFalse(flow._inflight)
+
+    async def test_recovered_request_delivers_and_consumes_exactly_one_signal(self):
+        async def recover(*args, before_retry):
+            await before_retry()
+            await before_retry()
+            return VALID
+        api.analyse.side_effect = recover
+        await flow.receive(message(), self.bot, self.state, self.render)
+        self.assertEqual(api.reserve.await_count, 3)
+        self.assertEqual([c.kwargs for c in api.reserve.await_args_list], [{}, {'retry': True}, {'retry': True}])
+        trial.consume.assert_awaited_once_with(None, 'trial-token')
+        self.assertEqual(len([c for c in self.render.await_args_list if c.kwargs.get('raise_on_error')]), 1)
+
+    async def test_cancel_during_retry_stops_provider_and_releases_slot(self):
+        async def cancelled(*args, before_retry):
+            await self.state.clear()
+            await before_retry()
+            self.fail('Cancelled session must not request again')
+        api.analyse.side_effect = cancelled
+        await flow.receive(message(), self.bot, self.state, self.render)
+        api.reserve.assert_awaited_once_with(None, 11)
+        trial.consume.assert_not_awaited()
+        trial.release.assert_awaited_once_with(None, 'trial-token')
+        self.assertFalse(flow._inflight)
+
+    async def test_retry_limit_releases_signal_without_delivery(self):
+        api.reserve.side_effect = [None, 'limit']
+        async def retry(*args, before_retry):
+            await before_retry()
+            self.fail('Exhausted API budget must stop the retry')
+        api.analyse.side_effect = retry
+        await flow.receive(message(), self.bot, self.state, self.render)
+        trial.consume.assert_not_awaited()
+        trial.release.assert_awaited_once_with(None, 'trial-token')
+        self.assertEqual(self.render.await_args.args[3], flow.MESSAGES['limit'])
 
     async def test_intro_shows_lifetime_balance_and_no_upload_state(self):
         cb = types.SimpleNamespace(message=types.SimpleNamespace(chat=types.SimpleNamespace(type='private')),
@@ -558,7 +677,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_and_duplicate_upload(self):
         started, finish = asyncio.Event(), asyncio.Event()
-        async def analyse(*args):
+        async def analyse(*args, **kwargs):
             started.set()
             await finish.wait()
             return VALID
@@ -577,7 +696,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_session_cannot_receive_old_result(self):
         started, finish = asyncio.Event(), asyncio.Event()
-        async def analyse(*args):
+        async def analyse(*args, **kwargs):
             started.set()
             await finish.wait()
             return VALID
@@ -611,7 +730,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         second_state = FSMContext(MemoryStorage(), StorageKey(bot_id=1, chat_id=12, user_id=12))
         await second_state.set_state(flow.Chart.waiting_image.state)
         await second_state.update_data(chart_session='other-user')
-        async def analyse(image, language, context):
+        async def analyse(image, language, context, **kwargs):
             await asyncio.sleep(0)
             return dict(VALID, direction='SELL' if context == 'second' else 'BUY')
         api.analyse.side_effect = analyse
@@ -689,7 +808,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
                 api.analyse.assert_not_awaited()
                 trial.reserve.assert_not_awaited()
                 await flow.receive(message(), self.bot, state, self.render)
-                api.analyse.assert_awaited_once_with(IMAGE, 'en', '')
+                api.analyse.assert_awaited_once_with(IMAGE, 'en', '', before_retry=ANY)
                 api.reserve.assert_awaited_once_with(None, 11)
                 self.assertIn('AI Trading Signal Result', self.render.await_args.args[3])
                 self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS[:1] + flow.VERIFIED_BACK)
