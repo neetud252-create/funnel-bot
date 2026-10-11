@@ -123,9 +123,15 @@ async def main():
                 await c.execute("INSERT INTO chart_analysis_usage VALUES (11,CURRENT_DATE,29,clock_timestamp()-INTERVAL '1 minute'),(0,CURRENT_DATE,29,clock_timestamp()-INTERVAL '1 minute')")
             assert await api.reserve(pool, 11) is None
             assert await api.reserve(pool, 11) == 'cooldown'
+            assert await api.reserve(pool, 11, retry=True) is None
+            async with pool.acquire() as c:
+                assert await c.fetchval('SELECT requests FROM chart_analysis_usage WHERE tg_id=0') == 31
+                assert await c.fetchval('SELECT requests FROM chart_analysis_usage WHERE tg_id=11') == 31
+            assert await api.reserve(pool, 11) == 'cooldown'
             async with pool.acquire() as c:
                 await c.execute('UPDATE chart_analysis_usage SET requests=$1 WHERE tg_id=0', api.GLOBAL_LIMIT)
             assert await api.reserve(pool, 11) == 'limit'
+            assert await api.reserve(pool, 11, retry=True) == 'limit'
         print('PASS: daily 30/31, counters, restart, rollover, refunds, concurrent holds, shared manual quota, replay, expiry, Premium, verification, provider gates')
     finally:
         if pool:

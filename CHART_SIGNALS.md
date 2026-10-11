@@ -52,8 +52,8 @@ cannot establish billing status from the key. Do not enable Cloud Billing or
 assume an existing key belongs to a free project. Check its active quotas in
 AI Studio. Google's shared project quotas also cover other apps using that key;
 the bot's 200/day local cap is not a promise of 200 free Gemini requests. A 429
-returns the existing localized busy message with New Analysis, without retries,
-spend increases or a paid fallback. Google may have different daily reset times
+returns the existing localized busy message with New Analysis, without retrying
+quota errors or switching to a paid fallback. Google may have different daily reset times
 from the bot's local UTC counters.
 
 Unverified users have **two lifetime free BUY/SELL signals**. The database's
@@ -83,8 +83,13 @@ Defaults: `CHART_DAILY_LIMIT=5` requests per unverified user, `CHART_GLOBAL_DAIL
 across all users, reset at 00:00 UTC. These budgets are separate from paid-tier
 signal counts and persist in Postgres `chart_analysis_usage`. Counts are reserved
 before an API attempt, including failed/cancelled attempts that might be billed.
-No automatic retries. A 30-second cooldown and four concurrent requests per
-process limit duplicate submissions. These are separate abuse/spending controls:
+Transient HTTP 500/502/503/504 and transport failures retry at most twice with
+exponential backoff and jitter (three attempts total), using the same Gemini model.
+Every retry reserves another durable API-budget unit before the request, bypassing
+only the cooldown for that same upload. The global cap and trial request cap still
+apply. HTTP 429, configuration errors, blocked/invalid model output and unreadable
+images do not automatically retry. A 30-second cooldown and four concurrent
+analyses per process limit duplicate submissions. These are separate abuse/spending controls:
 Errors do not use lifetime signal slots, but API attempts use daily budgets.
 Verified users use the delivered-signal allowance instead of the five-request
 trial cap, so failed analyses do not consume their daily signal allowance.
@@ -242,7 +247,9 @@ Rejections log a fixed reason code (for example `max_output_tokens`, `json`,
 captions or credentials. A provider/format error now uses the existing service
 error wording instead of blaming screenshot clarity, and offers New Analysis.
 Neither an invalid response nor a failed API call consumes a lifetime signal.
-The existing daily request budgets and no-retry policy remain unchanged.
+The existing daily request budgets remain enforced for every API attempt.
+Temporary transport/provider errors use the bounded retry policy above; invalid
+model responses still fail validation without retry or an invented direction.
 More reliable parsing does not establish prediction accuracy.
 
 On 10 October 2026 at 15:38 IST, the previous DeepSeek deployment logged
@@ -251,15 +258,16 @@ combined reasoning/final-answer allowance, not rejected the image as unreadable.
 The Gemini request permits 8,192 output tokens with low thinking level and the
 same strategy/validation. The HTTP timeout is 80 seconds with a 90-second
 overall provider deadline, still below the existing three-minute trial lease.
-This does not increase the user's daily request count, add automatic retries,
-or accept partial JSON. Responses remain bounded; exhaustion is still an error.
+All attempts, backoff and retry-budget checks share that 90-second deadline.
+Retries count toward the existing API budget and never accept partial JSON. Responses remain bounded; exhaustion is still an error.
 
-`python test_chart_live.py path/to/chart.png` is an optional **single-request**
+`python test_chart_live.py path/to/chart.png` is an optional **bounded-analysis**
 diagnostic using `GEMINI_API_KEY` and the same HTTP path as production. First
 confirm billing is disabled. It sends that image to Google, so use only an
 approved chart-only sample with all personal/account details removed. It prints
 safe response metadata and validation results; it does not touch Telegram or
-the database. With no argument it skips without making a request.
+the database. It can make up to three same-model calls for transient failures,
+without production database accounting, so do not use it for user traffic. With no argument it skips without making a request.
 
 Checks: `python test_chart_signals.py`, `python test_home_menu.py`,
 `python test_localization.py`, `python test_uid_singleflight.py`.
@@ -277,3 +285,20 @@ API references:
 - https://ai.google.dev/gemini-api/docs/pricing
 - https://ai.google.dev/gemini-api/docs/rate-limits
 - https://ai.google.dev/gemini-api/terms
+
+## 11 October 2026: recover transient Gemini outages
+
+Production returned HTTP 503 twice at 12:49 UTC, and the old single-attempt
+transport immediately displayed the generic analysis error. The transport now
+retries transient failures with 2s/4s exponential delays plus up to 1s jitter,
+honors longer Retry-After values within the shared 90s deadline, and makes at most
+three attempts. No provider/model or billing change is involved. Retry attempts
+are charged only against the existing provider-request budgets; only the single
+delivered result consumes a signal. Back, /start or a replacement upload session
+stops further retries. A continuing outage still returns an error and releases
+the pending signal slot; this cannot guarantee provider availability.
+
+Logs record attempt number, HTTP status or a fixed transport/timeout reason,
+without provider bodies, credentials, captions or images. A successful later
+attempt logs provider recovery. Validation still rejects contradictory, truncated
+and unsupported results.

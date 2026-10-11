@@ -1,4 +1,4 @@
-"""Opt-in Gemini diagnostic: one request, no bot/database changes.
+"""Opt-in Gemini diagnostic: one bounded analysis, no bot/database changes.
 
 Run: python test_chart_live.py path/to/chart.png
 Requires GEMINI_API_KEY from a billing-disabled project for free-only use.
@@ -44,7 +44,7 @@ async def main(path):
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
-        print('SKIP: pass an approved chart-only image path to make one Gemini request')
+        print('SKIP: pass an approved chart-only image path to run one Gemini analysis')
     else:
         try:
             asyncio.run(main(sys.argv[1]))

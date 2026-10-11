@@ -4,9 +4,12 @@ import base64
 import io
 import json
 import logging
+import math
 import os
 import re
-from datetime import timezone
+import secrets
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 import chart_strategy
@@ -22,6 +25,8 @@ MAX_CONCURRENT = 4
 MAX_OUTPUT_TOKENS = 8192
 HTTP_TIMEOUT_SECONDS = 80
 TOTAL_TIMEOUT_SECONDS = 90  # Below the existing three-minute trial reservation.
+MAX_REQUEST_ATTEMPTS = 3
+RETRYABLE_HTTP_STATUS = frozenset((500, 502, 503, 504))
 
 LANGUAGES = dict(zip(
     ('en', 'ru', 'uk', 'hi', 'bn', 'ur', 'vi', 'id', 'tr', 'es', 'ar', 'pt'),
@@ -55,6 +60,7 @@ REJECTION_REASONS = frozenset((
     'candidate_count', 'finish_reason', 'message_content', 'json', 'fields',
     'direction', 'chart_type', 'field_text', 'invalidation', 'setup', 'checks',
     'evidence', 'unreadable', 'contradictory_direction', 'insufficient_evidence',
+    'http_status', 'transport', 'timeout',
 ))
 
 
@@ -234,29 +240,77 @@ def parse_response(payload):
         raise AnalysisError('response', detail) from exc
 
 
-async def request_response(data, language, context='', *, transport=None):
-    """One Gemini request. Free billing must be enforced by the Google project."""
+def retry_delay(attempt, response=None):
+    """Bounded exponential backoff with jitter; respect a longer Retry-After."""
+    delay = 2 ** attempt + secrets.randbelow(1000) / 1000
+    if response is not None:
+        value = response.headers.get('retry-after', '')
+        try:
+            requested = float(value)
+        except ValueError:
+            try:
+                requested = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                requested = 0
+        if math.isfinite(requested):
+            delay = max(delay, requested)
+    return delay
+
+
+async def request_response(data, language, context='', *, transport=None, before_retry=None):
+    """Recover transient Gemini failures within one deadline, using the same model.
+
+    Production supplies before_retry to reserve each additional API attempt and
+    stop abandoned sessions. Free billing remains enforced by the Google project.
+    """
     key = os.getenv('GEMINI_API_KEY', '').strip()
     if not key:
         raise AnalysisError('configuration')
     body = request_body(data, language, context)
     try:
-        # No retries, model switching, tools or paid-provider fallback.
-        async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
+        async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS) as deadline:
             async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS, transport=transport) as client:
-                response = await client.post(API_URL,
-                    headers={'x-goog-api-key': key}, json=body)
-        if response.status_code != 200:
-            code = ('configuration' if response.status_code in (400, 401, 402, 403, 404) else
-                    'busy' if response.status_code == 429 else 'service')
-            raise AnalysisError(code)
-        return response.json()
-    except (httpx.HTTPError, TimeoutError, ValueError) as exc:
-        raise AnalysisError('service') from exc
+                for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
+                    response = None
+                    try:
+                        response = await client.post(API_URL,
+                            headers={'x-goog-api-key': key}, json=body)
+                    except httpx.TransportError as exc:
+                        detail = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'transport'
+                        failure = AnalysisError('service', detail)
+                        logging.warning('Chart provider failed: provider=Gemini attempt=%s detail=%s', attempt, detail)
+                    else:
+                        status = response.status_code
+                        if status == 200:
+                            payload = response.json()
+                            if attempt > 1:
+                                logging.info('Chart provider recovered: provider=Gemini attempt=%s', attempt)
+                            return payload
+                        code = ('configuration' if status in (400, 401, 402, 403, 404) else
+                                'busy' if status == 429 else 'service')
+                        failure = AnalysisError(code, 'http_status')
+                        # Log only status/attempt, never response bodies or headers.
+                        logging.warning('Chart provider failed: provider=Gemini attempt=%s status=%s', attempt, status)
+                        if status not in RETRYABLE_HTTP_STATUS:
+                            raise failure
+                    if attempt == MAX_REQUEST_ATTEMPTS:
+                        raise failure
+                    delay = retry_delay(attempt, response)
+                    if delay >= deadline.when() - asyncio.get_running_loop().time():
+                        raise failure
+                    await asyncio.sleep(delay)
+                    if before_retry is not None:
+                        await before_retry()
+    except TimeoutError as exc:
+        raise AnalysisError('service', 'timeout') from exc
+    except httpx.HTTPError as exc:
+        raise AnalysisError('service', 'transport') from exc
+    except ValueError as exc:
+        raise AnalysisError('response', 'json') from exc
 
 
-async def analyse(data, language, context='', *, transport=None):
-    payload = await request_response(data, language, context, transport=transport)
+async def analyse(data, language, context='', *, transport=None, before_retry=None):
+    payload = await request_response(data, language, context, transport=transport, before_retry=before_retry)
     try:
         return parse_response(payload)
     except AnalysisError as exc:
@@ -280,7 +334,7 @@ CREATE TABLE IF NOT EXISTS chart_analysis_usage (
 """
 
 
-async def reserve(pool, tg_id):
+async def reserve(pool, tg_id, *, retry=False):
     if tg_id <= 0:
         return 'private'
     async with pool.acquire() as conn:
@@ -290,7 +344,7 @@ async def reserve(pool, tg_id):
             day = now.astimezone(timezone.utc).date()
             rows = await conn.fetch('SELECT * FROM chart_analysis_usage WHERE tg_id IN (0, $1)', tg_id)
             verified = bool(await conn.fetchval('SELECT verified FROM users WHERE tg_id=$1', tg_id))
-            blocked = reservation_refusal(rows, tg_id, now, verified=verified)
+            blocked = reservation_refusal(rows, tg_id, now, verified=verified, retry=retry)
             if blocked:
                 return blocked
             for key in (0, tg_id):
@@ -302,7 +356,7 @@ async def reserve(pool, tg_id):
     return None
 
 
-def reservation_refusal(rows, tg_id, now, *, verified=False):
+def reservation_refusal(rows, tg_id, now, *, verified=False, retry=False):
     day = now.astimezone(timezone.utc).date()
     usage = {row['tg_id']: row for row in rows}
     for key, limit in ((tg_id, DAILY_LIMIT), (0, GLOBAL_LIMIT)):
@@ -314,6 +368,7 @@ def reservation_refusal(rows, tg_id, now, *, verified=False):
         if row and row['usage_day'] == day and row['requests'] >= limit:
             return 'limit'
     user = usage.get(tg_id)
-    if user and (now - user['last_request']).total_seconds() < COOLDOWN_SECONDS:
+    # An internal retry belongs to the same upload, but still spends API budget.
+    if not retry and user and (now - user['last_request']).total_seconds() < COOLDOWN_SECONDS:
         return 'cooldown'
     return None
