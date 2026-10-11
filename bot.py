@@ -1757,6 +1757,9 @@ async def main():
     else:
         logging.info("ENABLE_AUTO_RETRY off - no background re-check; users "
                      "re-send their account ID after depositing to verify")
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        await chart_signals.api.close_provider_client()
 
 asyncio.run(main())

@@ -450,6 +450,45 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(flow.timer_text(value, 'en'), expected)
 
 
+class ConnectionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        await api.close_provider_client()
+
+    async def test_concurrent_uploads_share_connection_pool_not_request_data(self):
+        calls = []
+        async def handler(request):
+            body = json.loads(request.content)
+            context = body['contents'][0]['parts'][0]['text']
+            calls.append(context)
+            await asyncio.sleep(0)
+            return httpx.Response(200, json=response(dict(VALID, trend=context)))
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=80)
+        with patch.dict(os.environ, GEMINI_API_KEY='test-key'), patch.object(api.httpx, 'AsyncClient', return_value=client) as factory:
+            first, second = await asyncio.gather(api.analyse(IMAGE, 'en', 'first'),
+                                                 api.analyse(IMAGE, 'hi', 'second'))
+            await api.analyse(IMAGE, 'en', 'third')
+        self.assertTrue(first['trend'].endswith('first'))
+        self.assertTrue(second['trend'].endswith('second'))
+        self.assertEqual(len(calls), 3)
+        factory.assert_called_once()
+        self.assertFalse(client.is_closed)
+        await api.close_provider_client()
+        self.assertTrue(client.is_closed)
+        self.assertNotIn(asyncio.get_running_loop(), api._clients)
+
+    async def test_timing_logs_only_contain_safe_counts(self):
+        payload = response()
+        payload['usageMetadata'] = {'candidatesTokenCount': 420, 'thoughtsTokenCount': 200}
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+        with patch.dict(os.environ, GEMINI_API_KEY='PRIVATE_KEY'), self.assertLogs(level='INFO') as logs:
+            await api.analyse(IMAGE, 'en', 'PRIVATE_CAPTION', transport=transport)
+        text = '\n'.join(logs.output)
+        self.assertIn('elapsed_ms=', text)
+        self.assertIn('output_tokens=420 thinking_tokens=200', text)
+        self.assertNotIn('PRIVATE', text)
+        self.assertNotIn(VALID['trend'], text)
+
+
 class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         import test_signal_flow as H
