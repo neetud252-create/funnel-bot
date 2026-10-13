@@ -1,87 +1,87 @@
-"""Regression checks for the registration gift and later deposit gate."""
-
+"""The workbook is downloaded from the welcome menu, never auto-delivered."""
 import asyncio
-import os
-import sys
-import types
 from decimal import Decimal
-
-ROOT = os.path.dirname(os.path.abspath(__file__))
-os.chdir(ROOT)
-sys.path.insert(0, ROOT)
+import types
+from unittest.mock import AsyncMock, patch
 
 import test_signal_flow as H
 
 
 async def main():
     import config
-    fake_db = H._install_stub_modules()
-    bot_mod = H._load_bot()
-    import panelbot
-
+    import home_menu
+    db = H._install_stub_modules()
+    mod = H._load_bot()
     tg_id = 77001
-    fake_db._users[tg_id] = fake_db._fresh_row()
-    await fake_db.set_setting(bot_mod.GIFT_FILE_ID_KEY, "go-plus-file-id")
-    await fake_db.set_setting(bot_mod.GIFT_FILE_NAME_KEY, "Apex MM.xlsx")
+    row = db._fresh_row()
+    db._users[tg_id] = row
+    await db.set_setting(mod.GIFT_FILE_ID_KEY, 'go-plus-file-id')
+    await db.set_setting(mod.GIFT_FILE_NAME_KEY, 'Apex MM.xlsx')
+    assert home_menu.keyboard()[-1] == [
+        ('📊 Money Management Sheet', 'cb:home:sheet', 'primary'),
+        ('🌐 Change Language', 'cb:home:language', 'danger')]
 
-    async def registered_without_deposit(uid):
-        return {"campaign_id": config.CAMPAIGN_ID,
-                "sum_deposits": Decimal(0)}
+    # Everyone can download directly, repeatedly, without changing their access,
+    # account ID, quota, or an in-progress registration/Premium conversation.
+    for verified in (False, True):
+        row.update(verified=verified, uid='123456789', signals_used_today=12)
+        before = dict(row)
+        bot = H.FakeBot()
+        state = H.FakeState('existing-flow')
+        with patch.object(mod.panelbot, 'lookup_trader', AsyncMock()) as lookup:
+            for _ in range(2):
+                await mod.home_action(H.FakeCB(tg_id, 'home:sheet', 1), bot, state)
+            lookup.assert_not_awaited()
+        docs = [c for c in bot.calls if c['kind'] == 'document']
+        assert len(docs) == 2
+        assert all(c['asset'] == 'go-plus-file-id' for c in docs)
+        assert all(c['body'] == home_menu.SHEET_CAPTION for c in docs)
+        assert docs[0]['markup'].inline_keyboard[0][0].callback_data == 'home:back'
+        assert 'Account confirmed' not in docs[0]['body']
+        assert state.state == 'existing-flow'
+        assert {k:v for k,v in row.items() if k!='gift_sent_at'} == {
+            k:v for k,v in before.items() if k!='gift_sent_at'}
 
-    panelbot.lookup_trader = registered_without_deposit
+    # The registration verdict now shows the deposit requirement directly.
+    for amount, expected in ((Decimal(0), config.VERIFY_NEED_DEPOSIT),
+                             (config.MIN_DEPOSIT, config.VERIFY_GRANTED)):
+        bot = H.FakeBot()
+        with patch.object(mod.panelbot, 'lookup_trader', AsyncMock(return_value={
+                'campaign_id':config.CAMPAIGN_ID, 'sum_deposits':amount})):
+            assert await mod._run_verification(bot,tg_id,'123456789') == expected
+        assert not any(c['kind']=='document' for c in bot.calls)
+        if amount == 0:
+            assert config.MSG_NEED_DEPOSIT in [c['body'] for c in bot.calls]
+
+    # Returning to the menu or resubmitting a verified ID no longer sends it.
     bot = H.FakeBot()
-    status = await bot_mod._run_verification(bot, tg_id, "123456789")
-    assert status == config.VERIFY_NEED_DEPOSIT
-    docs = [c for c in bot.calls if c["kind"] == "document"]
-    assert len(docs) == 1, docs
-    assert docs[0]["asset"] == "go-plus-file-id"
-    buttons = docs[0]["markup"].inline_keyboard
-    assert buttons[0][0].callback_data == "gift:downloaded"
-    assert fake_db._users[tg_id]["gift_sent_at"] == "now"
+    await mod.show(bot,tg_id,'menu')
+    await mod._capture_uid(H.FakeMessage(tg_id,'123456789'),bot,H.FakeState())
+    assert not any(c['kind']=='document' for c in bot.calls)
+    row['verified'] = False
+    with patch.object(config,'TEST_MODE',True):
+        await mod._capture_uid(H.FakeMessage(tg_id,'123456789'),bot,H.FakeState())
+    assert not any(c['kind']=='document' for c in bot.calls)
 
-    # A repeated UID must receive another copy of the workbook.
-    bot2 = H.FakeBot()
-    await bot_mod._run_verification(bot2, tg_id, "123456789")
-    repeat_docs = [c for c in bot2.calls if c["kind"] == "document"]
-    assert len(repeat_docs) == 1, repeat_docs
-    assert repeat_docs[0]["asset"] == "go-plus-file-id"
+    # Missing or expired Telegram document IDs yield a useful reply, not a crash.
+    await db.set_setting(mod.GIFT_FILE_ID_KEY,'')
+    bot = H.FakeBot()
+    await mod.home_action(H.FakeCB(tg_id,'home:sheet',1),bot,H.FakeState())
+    assert bot.calls[-1]['body'] == home_menu.SHEET_UNAVAILABLE
+    await db.set_setting(mod.GIFT_FILE_ID_KEY,'expired-file-id')
+    bot.send_document = AsyncMock(side_effect=RuntimeError('unavailable'))
+    await mod.home_action(H.FakeCB(tg_id,'home:sheet',1),bot,H.FakeState())
+    assert bot.calls[-1]['body'] == home_menu.SHEET_UNAVAILABLE
 
-    cb = H.FakeCB(tg_id, "gift:downloaded", 12)
-    bot3 = H.FakeBot()
-    await bot_mod.gift_downloaded(cb, bot3)
-    assert fake_db._users[tg_id]["gift_acknowledged_at"] == "now"
-    start_messages = [c for c in bot3.calls if c["kind"] == "text"]
-    assert start_messages[-1]["markup"].inline_keyboard[0][0].callback_data == "gift:start"
-
-    # Acknowledging a previous gift must not suppress future attachments.
-    bot_after_ack = H.FakeBot()
-    await bot_mod._run_verification(bot_after_ack, tg_id, "123456789")
-    ack_docs = [c for c in bot_after_ack.calls if c["kind"] == "document"]
-    assert len(ack_docs) == 1, ack_docs
-    assert ack_docs[0]["asset"] == "go-plus-file-id"
-
-    state = H.FakeState()
-    cb2 = H.FakeCB(tg_id, "gift:start", 13)
-    bot4 = H.FakeBot()
-    await bot_mod.gift_start(cb2, bot4, state)
-    assert state.state == bot_mod.Reg.waiting_uid.state
-    assert "send your account ID" in bot4.calls[-1]["body"]
-
-    # The admin upload stores the file id issued to THIS bot.
-    old_admins = config.ADMIN_IDS
-    config.ADMIN_IDS = [tg_id]
-    try:
-        upload = H.FakeMessage(tg_id, "/setgift")
-        upload.document = types.SimpleNamespace(
-            file_id="replacement-file-id", file_name="Apex Replacement.xlsx")
-        await bot_mod.cmd_setgift(upload)
-        assert await fake_db.get_setting(bot_mod.GIFT_FILE_ID_KEY) == "replacement-file-id"
-        assert upload.replies and "GIFT UPLOADED" in upload.replies[-1]
-    finally:
-        config.ADMIN_IDS = old_admins
-
-    print("PASS - registered UID receives the gift every time, including after acknowledgement.")
+    # /setgift still updates the same persisted Telegram file ID.
+    with patch.object(config,'ADMIN_IDS',[tg_id]):
+        upload=H.FakeMessage(tg_id,'/setgift')
+        upload.document=types.SimpleNamespace(file_id='replacement-id',file_name='Apex.xlsx')
+        await mod.cmd_setgift(upload)
+        assert await db.get_setting(mod.GIFT_FILE_ID_KEY)=='replacement-id'
+        assert 'welcome menu' in upload.replies[-1]
+    print('PASS: welcome sheet download, repeat downloads, no deposit gate, no auto-delivery, failure handling, admin replacement.')
 
 
-if __name__ == "__main__":
+if __name__=='__main__':
     asyncio.run(main())

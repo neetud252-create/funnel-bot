@@ -506,7 +506,6 @@ async def show(bot, tg_id, key):
     if key == "menu":
         # The menu caption is a template ({limit}/{used}/{left}); routing it
         # here means no caller can render it raw and leak the braces on screen.
-        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id)
     elif key == "register":
         # Same reason, one step further: this caption is a template ({ref}) AND
@@ -560,6 +559,15 @@ async def start(m: Message, bot: Bot, state: FSMContext,
 @dp.callback_query(F.data.startswith("home:"))
 async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     action = cb.data.split(":", 1)[1]
+    if action == 'sheet':
+        await cb.answer()
+        try:
+            if await _send_gift(bot, cb.from_user.id):
+                return
+        except Exception as exc:
+            logging.warning('Sheet delivery failed: %s', type(exc).__name__)
+        await bot.send_message(cb.from_user.id, home_menu.SHEET_UNAVAILABLE)
+        return
     if action == 'test':
         await chart_signals.open_screen(cb, bot, state, render)
         return
@@ -660,16 +668,15 @@ async def cmd_setgift(m: Message):
     await m.answer(
         "✅ GIFT UPLOADED\n\n"
         f"File: {name}\n"
-        "It will now be delivered after a UID is confirmed as registered "
-        "through our link.")
+        "Users can download it with Money Management Sheet on the welcome menu.")
 
 
-def _gift_ack_kb():
-    return build_kb([[("I Downloaded My Gift", "cb:gift:downloaded", "success")]])
+def _sheet_kb():
+    return build_kb([[("« Back", "cb:home:back")]])
 
 
 async def _send_gift(bot, tg_id):
-    """Deliver the configured Excel gift on every request. Returns True when configured."""
+    """Send the saved workbook only on an explicit home-menu request."""
     file_id = await db.get_setting(GIFT_FILE_ID_KEY)
     if not file_id:
         logging.warning("gift requested for tg_id=%s but /setgift is not configured", tg_id)
@@ -677,10 +684,8 @@ async def _send_gift(bot, tg_id):
     name = await db.get_setting(GIFT_FILE_NAME_KEY) or "Apex Trader Money Management.xlsx"
     await bot.send_document(
         tg_id, file_id,
-        caption=("🎁 <b>Account confirmed — your free gift is ready.</b>\n\n"
-                 "Download the Apex Trader Money Management Excel sheet, "
-                 "then tap the button below."),
-        parse_mode="HTML", reply_markup=_gift_ack_kb())
+        caption=home_menu.SHEET_CAPTION,
+        parse_mode="HTML", reply_markup=_sheet_kb())
     await db.mark_gift_sent(tg_id)
     await activity_stats.record(tg_id, 'gift_delivered')
     logging.info("gift delivered tg_id=%s file=%r", tg_id, name)
@@ -1382,30 +1387,26 @@ async def _run_verification(bot, tg_id, uid):
     if status == config.VERIFY_GRANTED:
         await db.set_verified(tg_id, detail)
         await _clear_nudge(bot, tg_id)
-        # Verified: drop the ack, deliver the registration gift, then hand the
-        # user the main menu. Always attach the workbook, including on retries.
+        # Verified: drop the acknowledgement and open the trading menu.
+        # The workbook is available only from the welcome-menu sheet button.
         try:
             await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
         except Exception:
             pass
-        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id)
         return status
     if status == config.VERIFY_NEED_DEPOSIT:
         await activity_stats.record(tg_id, 'referral_confirmed')
-        # Campaign match proves the account was created through our link. That
-        # is the gift gate; deposit remains the later Go+ access gate.
+        # Campaign matched, but the required access deposit is still missing.
         try:
             await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
         except Exception:
             pass
-        if not await _send_gift(bot, tg_id):
-            # Safe fallback until an admin uploads the workbook to THIS bot.
-            await bot.send_message(
-                tg_id, config.MSG_NEED_DEPOSIT, parse_mode="HTML",
-                reply_markup=build_kb(_register_btn(
-                    label="Register & Get Access", icon=config.E_NEED_DEP_REG,
-                    url=await _ref_url(tg_id))))
+        await bot.send_message(
+            tg_id, config.MSG_NEED_DEPOSIT, parse_mode="HTML",
+            reply_markup=build_kb(_register_btn(
+                label="Register & Get Access", icon=config.E_NEED_DEP_REG,
+                url=await _ref_url(tg_id))))
         return status
     if status == config.VERIFY_WRONG_LINK:
         await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK,
@@ -1591,7 +1592,6 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         # menu. Same reasoning as /start - a stale flag costs nothing, an
         # avoidable lookup risks a FloodWait that hits everyone.
         await state.clear()
-        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id)
         return
     if not UID_RE.fullmatch(uid):
@@ -1660,7 +1660,6 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         logging.warning("VERIFY_MODE=test: bypassing verification for tg_id=%s uid=%s", tg_id, uid)
         await db.set_verified(tg_id, Decimal(0))
         await _clear_nudge(bot, tg_id)
-        await _send_gift(bot, tg_id)
         await _show_menu(bot, tg_id, test_mode=True)
         return
     # Stamped only where a panel lookup actually happens - the TEST_MODE
@@ -1703,7 +1702,6 @@ async def retry_worker(bot):
                         await db.set_verified(r["tg_id"], dep)
                         await _clear_nudge(bot, r["tg_id"])
                         try:
-                            await _send_gift(bot, r["tg_id"])
                             await _show_menu(bot, r["tg_id"])
                         except Exception:
                             logging.exception("retry_worker: notify failed for %s", r["tg_id"])

@@ -13,6 +13,10 @@ TEXT = (
 )
 
 
+SHEET_CAPTION = "📊 <b>Money Management Sheet</b>\n\nDownload your Excel sheet below."
+SHEET_UNAVAILABLE = "The money management sheet is temporarily unavailable. Please try again shortly or contact support."
+
+
 def keyboard():
     # SUPPORT accepts either a Telegram handle or a full URL.
     support = config.SUPPORT.strip()
@@ -25,7 +29,8 @@ def keyboard():
          ('☎️ Support', 'url:' + support, 'danger')],
         [('▶️ YouTube', 'url:' + config.YOUTUBE_URL, 'primary'),
          ('📢 Channel', 'url:https://t.me/goplusaitrader', 'primary')],
-        [('🌐 Change Language', 'cb:home:language', 'danger')],
+        [('📊 Money Management Sheet', 'cb:home:sheet', 'primary'),
+         ('🌐 Change Language', 'cb:home:language', 'danger')],
     ]
 
 
