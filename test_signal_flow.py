@@ -103,21 +103,12 @@ def _install_stub_modules():
     async def is_premium(tg_id):
         return bool(_u(tg_id).get("is_premium", False))
 
-    # Mirrors _UNLOCK_PREMIUM_SQL. The gate is expressed as ONE condition
-    # checked against the row as it stands at this instant, exactly like the
-    # statement's WHERE - not as a read, a decision and then a write, which is
-    # the shape the real SQL exists to avoid. Because the fake is synchronous
-    # between awaits, two interleaved callers see the same serialisation the
-    # single UPDATE gives them.
-    async def unlock_premium(tg_id, cost):
+    async def unlock_premium(tg_id, uid, deposit, minimum_deposit):
         row = db._users.get(tg_id)
-        if row is None:
-            return False, 0, False
-        if not row.get("is_premium", False) and row.get("game_tokens", 0) >= cost:
-            row["game_tokens"] = row.get("game_tokens", 0) - cost
-            row["is_premium"] = True
-            return True, row["game_tokens"], True
-        return False, row.get("game_tokens", 0), bool(row.get("is_premium", False))
+        if not row or not row['verified'] or row['uid'] != uid or deposit < minimum_deposit:
+            return False
+        row.update(is_premium=True, deposit=deposit, last_checked='now')
+        return True
 
     async def game_tokens(tg_id):
         row = db._users.get(tg_id)
@@ -492,7 +483,7 @@ def _fresh_user(fake_db, tg_id, premium=False, used=0, day=None):
     """Put a verified trader in a known quota state and return their row."""
     fake_db._users[tg_id] = {
         "ui_msg_id": None, "album_ids": None, "is_premium": premium,
-        "verified": True,
+        "verified": True, "uid": "123456789",
         "signals_used_today": used,
         "last_reset_date": day if day is not None else fake_db._today[0],
     }
@@ -1333,22 +1324,19 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("no button was dropped for a bad URL", len(flat) == 6, str(len(flat)))
 
     _fresh_user(fake_db, tg_id)
+    fake_db._users[tg_id]['uid'] = '123456789'
     fake_bot = FakeBot()
     await bot_mod.menu_premium(FakeCB(tg_id, "menu:premium", 700), fake_bot, FakeState())
     last = last_screen(fake_bot)
     body = last["body"] or ""
-    # The tap now attempts the in-game unlock instead of showing the old
-    # informational screen. A fresh user holds 0 tokens, so it is refused and
-    # the locked screen states the shortfall. See test_premium_tokens.py for
-    # the balance matrix and the atomicity of the deduction.
+    # Opening Premium quotes the real deposit threshold; verification happens
+    # when the linked account ID is submitted. See test_premium_deposit.py.
     check("the Premium screen is text-only", last["kind"] == "text", last["kind"])
-    check("it is headed 'Almost there.' behind the money emoji",
-          body.startswith(config.pe(config.E_MONEY, "\U0001F4B0")
-                          + " <b>Almost there.</b>"), repr(body))
+    check("it is headed Unlock Premium", "<b>Unlock Premium</b>" in body, repr(body))
     check("it quotes the configured unlock cost",
-          str(config.PREMIUM_UNLOCK_COST) in body, repr(body))
+          str(config.PREMIUM_MIN_DEPOSIT) in body, repr(body))
     check("it states the threshold as a dollar figure",
-          "<b>$%d</b>" % config.PREMIUM_UNLOCK_COST in body, repr(body))
+          "<b>$%d</b>" % config.PREMIUM_MIN_DEPOSIT in body, repr(body))
     check("it asks for the account ID rather than unlocking on the tap",
           "account ID" in body, repr(body))
     check("no in-game phrasing is left on this screen",
@@ -1362,6 +1350,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           not fake_db._users[tg_id]["is_premium"])
 
     _fresh_user(fake_db, pro, premium=True)
+    fake_db._users[pro]['uid'] = '123456789'
     fake_bot = FakeBot()
     await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot, FakeState())
     body = last_screen(fake_bot)["body"] or ""
@@ -1371,7 +1360,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           "Ask about Premium" not in str(last_screen(fake_bot)["markup"]),
           str(last_screen(fake_bot)["markup"]))
     check("the already-active screen quotes the Premium allowance",
-          str(config.PREMIUM_DAILY_SIGNALS) + " signals per day" in body, repr(body))
+          str(config.PREMIUM_DAILY_SIGNALS) + " AI signals per day" in body, repr(body))
     check("menu:level is registered above the menu: catch-all",
           bot_src.index('F.data == "menu:level"')
           < bot_src.index('F.data.startswith("menu:")'))
@@ -1427,7 +1416,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         await bot_mod.menu_premium(FakeCB(pro, "menu:premium", 700), fake_bot, FakeState())
         body = last_screen(fake_bot)["body"] or ""
         check("the Unlock Premium screen advertises 100, not 70",
-              "100 signals per day" in body and "70" not in body, repr(body))
+              "100 AI signals per day" in body and "70" not in body, repr(body))
 
         _fresh_user(fake_db, pro, premium=True)
         fake_bot = FakeBot()

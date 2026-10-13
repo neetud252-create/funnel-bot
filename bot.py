@@ -80,6 +80,7 @@ _uid_lookup_at = {}
 # parallel. Entries are removed by _clear_inflight from the task's done
 # callback, so completion, failure, timeout and cancellation all clean up.
 _verify_inflight = {}
+_premium_checks = set()
 
 # Cache entries are (file_id, content_hash). The hash is of the file's BYTES at
 # the moment Telegram issued that file_id, so replacing artwork on disk changes
@@ -1187,41 +1188,27 @@ async def menu_level(cb: CallbackQuery, bot: Bot):
     # promise an allowance the server would refuse.
     premium, limit = await _user_quota(tg_id)
     used, left = await db.signal_state(tg_id, limit)
-    tokens = await db.game_tokens(tg_id)
     await render(bot, tg_id, None,
                  config.MSG_LEVEL.format(icon=config.level_icon_tg(premium),
                                          name=config.level_name(premium),
-                                         limit=limit, used=used, left=left,
-                                         tokens=tokens),
+                                         limit=limit, used=used, left=left),
                  config.LEVEL_KB)
 
 # Must stay above menu_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "menu:premium")
 async def menu_premium(cb: CallbackQuery, bot: Bot, state: FSMContext):
-    # Opens the Premium unlock flow. The button itself is untouched - text,
-    # style, callback and custom emoji are all as they were; only what happens
-    # after the tap changed.
-    #
-    # This screen never unlocks anything. It states the balance and the
-    # shortfall and arms Premium.waiting_uid, because the unlock is gated on a
-    # game UID check that has to happen on a message, not on this tap.
     await cb.answer()
     tg_id = cb.from_user.id
-    premium = await db.is_premium(tg_id)
-    balance = await db.game_tokens(tg_id)
-
-    if premium:
-        # Nothing to unlock, so no ID is asked for and no state is armed.
+    user = await db.get_user(tg_id)
+    if not user or not user['verified'] or not user['uid']:
+        await _open_registration(bot, tg_id, state)
+        return
+    if user['is_premium']:
         await state.clear()
         text = config.MSG_PREMIUM_ALREADY.format(limit=config.daily_limit(True))
     else:
-        # tokens_needed() still decides WHICH screen is shown - the threshold
-        # calculation is unchanged. The copy no longer prints the shortfall, so
-        # only the configured threshold is rendered.
-        needed = config.tokens_needed(balance)
-        template = (config.MSG_PREMIUM_READY if needed == 0
-                    else config.MSG_PREMIUM_SHORT)
-        text = template.format(cost=config.PREMIUM_UNLOCK_COST)
+        text = config.MSG_PREMIUM_SHORT.format(
+            cost=config.PREMIUM_MIN_DEPOSIT, limit=config.daily_limit(True))
         await state.set_state(Premium.waiting_uid)
     await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
@@ -1323,7 +1310,7 @@ async def _clear_nudge(bot, tg_id):
     except Exception:
         logging.debug("nudge cleanup failed tg_id=%s", tg_id, exc_info=True)
 
-async def _panel_verdict(tg_id, uid):
+async def _panel_verdict(tg_id, uid, *, minimum_deposit=None):
     """ONE panel query, classified. Sends nothing to the user.
 
     Returns (status, detail). Splitting the query from the messaging is what
@@ -1332,6 +1319,7 @@ async def _panel_verdict(tg_id, uid):
     deposit rules are exactly as they were - only their result is now named
     rather than flattened into a bool.
     """
+    minimum_deposit = config.MIN_DEPOSIT if minimum_deposit is None else minimum_deposit
     try:
         info = await panelbot.lookup_trader(uid)
     except panelbot.PanelUnavailable as e:
@@ -1344,9 +1332,9 @@ async def _panel_verdict(tg_id, uid):
     if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
         dep = info.get("sum_deposits") or Decimal(0)
         logging.info("VERIFY uid=%s tg_id=%s campaign MATCH dep=%s min=%s -> %s",
-                     uid, tg_id, dep, config.MIN_DEPOSIT,
-                     "ACCESS" if dep >= config.MIN_DEPOSIT else "NEED_DEPOSIT")
-        if dep >= config.MIN_DEPOSIT:
+                     uid, tg_id, dep, minimum_deposit,
+                     "ACCESS" if dep >= minimum_deposit else "NEED_DEPOSIT")
+        if dep >= minimum_deposit:
             return config.VERIFY_GRANTED, dep
         return config.VERIFY_NEED_DEPOSIT, dep
     # Not found, or a different campaign. record_found=False with a healthy
@@ -1431,19 +1419,7 @@ async def _run_verification(bot, tg_id, uid):
     return config.VERIFY_TEMPORARY
 
 async def _verify_account_id(tg_id, account_id):
-    """Check one account ID. Returns True when it is valid.
-
-    Unchanged in behaviour - this is a FORMAT check (5-15 digits) and nothing
-    more. It is intentionally self-contained: it never calls panelbot, never
-    reads users.verified, users.uid or users.deposit, and has nothing to do
-    with the trading-account verification that gates the funnel. The Premium
-    screens describe this step in real-currency terms; what runs here is the
-    format rule, so do not read the copy as a description of this function.
-
-    It also holds no state of its own - no cache, no memo of the last id, no
-    "already checked" flag. Every call does the full check from scratch, which
-    is what makes a repeated ID verify again instead of being waved through.
-    """
+    """Validate the ID format before querying the real affiliate panel."""
     account_id = (account_id or "").strip()
     ok = bool(UID_RE.fullmatch(account_id))
     logging.info("ACCOUNT ID CHECK tg_id=%s id=%r -> %s", tg_id,
@@ -1461,44 +1437,70 @@ chart_signals.install(dp, render)
 @dp.message(Premium.waiting_uid)
 async def premium_uid(m: Message, bot: Bot, state: FSMContext):
     tg_id = m.from_user.id
+    # Acquire before the first await so simultaneous messages cannot both pass.
+    if tg_id in _premium_checks:
+        return
+    _premium_checks.add(tg_id)
+    try:
+        await _check_premium_uid(m, bot, state)
+    finally:
+        _premium_checks.discard(tg_id)
+
+
+async def _check_premium_uid(m, bot, state):
+    tg_id = m.from_user.id
     uid = (m.text or "").strip()
     try:
         await bot.delete_message(chat_id=tg_id, message_id=m.message_id)
     except Exception:
         pass
-
-    # Fresh verification on EVERY message, unconditionally. There is no check
-    # of users.verified, no comparison against the previously sent id and no
-    # one-time flag anywhere on this path: the third send of the same ID runs
-    # exactly the same check as the first.
+    user = await db.get_user(tg_id)
+    if not user or not user['verified'] or not user['uid']:
+        await _open_registration(bot, tg_id, state)
+        return
+    if user['is_premium']:
+        await state.clear()
+        await render(bot, tg_id, None, config.MSG_PREMIUM_ALREADY.format(
+            limit=config.daily_limit(True)), config.UNLOCK_KB)
+        return
     if not await _verify_account_id(tg_id, uid):
-        # Re-armed, so resending is a working retry with no attempt limit.
-        await state.set_state(Premium.waiting_uid)
-        await render(bot, tg_id, None, config.MSG_ACCOUNT_ID_INVALID,
-                     config.UNLOCK_KB)
+        await render(bot, tg_id, None, config.MSG_ACCOUNT_ID_INVALID, config.UNLOCK_KB)
+        return
+    if uid != str(user['uid']):
+        await render(bot, tg_id, None, config.MSG_PREMIUM_ACCOUNT_MISMATCH, config.UNLOCK_KB)
         return
 
-    # ID accepted. The spend is still the single gated UPDATE - the check
-    # above decides whether we ATTEMPT it, never whether it succeeds, so the
-    # atomicity of the deduction is exactly what it was.
-    cost = config.PREMIUM_UNLOCK_COST
-    unlocked, balance, premium = await db.unlock_premium(tg_id, cost)
+    await render(bot, tg_id, None, config.MSG_PREMIUM_CHECKING, config.UNLOCK_KB)
+    try:
+        # Always verify the actual deposit, even when VERIFY_MODE=test.
+        # No cached deposit, token balance or format-only check can grant Premium.
+        status, deposit = await asyncio.wait_for(
+            _panel_verdict(tg_id, uid, minimum_deposit=config.PREMIUM_MIN_DEPOSIT),
+            timeout=config.UID_VERIFY_TIMEOUT)
+    except Exception as exc:
+        logging.warning('Premium verification unavailable: %s', type(exc).__name__)
+        status, deposit = config.VERIFY_TEMPORARY, None
 
-    if unlocked:
-        logging.info("premium unlocked by tg_id=%s for %s tokens, %s left",
-                     tg_id, cost, balance)
-        await state.clear()
-        text = config.MSG_PREMIUM_UNLOCKED.format(limit=config.daily_limit(True))
-    elif premium:
-        # Already Premium - the statement matched no row, so nothing was spent.
-        await state.clear()
-        text = config.MSG_PREMIUM_ALREADY.format(limit=config.daily_limit(True))
-    else:
-        # Valid ID, threshold not met. Stay armed so the user can send the ID
-        # again, and check it again when they do.
-        await state.set_state(Premium.waiting_uid)
+    if status == config.VERIFY_GRANTED:
+        try:
+            unlocked = await db.unlock_premium(
+                tg_id, uid, deposit, config.PREMIUM_MIN_DEPOSIT)
+        except Exception as exc:
+            logging.warning('Premium grant unavailable: %s', type(exc).__name__)
+            unlocked = False
+        if unlocked:
+            await state.clear()
+            text = config.MSG_PREMIUM_UNLOCKED.format(limit=config.daily_limit(True))
+        else:
+            text = config.MSG_PREMIUM_RETRY
+    elif status == config.VERIFY_NEED_DEPOSIT:
         text = config.MSG_PREMIUM_STILL_SHORT.format(
-            cost=config.PREMIUM_UNLOCK_COST)
+            cost=config.PREMIUM_MIN_DEPOSIT, balance=f'{deposit:.2f}',
+            needed=f'{max(config.PREMIUM_MIN_DEPOSIT - deposit, Decimal(0)):.2f}')
+    elif status == config.VERIFY_WRONG_LINK:
+        text = config.MSG_WRONG_LINK
+    else:
+        text = config.MSG_PREMIUM_RETRY
     await render(bot, tg_id, None, text, config.UNLOCK_KB)
 
 def _clear_inflight(tg_id, task):
@@ -1720,6 +1722,8 @@ async def main():
     logging.info('Screenshot analysis ready; provider=%s; API configured=%s; model=%s; strategy=%s',
                  chart_signals.api.provider(), chart_signals.api.configured(), chart_signals.api.model(),
                  chart_signals.chart_strategy.VERSION)
+    logging.info('Premium deposit verification ready; minimum=$%s; daily AI signals=%s',
+                 config.PREMIUM_MIN_DEPOSIT, config.daily_limit(True))
     logging.info('Verified chart quota ready; Start=%s/day; Premium=%s/day; reset=00:00 UTC',
                  config.daily_limit(False), config.daily_limit(True))
     # Validate dashboard queries against the live schema before accepting commands.

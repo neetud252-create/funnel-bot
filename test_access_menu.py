@@ -265,7 +265,7 @@ def main():
                                        "https://example.com/PLACEHOLDER_REF"),
           config.REF_LINK)
     for untouched in ("MIN_DEPOSIT", "CAMPAIGN_ID", "VERIFY_MODE",
-                      "UID_VERIFY_RETRIES", "PREMIUM_UNLOCK_COST"):
+                      "UID_VERIFY_RETRIES", "PREMIUM_MIN_DEPOSIT"):
         check("%s is still defined and was not moved" % untouched,
               untouched + " " in config_src or untouched + "=" in config_src,
               untouched)

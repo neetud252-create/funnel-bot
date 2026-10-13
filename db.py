@@ -428,51 +428,38 @@ async def is_premium(tg_id: int):
         row = await c.fetchrow("SELECT is_premium FROM users WHERE tg_id=$1", tg_id)
         return bool(row["is_premium"]) if row else False
 
-# --- In-game tokens and the Premium unlock ----------------------------------
-# Fictional credits. Nothing here reads users.deposit, the traders table or any
-# postback: a token balance is created only by an admin command and spent only
-# by the unlock below.
-#
-# The unlock is ONE statement, which in Postgres is its own transaction. That is
-# the whole concurrency story: the WHERE is the gate, so two taps arriving
-# together cannot both see "100 tokens, not premium" and both spend it. The
-# second statement finds is_premium already TRUE (or the balance already short)
-# and matches no row, so it deducts nothing and returns None.
-#
-# A read-then-write pair - SELECT game_tokens, then UPDATE - would be the bug
-# this is written to avoid: both callers would read 100, both would pass their
-# own check, and the balance would go to -100 with one Premium granted twice.
+# --- Premium eligibility ----------------------------------------------------
+# The caller supplies a fresh campaign-matched panel result. The single UPDATE
+# rechecks the linked account and verification under the database row lock.
+# Deposit and tier change together; tokens and daily usage are never deducted
+# or reset. Repeating a successful verification is harmless.
 _UNLOCK_PREMIUM_SQL = """
     UPDATE users
-       SET game_tokens = game_tokens - $2,
-           is_premium  = TRUE
-     WHERE tg_id       = $1
-       AND is_premium  = FALSE
-       AND game_tokens >= $2
-    RETURNING game_tokens
+       SET is_premium = TRUE,
+           deposit = $3,
+           last_checked = now()
+     WHERE tg_id = $1
+       AND uid = $2
+       AND verified = TRUE
+       AND $3::numeric >= $4::numeric
+    RETURNING is_premium
 """
 
-async def unlock_premium(tg_id: int, cost: int):
-    """Spend `cost` tokens to grant Premium, atomically.
-
-    Returns (unlocked, balance, premium):
-      unlocked - True only when THIS call performed the deduction
-      balance  - the balance after the call, for the message to quote
-      premium  - the tier after the call, so the caller never re-reads it
-    """
+async def unlock_premium(tg_id: int, uid: str, deposit, minimum_deposit):
+    """Apply a fresh verified deposit without changing today's signal usage."""
+    from decimal import Decimal, InvalidOperation
+    try:
+        deposit, minimum_deposit = Decimal(str(deposit)), Decimal(str(minimum_deposit))
+        if (not deposit.is_finite() or not minimum_deposit.is_finite()
+                or minimum_deposit <= 0 or deposit < minimum_deposit):
+            return False
+    except (InvalidOperation, TypeError, ValueError):
+        return False
     async with pool.acquire() as c:
-        row = await c.fetchrow(_UNLOCK_PREMIUM_SQL, tg_id, cost)
-        if row is not None:
-            return True, row["game_tokens"], True
-        # Refused. Report why from the same connection, so the message quotes
-        # the balance that was actually in effect: either not enough tokens, or
-        # Premium was already held (a second tap, or a concurrent one that lost).
-        cur = await c.fetchrow(
-            "SELECT game_tokens, is_premium FROM users WHERE tg_id=$1", tg_id)
-        if cur is None:
-            return False, 0, False
-        return False, cur["game_tokens"], bool(cur["is_premium"])
+        return await c.fetchrow(_UNLOCK_PREMIUM_SQL, tg_id, uid,
+                                deposit, minimum_deposit) is not None
 
+# Fictional tokens remain independent of deposit verification and Premium.
 async def game_tokens(tg_id: int):
     async with pool.acquire() as c:
         row = await c.fetchrow("SELECT game_tokens FROM users WHERE tg_id=$1", tg_id)

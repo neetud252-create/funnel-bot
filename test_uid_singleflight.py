@@ -508,7 +508,7 @@ async def main():
     check("the campaign check is untouched",
           'str(info.get("campaign_id")) == str(config.CAMPAIGN_ID)' in src)
     check("the deposit threshold check is untouched",
-          "dep >= config.MIN_DEPOSIT" in src)
+          "config.MIN_DEPOSIT if minimum_deposit is None" in src)
     check("no sleep was added before submitting the uid",
           "asyncio.sleep" not in src.split("async def _verify_once")[1]
           .split("async def")[0])
@@ -517,11 +517,11 @@ async def main():
     check("Start/Premium limits unchanged",
           (config.START_DAILY_SIGNALS, config.PREMIUM_DAILY_SIGNALS) == (30, 70),
           str((config.START_DAILY_SIGNALS, config.PREMIUM_DAILY_SIGNALS)))
-    check("Premium unlock cost unchanged", config.PREMIUM_UNLOCK_COST == 100)
+    check("Premium minimum deposit is $100", config.PREMIUM_MIN_DEPOSIT == 100)
     check("deposit threshold unchanged", config.MIN_DEPOSIT == Decimal("50"),
           str(config.MIN_DEPOSIT))
-    check("the atomic unlock statement is untouched",
-          "AND game_tokens >= $2" in open(
+    check("the atomic unlock checks the verified deposit",
+          "AND $3::numeric >= $4::numeric" in open(
               os.path.join(ROOT, "db.py"), encoding="utf-8").read())
 
     print("\n%d checks, %d failed" % (CHECKS[0], len(FAILURES)))

@@ -927,12 +927,9 @@ PREMIUM_DAILY_SIGNALS = _int_env("PREMIUM_DAILY_SIGNALS", 70)
 # Start limit, which is what it meant before Premium existed.
 DAILY_SIGNAL_LIMIT = START_DAILY_SIGNALS
 
-# Price of the Premium unlock, in the bot's own fictional tokens. Read from
-# Railway like the two limits above, and passed to db.unlock_premium as the
-# amount to deduct, so the number quoted on the locked screen and the number
-# actually charged are always the same value. Not money: see the game_tokens
-# comment in db.py.
-PREMIUM_UNLOCK_COST = _int_env("PREMIUM_UNLOCK_COST", 100)
+# Minimum cumulative deposits confirmed by the affiliate panel, in USD.
+# A deposit is verified, never charged or deducted by this bot.
+PREMIUM_MIN_DEPOSIT = Decimal(_int_env("PREMIUM_MIN_DEPOSIT", 100) or 100)
 
 # Icon and name are kept apart because the two screens compose them
 # differently: the menu caption wants "<star> Start" as one label, while the My
@@ -996,105 +993,36 @@ def level_name(is_premium):
 # menu_level in bot.py - the tier and the limit come from the same lookup the
 # enforcement uses, so this screen cannot advertise a number the server would
 # refuse to honour.
-# {tokens} is the in-game balance, appended rather than replacing the existing
-# lines: the used/remaining counters are what the screen was already for.
 MSG_LEVEL = ("{icon} <b>Your current level:</b> {name}\n"
              "\U0001F4CA <b>Daily limit:</b> {limit} signals\n"
              "\U0001F4C8 <b>Used today:</b> {used}\n"
-             "\U000026A1 <b>Remaining today:</b> {left}\n"
-             "\U0001FA99 <b>Game tokens:</b> {tokens}")
+             "\U000026A1 <b>Remaining today:</b> {left}")
 
 LEVEL_KB = [[("\U000000AB Back", "cb:go:menu")]]
 
-# --- Unlock Premium screen --------------------------------------------------
-# Opened from the main menu, where it replaced the VIP team link. Informational:
-# it states the benefits, the configured Premium allowance and the viewer's own
-# current status. {premium_limit} is PREMIUM_DAILY_SIGNALS, so the number quoted
-# here is the same one the quota check enforces - it is never written out.
-#
-# There is deliberately no purchase flow here: Premium is assigned by an admin
-# (/premium <tg_id>). Nothing on this screen asks for a deposit - the trading
-# account balance gates verification, not the tier.
-MSG_PREMIUM = ("\U0001F3C6 <b>Premium Level</b>\n\n"
-               "<b>Premium benefits:</b>\n"
-               "\U00002014 {premium_limit} signals/day\n"
-               "\U00002014 Premium status\n\n"
-               "{status}")
+# Compatibility status text used by informational and localized screens.
+MSG_PREMIUM_ACTIVE = ("🏆 <b>Your status:</b> Premium is active "
+                      "— {limit} signals/day.")
 
-MSG_PREMIUM_ACTIVE = ("\U0001F3C6 <b>Your status:</b> Premium is active "
-                      "\U00002014 {limit} signals/day.")
-
-MSG_PREMIUM_INACTIVE = ("\U0001F7E2 <b>Your status:</b> Start "
-                        "\U00002014 {limit} signals/day.\n\n"
-                        "Premium is assigned by our team. Tap below to ask about it.")
-
-def premium_kb(is_premium):
-    # A user who already has Premium gets no request button - there is nothing
-    # for them to ask for, and offering it would read as though it had lapsed.
-    rows = []
-    if not is_premium:
-        rows.append([("\U0001F9D1 Ask about Premium", "url:" + SUPPORT_URL)])
-    rows.append([("\U000000AB Back", "cb:go:menu")])
-    return rows
-
-# --- The in-game unlock -----------------------------------------------------
-# Shown after tapping Unlock Premium. {cost} is PREMIUM_UNLOCK_COST and {needed}
-# is what is still missing, both computed from the balance the atomic UPDATE
-# actually saw - so the screen cannot quote a shortfall the database disagrees
-# with. Tokens are fictional in-game credits: nothing on these screens asks for
-# money, a deposit or a trading account.
-MSG_PREMIUM_LOCKED = ("\U0001F451 <b>Premium Locked</b>\n\n"
-                      "You need {cost} game tokens to unlock Premium.\n\n"
-                      "Your balance: {balance}\n"
-                      "Still needed: {needed} tokens")
-
-def tokens_needed(balance):
-    # The ONE shortfall calculation. Both the screens and the tests read it
-    # from here, so a message can never quote a number the unlock disagrees
-    # with. Floors at 0 so a balance above the cost never reads as negative.
-    return max(PREMIUM_UNLOCK_COST - int(balance or 0), 0)
-
-# --- Premium verification screens -------------------------------------------
-# Shown while the user is in the Premium unlock flow.
-#
-# WORDING vs BEHAVIOUR - read before editing:
-# These screens are written in real-currency terms ($, balance, account ID) by
-# request. The code behind them is unchanged and still gates on game_tokens,
-# a column written only by the /tokens and /tokenset admin commands, and the
-# account-ID check is still format-only (5-15 digits, no panel lookup). So a
-# real top-up does NOT move what this screen is actually waiting on. Keep that
-# in mind before treating the copy as a description of the mechanism.
-#
-# The money emoji goes through pe(), which embeds the plain 💰 as the inner
-# glyph: clients without premium emoji render that literal rather than nothing.
-# E_MONEY is the supplied id and already existed above - not a new constant.
+# --- Premium deposit verification ------------------------------------------
 T_PREM_MONEY = pe(E_MONEY, "\U0001F4B0")
-
-# {cost} is PREMIUM_UNLOCK_COST, so the figure quoted is the same one the
-# unlock enforces rather than a literal typed into the copy.
-MSG_PREMIUM_SHORT = (T_PREM_MONEY + " <b>Almost there.</b>\n\n"
-                     "Your account is registered through our link. To unlock "
-                     "access, top up your balance with <b>${cost}</b> or more "
-                     "\U00002014 then send your account ID here again to "
-                     "complete verification.")
-
-# Threshold already met: the only thing left is the account-ID check.
-MSG_PREMIUM_READY = (T_PREM_MONEY + " <b>Almost there.</b>\n\n"
-                     "Your account is registered through our link. Your balance "
-                     "meets the <b>${cost}</b> requirement \U00002014 send your "
-                     "account ID here to complete verification.")
-
-# The account ID was accepted but the threshold is still not met. Distinct from
-# MSG_PREMIUM_SHORT so the user can tell the ID passed and the balance is what
-# is outstanding - one screen for both would read as the ID having failed.
+MSG_PREMIUM_SHORT = ("👑 <b>Unlock Premium</b>\n\n"
+    "Required total deposits: <b>${cost}</b> or more.\n"
+    "Daily allowance: <b>{limit} AI signals per day</b>.\n\n"
+    "Deposit into your linked Pocket Option account, then send its account ID here to verify.")
 MSG_PREMIUM_STILL_SHORT = (T_PREM_MONEY + " <b>Almost there.</b>\n\n"
-                           "Your account ID has been checked. Top up your balance "
-                           "with <b>${cost}</b> or more \U00002014 then send your "
-                           "account ID here again to complete verification.")
-
-MSG_PREMIUM_UNLOCKED = ("\U0001F451 <b>Premium Unlocked!</b>\n\n"
-                        "Your account ID has been verified successfully.\n\n"
-                        "You now have <b>{limit} signals per day</b>.")
+    "Verified total deposits: <b>${balance}</b>.\n"
+    "Required total deposits: <b>${cost}</b> or more.\n"
+    "Still needed: <b>${needed}</b>.\n\n"
+    "Deposit into your linked Pocket Option account, then send its account ID here to verify.")
+MSG_PREMIUM_CHECKING = "⏳ <b>Checking your Premium deposit…</b>"
+MSG_PREMIUM_RETRY = ("⏳ <b>Verification is taking a moment.</b>\n\n"
+    "We could not confirm your deposit. Please send your account ID again shortly.")
+MSG_PREMIUM_ACCOUNT_MISMATCH = (
+    "Please send the same Pocket Option account ID you used to unlock bot access.")
+MSG_PREMIUM_UNLOCKED = ("👑 <b>Premium Unlocked!</b>\n\n"
+    "Your deposit has been verified successfully.\n\n"
+    "You now have <b>{limit} AI signals per day</b>.")
 
 # The account ID did not pass the check. Says so and invites another attempt -
 # there is no attempt limit and no lockout, so the user can send it as often as
@@ -1109,17 +1037,10 @@ MSG_ENTER_UID = ("⛔ Enter Your Pocket Option Trader ID\n\n"
                  "📌 You can find it in your Pocket Option account settings.\n\n"
                  "⚡ Send your Trader ID to continue.")
 
-# A second tap once Premium is held. The unlock statement refuses it (its WHERE
-# requires is_premium = FALSE), so nothing was deducted and this only says so.
-# The token balance line was dropped here: this screen now sits in a flow
-# written in real-currency terms, and showing a game-token count next to it
-# read as two different currencies on one screen.
-MSG_PREMIUM_ALREADY = ("\U0001F451 <b>Premium is already active</b>\n\n"
-                       "You have <b>{limit} signals per day</b>.")
-
-# The unlock screens keep the plain Back button and nothing else: there is no
-# purchase button because there is nothing to purchase.
-UNLOCK_KB = [[("\U000000AB Back", "cb:go:menu")]]
+# Existing Premium status remains active; showing it does not reset usage.
+MSG_PREMIUM_ALREADY = ("👑 <b>Premium is already active</b>\n\n"
+                       "You have <b>{limit} AI signals per day</b>.")
+UNLOCK_KB = [[("« Back", "cb:go:menu")]]
 
 # --- Admin level commands ---------------------------------------------------
 # Replies to /premium and /startlevel. Admin-only (ADMIN_IDS); a non-admin gets
