@@ -17,13 +17,13 @@ async def main():
     assert [len(row) for row in rows] == [1, 2, 2, 2, 1]
     assert [button.text for row in rows for button in row] == [
         '💎 Get Bot Access', '📖 Guide', '🎯 Test Signals', '⭐ Review',
-        '☎️ Support', '▶️ YouTube', '💡 Forex Tips', '🌐 Change Language']
+        '☎️ Support', '▶️ YouTube', '📢 Channel', '🌐 Change Language']
     assert rows[0][0].callback_data == 'home:access'
     for value in ('@flashhher', 'https://t.me/flashhher'):
         with patch.object(config, 'SUPPORT', value):
             assert home_menu.keyboard()[2][1][1] == 'url:https://t.me/flashhher'
-    with patch.object(config, 'FOREX_TIPS_URL', 'https://t.me/PLACEHOLDER_FOREX_TIPS'):
-        assert home_menu.keyboard()[3][1][1] == 'cb:home:tips'
+    assert rows[3][1].url == 'https://t.me/apexxtraderz'
+    assert rows[3][1].callback_data is None
 
     for verified in (False, True):
         uid = 72000 + int(verified)

@@ -17,9 +17,6 @@ def keyboard():
     # SUPPORT accepts either a Telegram handle or a full URL.
     support = config.SUPPORT.strip()
     support = support if support.startswith(('https://', 'http://')) else 'https://t.me/' + support.lstrip('@')
-    tips = config.FOREX_TIPS_URL.strip()
-    tips_action = ('url:' + tips if tips and 'PLACEHOLDER' not in tips
-                   else 'cb:home:tips')
     return [
         [('💎 Get Bot Access', 'cb:home:access', 'success')],
         [('📖 Guide', 'url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy', 'primary'),
@@ -27,7 +24,7 @@ def keyboard():
         [('⭐ Review', 'url:https://t.me/goplustrade_reviews', 'danger'),
          ('☎️ Support', 'url:' + support, 'danger')],
         [('▶️ YouTube', 'url:' + config.YOUTUBE_URL, 'primary'),
-         ('💡 Forex Tips', tips_action, 'primary')],
+         ('📢 Channel', 'url:https://t.me/apexxtraderz', 'primary')],
         [('🌐 Change Language', 'cb:home:language', 'danger')],
     ]
 
