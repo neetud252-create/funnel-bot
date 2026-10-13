@@ -14,7 +14,7 @@ async def main():
     import config
 
     rows = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard
-    assert [len(row) for row in rows] == [1, 2, 2, 2, 2]
+    assert [len(row) for row in rows] == [1, 2, 2, 2, 1, 1]
     assert [button.text for row in rows for button in row] == [
         '💎 Get Bot Access', '📖 Guide', '🎯 Test Signals', '⭐ Review',
         '☎️ Support', '▶️ YouTube', '📢 Channel', '📊 Money Management Sheet', '🌐 Change Language']
@@ -25,7 +25,7 @@ async def main():
     assert rows[3][1].url == 'https://t.me/goplusaitrader'
     assert rows[3][1].callback_data is None
     assert rows[4][0].callback_data == 'home:sheet'
-    assert rows[4][1].callback_data == 'home:language'
+    assert rows[5][0].callback_data == 'home:language'
 
     for verified in (False, True):
         uid = 72000 + int(verified)

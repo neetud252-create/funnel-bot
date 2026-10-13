@@ -17,9 +17,9 @@ async def main():
     db._users[tg_id] = row
     await db.set_setting(mod.GIFT_FILE_ID_KEY, 'go-plus-file-id')
     await db.set_setting(mod.GIFT_FILE_NAME_KEY, 'Apex MM.xlsx')
-    assert home_menu.keyboard()[-1] == [
-        ('📊 Money Management Sheet', 'cb:home:sheet', 'primary'),
-        ('🌐 Change Language', 'cb:home:language', 'danger')]
+    assert home_menu.keyboard()[-2:] == [
+        [('📊 Money Management Sheet', 'cb:home:sheet', 'primary')],
+        [('🌐 Change Language', 'cb:home:language', 'danger')]]
 
     # Everyone can download directly, repeatedly, without changing their access,
     # account ID, quota, or an in-progress registration/Premium conversation.

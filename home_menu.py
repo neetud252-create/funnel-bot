@@ -29,8 +29,8 @@ def keyboard():
          ('☎️ Support', 'url:' + support, 'danger')],
         [('▶️ YouTube', 'url:' + config.YOUTUBE_URL, 'primary'),
          ('📢 Channel', 'url:https://t.me/goplusaitrader', 'primary')],
-        [('📊 Money Management Sheet', 'cb:home:sheet', 'primary'),
-         ('🌐 Change Language', 'cb:home:language', 'danger')],
+        [('📊 Money Management Sheet', 'cb:home:sheet', 'primary')],
+        [('🌐 Change Language', 'cb:home:language', 'danger')],
     ]
 
 
