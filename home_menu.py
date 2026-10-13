@@ -24,7 +24,7 @@ def keyboard():
         [('⭐ Review', 'url:https://t.me/goplustrade_reviews', 'danger'),
          ('☎️ Support', 'url:' + support, 'danger')],
         [('▶️ YouTube', 'url:' + config.YOUTUBE_URL, 'primary'),
-         ('📢 Channel', 'url:https://t.me/apexxtraderz', 'primary')],
+         ('📢 Channel', 'url:https://t.me/goplusaitrader', 'primary')],
         [('🌐 Change Language', 'cb:home:language', 'danger')],
     ]
 

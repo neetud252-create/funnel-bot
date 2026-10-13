@@ -22,7 +22,7 @@ async def main():
     for value in ('@flashhher', 'https://t.me/flashhher'):
         with patch.object(config, 'SUPPORT', value):
             assert home_menu.keyboard()[2][1][1] == 'url:https://t.me/flashhher'
-    assert rows[3][1].url == 'https://t.me/apexxtraderz'
+    assert rows[3][1].url == 'https://t.me/goplusaitrader'
     assert rows[3][1].callback_data is None
 
     for verified in (False, True):
