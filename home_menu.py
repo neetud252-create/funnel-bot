@@ -1,9 +1,11 @@
-"""Public /start menu: a looping banner above text with the wider button layout."""
+"""Public /start menu: one video card containing the welcome caption and buttons."""
 import config
 
 PHOTO = 'home_banner'
 PHOTO_EXT = 'png'
 ANIMATION = 'home_banner_loop'
+# Separate Telegram cache key: video.file_id cannot reuse animation.file_id.
+VIDEO = 'home_banner_video'
 
 TEXT = (
     "👋 <b>Welcome to Go+ — Your Personal AI Trading Assistant!</b>\n\n"

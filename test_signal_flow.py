@@ -628,15 +628,16 @@ async def devstart_tests(bot_mod, fake_db, config):
 
         # --- and the funnel restarts exactly as it does for a new user -------
         sends = [c for c in fake_bot.calls if c["kind"] != "delete"]
-        check("/devstart sends the GIF then the text menu",
-              [c['kind'] for c in sends] == ['animation', 'text'],
+        check("/devstart sends one video card with its caption and menu",
+              [c['kind'] for c in sends] == ['video'],
               str([c["kind"] for c in sends]))
-        check("the new banner replaces the old album tracking",
-              row['album_ids'] == str(sends[0]['id']), repr(row['album_ids']))
+        check("the old companion message tracking is cleared",
+              row['album_ids'] is None, repr(row['album_ids']))
         check("/devstart lands on the welcome menu",
               bot_mod.home_menu.TEXT == sends[-1]["body"], repr(sends[-1]["body"]))
-        check("/devstart shows the wider text welcome menu",
-              sends[-1]["kind"] == "text" and sends[-1]["asset"] is None)
+        check("/devstart attaches the welcome menu to the existing MP4",
+              sends[-1]["kind"] == "video" and sends[-1]["asset"] == 'assets/home_banner_loop.mp4'
+              and sends[-1]['markup'] is not None)
         check("the new welcome message becomes the tracked screen",
               row["ui_msg_id"] == sends[-1]["id"],
               "%s vs %s" % (row["ui_msg_id"], sends[-1]["id"]))
@@ -718,7 +719,7 @@ async def devstart_tests(bot_mod, fake_db, config):
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
-          'await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard(), home_banner=True)' in bot_src)
+          'await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(), is_video=True)' in bot_src)
     check("Get Bot Access opens the registration entry",
           "await _open_registration(bot, tg_id, state)" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",

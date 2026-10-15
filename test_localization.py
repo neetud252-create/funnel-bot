@@ -9,7 +9,7 @@ import types
 from unittest.mock import AsyncMock, patch
 
 from aiogram import Bot
-from aiogram.methods import AnswerCallbackQuery, CopyMessage, SendAnimation, SendDocument, SendMessage, SendPhoto
+from aiogram.methods import AnswerCallbackQuery, CopyMessage, SendDocument, SendMessage, SendPhoto, SendVideo
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 import home_menu
@@ -129,10 +129,10 @@ async def check_delivery_and_selector():
     assert '5773793517482546530' in result.text
 
     for language in L.CODES:
-        animation = SendAnimation(chat_id=2, animation='banner-animation-id',
-                                  caption=home_menu.TEXT, reply_markup=markup, parse_mode='HTML')
-        localized = L.localize_method(animation, language)
-        assert localized.animation == 'banner-animation-id'
+        video = SendVideo(chat_id=2, video='banner-video-id',
+                          caption=home_menu.TEXT, reply_markup=markup, parse_mode='HTML')
+        localized = L.localize_method(video, language)
+        assert localized.video == 'banner-video-id'
         assert localized.caption == emoji_theme.html(L.translate_message(home_menu.TEXT, language))
         assert '4942823933909926751' in localized.caption
         assert localized.reply_markup.inline_keyboard[0][0].callback_data == 'home:access'

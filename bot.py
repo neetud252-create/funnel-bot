@@ -91,6 +91,8 @@ _premium_checks = set()
 _file_hashes = {}
 
 def asset_path(key, ext):
+    if key == home_menu.VIDEO and ext == 'mp4':
+        key = home_menu.ANIMATION
     # The photo cache uses the logical "jpg" type; retain the owner's PNG
     # unchanged on disk and upload it with its actual filename.
     if key == home_menu.PHOTO and ext == 'jpg':
@@ -269,7 +271,7 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4'),
+    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
            (config.UID_GUIDE_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
@@ -424,28 +426,10 @@ async def wipe(bot, tg_id):
                 pass
         await db.set_album(tg_id, None)
 
-async def _send_home_banner(bot, tg_id):
-    # Keep the animation separate from the welcome text so its media width
-    # does not constrain the menu. A missing banner must not hide the buttons.
-    for key, is_video in ((home_menu.ANIMATION, True), (home_menu.PHOTO, False)):
-        if media_missing(key, 'mp4' if is_video else 'jpg'):
-            continue
-        try:
-            message = await send_media(bot, tg_id, key, is_video, None, None)
-        except Exception as exc:
-            logging.warning('Home banner %s unavailable: %s', key, type(exc).__name__)
-            continue
-        if is_video:
-            await remember_video(key, message)
-        else:
-            await remember(key, message)
-        return message
-    return None
-
-
 async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
-                 reply_to_message_id=None, raise_on_error=False, home_banner=False):
-    if media_key == home_menu.ANIMATION and media_missing(media_key, 'mp4'):
+                 reply_to_message_id=None, raise_on_error=False):
+    is_home_media = media_key in (home_menu.ANIMATION, home_menu.VIDEO)
+    if is_home_media and media_missing(media_key, 'mp4'):
         media_key, is_video = home_menu.PHOTO, False
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
@@ -464,16 +448,11 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
             await bot.delete_message(chat_id=tg_id, message_id=msg_id)
         except Exception as e:
             logging.warning("delete screen failed: %s", e)
-    # Companion messages (including the home GIF) belong to the old screen.
-    # Persist their IDs so navigation can clean them up after a restart too.
+    # Clean up companion messages, including GIFs from the old split home layout.
     if user and user['album_ids']:
         await _drop_msgs(bot, tg_id, [int(mid) for mid in str(user['album_ids']).split(',')])
         await db.set_album(tg_id, None)
     try:
-        if home_banner:
-            banner = await _send_home_banner(bot, tg_id)
-            if banner:
-                await db.set_album(tg_id, str(banner.message_id))
         if media_key is None:
             # Deliberately text-only, not a missing asset - nothing to warn about.
             reply = {'reply_parameters': ReplyParameters(message_id=reply_to_message_id,
@@ -491,14 +470,19 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
             try:
                 m = await send_media(bot, tg_id, media_key, is_video, text, kb)
             except Exception:
-                if media_key != home_menu.ANIMATION:
+                if not is_home_media:
                     raise
-                logging.exception('Welcome animation failed; using the still banner')
+                logging.exception('Welcome media failed; using the still banner or text')
+                failed_key = media_key
                 media_key, is_video = home_menu.PHOTO, False
-                if media_missing(media_key, 'jpg'):
+                m = None
+                if failed_key != media_key and not media_missing(media_key, 'jpg'):
+                    try:
+                        m = await send_media(bot, tg_id, media_key, False, text, kb)
+                    except Exception:
+                        logging.exception('Welcome still banner failed; using text')
+                if m is None:
                     m = await bot.send_message(tg_id, text, parse_mode='HTML', reply_markup=kb)
-                else:
-                    m = await send_media(bot, tg_id, media_key, False, text, kb)
             if is_video:
                 await remember_video(media_key, m)
             else:
@@ -581,9 +565,8 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     # command defaults to None so /devstart's start(m, bot, state) still works.
     await _capture_ref(tg_id, command)
     await _clear_nudge(bot, tg_id)
-    # A text message lets Telegram use its wider chat bubble for the menu;
-    # attaching these buttons to the banner constrains them to the media width.
-    await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard(), home_banner=True)
+    # Send the existing MP4 as one video card with its caption and menu attached.
+    await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(), is_video=True)
 
 
 @dp.callback_query(F.data.startswith("home:"))
@@ -613,7 +596,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await cb.answer()
         await state.clear()
         await _clear_nudge(bot, cb.from_user.id)
-        await render(bot, cb.from_user.id, None, home_menu.TEXT, home_menu.keyboard(), home_banner=True)
+        await render(bot, cb.from_user.id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(), is_video=True)
         return
     if action in home_menu.PENDING:
         await cb.answer(home_menu.PENDING[action], show_alert=True)
