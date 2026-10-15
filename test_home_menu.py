@@ -40,18 +40,25 @@ async def main():
             await bot_mod.start(H.FakeMessage(uid, '/start'), bot, state, command)
             attribution.assert_awaited_once_with(uid, command)
         sends = [c for c in bot.calls if c['kind'] != 'delete']
-        assert len(sends) == 1 and sends[0]['kind'] == 'text'
-        assert sends[0]['asset'] is None
-        assert sends[0]['body'] == home_menu.TEXT
-        assert sends[0]['markup'] is not None
-        assert {k:v for k,v in fake_db._users[uid].items() if k!='ui_msg_id'} == {
-            k:v for k,v in initial.items() if k!='ui_msg_id'}
+        assert [c['kind'] for c in sends] == ['animation', 'text']
+        assert sends[0]['asset'] == 'assets/home_banner_loop.mp4'
+        assert sends[0]['body'] is None and sends[0]['markup'] is None
+        assert sends[1]['asset'] is None
+        assert sends[1]['body'] == home_menu.TEXT
+        assert sends[1]['markup'] is not None
+        assert fake_db._users[uid]['album_ids'] == str(sends[0]['id'])
+        assert fake_db._users[uid]['ui_msg_id'] == sends[1]['id']
+        assert {k:v for k,v in fake_db._users[uid].items() if k not in ('ui_msg_id', 'album_ids')} == {
+            k:v for k,v in initial.items() if k not in ('ui_msg_id', 'album_ids')}
         assert state.state is None
 
         await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
         assert bot.calls[-1]['kind'] == 'text'
         assert bot.calls[-1]['asset'] is None
         assert bot.calls[-1]['body'] == home_menu.TEXT
+        assert all(any(c['kind'] == 'delete' and c['id'] == old['id'] for c in bot.calls)
+                   for old in sends)
+        assert bot.calls[-2]['kind'] == 'animation'
 
         with patch.object(bot_mod, '_show_menu', AsyncMock()) as menu, \
              patch.object(bot_mod, 'show', AsyncMock()) as show:
@@ -129,23 +136,60 @@ async def main():
         assert state.state == 'registration-in-progress'
         assert cb.answers == [(home_menu.PENDING[action], True)]
 
-    # The retained banner renderer still falls back safely when used directly.
+    # Missing/rejected GIFs fall back to a separate photo, leaving the menu wide.
     bot = H.FakeBot()
     with patch.object(bot_mod, 'media_missing', side_effect=lambda key, ext: key == home_menu.ANIMATION):
-        await bot_mod.render(bot, 72010, home_menu.ANIMATION, home_menu.TEXT,
-                             home_menu.keyboard(), is_video=True)
-    assert bot.calls[-1]['kind'] == 'photo'
-    assert bot.calls[-1]['asset'] == 'assets/home_banner.png'
+        await bot_mod.start(H.FakeMessage(72010, '/start'), bot, H.FakeState())
+    assert bot.calls[-2]['kind'] == 'photo'
+    assert bot.calls[-2]['asset'] == 'assets/home_banner.png'
+    assert bot.calls[-2]['body'] is None and bot.calls[-2]['markup'] is None
+    assert bot.calls[-1]['kind'] == 'text'
     assert bot.calls[-1]['body'] == home_menu.TEXT and bot.calls[-1]['markup']
 
     bot = H.FakeBot()
     bot.send_animation = AsyncMock(side_effect=TelegramBadRequest(
         method=SendAnimation(chat_id=72010, animation='bad-id'), message='Invalid animation'))
-    await bot_mod.render(bot, 72010, home_menu.ANIMATION, home_menu.TEXT,
-                         home_menu.keyboard(), is_video=True)
-    assert bot.calls[-1]['kind'] == 'photo'
+    await bot_mod.start(H.FakeMessage(72010, '/start'), bot, H.FakeState())
+    assert bot.calls[-2]['kind'] == 'photo'
+    assert bot.calls[-1]['kind'] == 'text'
     assert bot.calls[-1]['body'] == home_menu.TEXT and bot.calls[-1]['markup']
     assert fake_db._users[72010]['ui_msg_id'] == bot.calls[-1]['id']
+
+    # Neither missing media nor upload failures can hide the welcome controls.
+    for missing in (True, False):
+        bot = H.FakeBot()
+        bot.send_animation = AsyncMock(side_effect=RuntimeError('upload unavailable'))
+        bot.send_photo = AsyncMock(side_effect=RuntimeError('upload unavailable'))
+        with patch.object(bot_mod, 'media_missing', return_value=missing):
+            await bot_mod.start(H.FakeMessage(72010, '/start'), bot, H.FakeState())
+        sends = [c for c in bot.calls if c['kind'] != 'delete']
+        assert len(sends) == 1 and sends[0]['kind'] == 'text'
+        assert sends[0]['body'] == home_menu.TEXT and sends[0]['markup']
+        assert fake_db._users[72010]['album_ids'] is None
+
+    # Navigation removes both messages using persisted IDs, even after reload.
+    bot = H.FakeBot()
+    await bot_mod.start(H.FakeMessage(72040, '/start'), bot, H.FakeState())
+    home_ids = {c['id'] for c in bot.calls if c['kind'] != 'delete'}
+    reloaded = H._load_bot()
+    for action in ('home:language', 'home:access'):
+        bot.calls.clear()
+        await reloaded.home_action(H.FakeCB(72040, action, 1), bot, H.FakeState())
+        assert home_ids.issubset({c['id'] for c in bot.calls if c['kind'] == 'delete'})
+        assert fake_db._users[72040]['album_ids'] is None
+        bot.calls.clear()
+        await reloaded.home_action(H.FakeCB(72040, 'home:back', 1), bot, H.FakeState())
+        home_ids = {c['id'] for c in bot.calls if c['kind'] != 'delete'}
+
+    # A signal finishing after /start must not erase the new GIF's tracked ID.
+    bot = H.FakeBot()
+    async def navigate_home(_seconds):
+        await bot_mod.start(H.FakeMessage(72041, '/start'), bot, H.FakeState())
+    with patch.object(bot_mod.asyncio, 'sleep', navigate_home):
+        await bot_mod._run_signal(bot, 72041, 1, 'M1')
+    banner = next(c for c in bot.calls if c['kind'] == 'animation')
+    assert fake_db._users[72041]['album_ids'] == str(banner['id'])
+    assert H.last_screen(bot)['body'] == home_menu.TEXT
 
     # Telegram animation.file_id is reused and never mixed with the old photo.
     key = home_menu.ANIMATION
@@ -155,10 +199,10 @@ async def main():
     assert fake_db._media_cache[key][0] == 'animation-file-id'
     assert key not in bot_mod._photo_cache
     bot = H.FakeBot()
-    await bot_mod.render(bot, 72011, key, home_menu.TEXT,
-                         home_menu.keyboard(), is_video=True)
-    assert bot.calls[-1]['kind'] == 'animation'
-    assert bot.calls[-1]['asset'] == 'animation-file-id'
+    await bot_mod.start(H.FakeMessage(72011, '/start'), bot, H.FakeState())
+    assert bot.calls[-2]['kind'] == 'animation'
+    assert bot.calls[-2]['asset'] == 'animation-file-id'
+    assert bot.calls[-1]['kind'] == 'text'
 
     # An expired cached animation retries from the local MP4 once.
     rejection = TelegramBadRequest(
@@ -170,7 +214,8 @@ async def main():
     assert str(calls[1].args[1].path) == 'assets/home_banner_loop.mp4'
     assert key not in bot_mod._video_cache
 
-    # If explicitly warmed, the loop must still use a reusable animation ID.
+    # Startup warms the separate home banner with a reusable animation ID.
+    assert (key, 'mp4') in bot_mod.referenced_assets()
     bot = H.FakeBot()
     result.message_id = 900
     bot.send_animation = AsyncMock(return_value=result)
@@ -181,7 +226,7 @@ async def main():
     bot.send_animation.assert_awaited_once()
     assert bot_mod.cached_id(key, 'mp4') == 'animation-file-id'
     bot_mod._video_cache.clear()
-    print('PASS - text welcome, preserved account data/access routing, and retained banner cache/fallback support.')
+    print('PASS - separate GIF and wide menu, navigation cleanup, upload fallbacks, cache, and access routing.')
 
 
 if __name__ == '__main__':

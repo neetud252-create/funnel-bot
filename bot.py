@@ -269,7 +269,8 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(config.UID_GUIDE_PHOTO, 'jpg')}
+    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4'),
+           (config.UID_GUIDE_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -423,8 +424,27 @@ async def wipe(bot, tg_id):
                 pass
         await db.set_album(tg_id, None)
 
+async def _send_home_banner(bot, tg_id):
+    # Keep the animation separate from the welcome text so its media width
+    # does not constrain the menu. A missing banner must not hide the buttons.
+    for key, is_video in ((home_menu.ANIMATION, True), (home_menu.PHOTO, False)):
+        if media_missing(key, 'mp4' if is_video else 'jpg'):
+            continue
+        try:
+            message = await send_media(bot, tg_id, key, is_video, None, None)
+        except Exception as exc:
+            logging.warning('Home banner %s unavailable: %s', key, type(exc).__name__)
+            continue
+        if is_video:
+            await remember_video(key, message)
+        else:
+            await remember(key, message)
+        return message
+    return None
+
+
 async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
-                 reply_to_message_id=None, raise_on_error=False):
+                 reply_to_message_id=None, raise_on_error=False, home_banner=False):
     if media_key == home_menu.ANIMATION and media_missing(media_key, 'mp4'):
         media_key, is_video = home_menu.PHOTO, False
     kb = build_kb(kb_rows)
@@ -444,7 +464,16 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
             await bot.delete_message(chat_id=tg_id, message_id=msg_id)
         except Exception as e:
             logging.warning("delete screen failed: %s", e)
+    # Companion messages (including the home GIF) belong to the old screen.
+    # Persist their IDs so navigation can clean them up after a restart too.
+    if user and user['album_ids']:
+        await _drop_msgs(bot, tg_id, [int(mid) for mid in str(user['album_ids']).split(',')])
+        await db.set_album(tg_id, None)
     try:
+        if home_banner:
+            banner = await _send_home_banner(bot, tg_id)
+            if banner:
+                await db.set_album(tg_id, str(banner.message_id))
         if media_key is None:
             # Deliberately text-only, not a missing asset - nothing to warn about.
             reply = {'reply_parameters': ReplyParameters(message_id=reply_to_message_id,
@@ -554,7 +583,7 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     await _clear_nudge(bot, tg_id)
     # A text message lets Telegram use its wider chat bubble for the menu;
     # attaching these buttons to the banner constrains them to the media width.
-    await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())
+    await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard(), home_banner=True)
 
 
 @dp.callback_query(F.data.startswith("home:"))
@@ -584,7 +613,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await cb.answer()
         await state.clear()
         await _clear_nudge(bot, cb.from_user.id)
-        await render(bot, cb.from_user.id, None, home_menu.TEXT, home_menu.keyboard())
+        await render(bot, cb.from_user.id, None, home_menu.TEXT, home_menu.keyboard(), home_banner=True)
         return
     if action in home_menu.PENDING:
         await cb.answer(home_menu.PENDING[action], show_alert=True)
@@ -984,9 +1013,8 @@ async def _send_wait_screen(bot, tg_id, msg_id, total):
     # caption it would render as a small inline glyph on the same line as the
     # text instead of the full-size custom emoji the reference shows, and a
     # caption needs a photo to hang off, which is exactly what must not be here.
-    # Returns (ui_id, extra_ids): ui_id is the message render() will clear when
-    # the signal lands, extra_ids are the messages this has to delete itself,
-    # since render() only ever clears ui_msg_id.
+    # Returns (ui_id, extra_ids); render() or this task cleans up both messages
+    # when navigation or the finished signal replaces the waiting screen.
     # Clear the screen first, so the tapped button grid is gone while we wait.
     # ui_msg_id is the tapped screen, album_ids holds the waiting messages of a
     # run this tap just cancelled (they are parked there precisely so they
@@ -1049,16 +1077,15 @@ async def _run_signal(bot, tg_id, msg_id, expiry):
         deadline = loop.time() + total
         ui_id, extra_ids = await _send_wait_screen(bot, tg_id, msg_id, total)
         await asyncio.sleep(max(0, deadline - loop.time()))
-        # Unconditional, and ahead of the ownership check below: these two are
-        # ours either way, and a screen that took over mid-wait replaced only
-        # ui_msg_id, so nothing else is going to clean them up.
+        # These IDs belong to this task even if navigation already removed them.
+        # Do not clear a newer screen's companion-message tracking mid-wait.
         await _drop_msgs(bot, tg_id, extra_ids)
-        await db.set_album(tg_id, None)
         user = await db.get_user(tg_id)
         if user and user["ui_msg_id"] != ui_id:
             # Another screen took over the chat while we counted down; it owns
             # ui_msg_id now, so dropping the signal beats clobbering it.
             return
+        await db.set_album(tg_id, None)
         # Re-check after the countdown: verification may have been revoked.
         if not await _require_signal_verification(bot, tg_id):
             return

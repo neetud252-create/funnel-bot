@@ -599,7 +599,6 @@ async def devstart_tests(bot_mod, fake_db, config):
               row["last_reset_date"] is None, repr(row["last_reset_date"]))
         check("is_premium becomes false",
               row["is_premium"] is False, str(row["is_premium"]))
-        check("album_ids is cleared", row["album_ids"] is None, repr(row["album_ids"]))
         check("last_checked is cleared alongside verified",
               row["last_checked"] is None, repr(row["last_checked"]))
 
@@ -629,8 +628,11 @@ async def devstart_tests(bot_mod, fake_db, config):
 
         # --- and the funnel restarts exactly as it does for a new user -------
         sends = [c for c in fake_bot.calls if c["kind"] != "delete"]
-        check("/devstart sends exactly one screen", len(sends) == 1,
+        check("/devstart sends the GIF then the text menu",
+              [c['kind'] for c in sends] == ['animation', 'text'],
               str([c["kind"] for c in sends]))
+        check("the new banner replaces the old album tracking",
+              row['album_ids'] == str(sends[0]['id']), repr(row['album_ids']))
         check("/devstart lands on the welcome menu",
               bot_mod.home_menu.TEXT == sends[-1]["body"], repr(sends[-1]["body"]))
         check("/devstart shows the wider text welcome menu",
@@ -673,9 +675,9 @@ async def devstart_tests(bot_mod, fake_db, config):
         check("/start leaves the signal counter alone",
               after["signals_used_today"] == 12, str(after["signals_used_today"]))
         check("/start leaves the deposit alone", after["deposit"] == 250)
-        check("/start still only repoints the tracked screen",
-              {k: v for k, v in after.items() if k != "ui_msg_id"}
-              == {k: v for k, v in before.items() if k != "ui_msg_id"},
+        check("/start still only repoints the tracked screen messages",
+              {k: v for k, v in after.items() if k not in ("ui_msg_id", "album_ids")}
+              == {k: v for k, v in before.items() if k not in ("ui_msg_id", "album_ids")},
               str(after))
         check("/start itself is never gated on ADMIN_IDS",
               not _is_admin_gated_start(bot_src),
@@ -716,7 +718,7 @@ async def devstart_tests(bot_mod, fake_db, config):
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
-          'await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())' in bot_src)
+          'await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard(), home_banner=True)' in bot_src)
     check("Get Bot Access opens the registration entry",
           "await _open_registration(bot, tg_id, state)" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",

@@ -1,4 +1,4 @@
-"""Public /start menu, sent as text so its buttons use the wider chat layout."""
+"""Public /start menu: a looping banner above text with the wider button layout."""
 import config
 
 PHOTO = 'home_banner'
