@@ -40,8 +40,8 @@ async def main():
             await bot_mod.start(H.FakeMessage(uid, '/start'), bot, state, command)
             attribution.assert_awaited_once_with(uid, command)
         sends = [c for c in bot.calls if c['kind'] != 'delete']
-        assert len(sends) == 1 and sends[0]['kind'] == 'animation'
-        assert sends[0]['asset'] == 'assets/home_banner_loop.mp4'
+        assert len(sends) == 1 and sends[0]['kind'] == 'text'
+        assert sends[0]['asset'] is None
         assert sends[0]['body'] == home_menu.TEXT
         assert sends[0]['markup'] is not None
         assert {k:v for k,v in fake_db._users[uid].items() if k!='ui_msg_id'} == {
@@ -49,8 +49,8 @@ async def main():
         assert state.state is None
 
         await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
-        assert bot.calls[-1]['kind'] == 'animation'
-        assert bot.calls[-1]['asset'] == 'assets/home_banner_loop.mp4'
+        assert bot.calls[-1]['kind'] == 'text'
+        assert bot.calls[-1]['asset'] is None
         assert bot.calls[-1]['body'] == home_menu.TEXT
 
         with patch.object(bot_mod, '_show_menu', AsyncMock()) as menu, \
@@ -105,7 +105,7 @@ async def main():
     await bot_mod.nav(H.FakeCB(uid, 'go:register', 1), bot, state)
     assert bot.calls[-1]['asset'] == 'assets/register.jpg'
     await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
-    assert bot.calls[-1]['kind'] == 'animation' and state.state is None
+    assert bot.calls[-1]['kind'] == 'text' and state.state is None
 
     # Returning users have the retired promotion removed when Telegram allows it.
     fake_db._users[72030] = dict(fake_db._fresh_row(), nudge_msg_id=7654)
@@ -129,10 +129,11 @@ async def main():
         assert state.state == 'registration-in-progress'
         assert cb.answers == [(home_menu.PENDING[action], True)]
 
-    # Missing/unavailable animations keep a usable welcome and its buttons.
+    # The retained banner renderer still falls back safely when used directly.
     bot = H.FakeBot()
     with patch.object(bot_mod, 'media_missing', side_effect=lambda key, ext: key == home_menu.ANIMATION):
-        await bot_mod.start(H.FakeMessage(72010, '/start'), bot, H.FakeState())
+        await bot_mod.render(bot, 72010, home_menu.ANIMATION, home_menu.TEXT,
+                             home_menu.keyboard(), is_video=True)
     assert bot.calls[-1]['kind'] == 'photo'
     assert bot.calls[-1]['asset'] == 'assets/home_banner.png'
     assert bot.calls[-1]['body'] == home_menu.TEXT and bot.calls[-1]['markup']
@@ -140,7 +141,8 @@ async def main():
     bot = H.FakeBot()
     bot.send_animation = AsyncMock(side_effect=TelegramBadRequest(
         method=SendAnimation(chat_id=72010, animation='bad-id'), message='Invalid animation'))
-    await bot_mod.start(H.FakeMessage(72010, '/start'), bot, H.FakeState())
+    await bot_mod.render(bot, 72010, home_menu.ANIMATION, home_menu.TEXT,
+                         home_menu.keyboard(), is_video=True)
     assert bot.calls[-1]['kind'] == 'photo'
     assert bot.calls[-1]['body'] == home_menu.TEXT and bot.calls[-1]['markup']
     assert fake_db._users[72010]['ui_msg_id'] == bot.calls[-1]['id']
@@ -153,7 +155,8 @@ async def main():
     assert fake_db._media_cache[key][0] == 'animation-file-id'
     assert key not in bot_mod._photo_cache
     bot = H.FakeBot()
-    await bot_mod.start(H.FakeMessage(72011, '/start'), bot, H.FakeState())
+    await bot_mod.render(bot, 72011, key, home_menu.TEXT,
+                         home_menu.keyboard(), is_video=True)
     assert bot.calls[-1]['kind'] == 'animation'
     assert bot.calls[-1]['asset'] == 'animation-file-id'
 
@@ -167,7 +170,7 @@ async def main():
     assert str(calls[1].args[1].path) == 'assets/home_banner_loop.mp4'
     assert key not in bot_mod._video_cache
 
-    # Startup must upload the loop as an animation, so its cached ID is reusable.
+    # If explicitly warmed, the loop must still use a reusable animation ID.
     bot = H.FakeBot()
     result.message_id = 900
     bot.send_animation = AsyncMock(return_value=result)
@@ -178,7 +181,7 @@ async def main():
     bot.send_animation.assert_awaited_once()
     assert bot_mod.cached_id(key, 'mp4') == 'animation-file-id'
     bot_mod._video_cache.clear()
-    print('PASS - animated welcome, cache/retry, still-image fallback, preserved account data and access routing.')
+    print('PASS - text welcome, preserved account data/access routing, and retained banner cache/fallback support.')
 
 
 if __name__ == '__main__':

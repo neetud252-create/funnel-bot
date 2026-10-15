@@ -1,4 +1,4 @@
-"""Public /start welcome menu. Additional features are enabled separately."""
+"""Public /start menu, sent as text so its buttons use the wider chat layout."""
 import config
 
 PHOTO = 'home_banner'

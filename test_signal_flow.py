@@ -633,8 +633,8 @@ async def devstart_tests(bot_mod, fake_db, config):
               str([c["kind"] for c in sends]))
         check("/devstart lands on the welcome menu",
               bot_mod.home_menu.TEXT == sends[-1]["body"], repr(sends[-1]["body"]))
-        check("/devstart shows the welcome banner and caption",
-              sends[-1]["kind"] == "animation" and sends[-1]["asset"] == "assets/home_banner_loop.mp4")
+        check("/devstart shows the wider text welcome menu",
+              sends[-1]["kind"] == "text" and sends[-1]["asset"] is None)
         check("the new welcome message becomes the tracked screen",
               row["ui_msg_id"] == sends[-1]["id"],
               "%s vs %s" % (row["ui_msg_id"], sends[-1]["id"]))
@@ -716,7 +716,7 @@ async def devstart_tests(bot_mod, fake_db, config):
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
-          'await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)' in bot_src)
+          'await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())' in bot_src)
     check("Get Bot Access opens the registration entry",
           "await _open_registration(bot, tg_id, state)" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",

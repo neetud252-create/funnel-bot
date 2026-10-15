@@ -269,8 +269,7 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4'),
-           (config.UID_GUIDE_PHOTO, 'jpg')}
+    ref = {(config.UID_GUIDE_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -553,7 +552,9 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     # command defaults to None so /devstart's start(m, bot, state) still works.
     await _capture_ref(tg_id, command)
     await _clear_nudge(bot, tg_id)
-    await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)
+    # A text message lets Telegram use its wider chat bubble for the menu;
+    # attaching these buttons to the banner constrains them to the media width.
+    await render(bot, tg_id, None, home_menu.TEXT, home_menu.keyboard())
 
 
 @dp.callback_query(F.data.startswith("home:"))
@@ -583,7 +584,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await cb.answer()
         await state.clear()
         await _clear_nudge(bot, cb.from_user.id)
-        await render(bot, cb.from_user.id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(), is_video=True)
+        await render(bot, cb.from_user.id, None, home_menu.TEXT, home_menu.keyboard())
         return
     if action in home_menu.PENDING:
         await cb.answer(home_menu.PENDING[action], show_alert=True)
