@@ -25,7 +25,7 @@ def keyboard():
     support = support if support.startswith(('https://', 'http://')) else 'https://t.me/' + support.lstrip('@')
     return [
         [('💎 Get Bot Access', 'cb:home:access', 'success')],
-        [('📖 Guide', 'url:https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy', 'primary'),
+        [('📖 Guide', 'cb:go:guide', 'primary'),
          ('🎯 Test Signals', 'cb:home:test', 'primary')],
         [('⭐ Review', 'url:https://t.me/goplustrade_reviews', 'danger'),
          ('☎️ Support', 'url:' + support, 'danger')],

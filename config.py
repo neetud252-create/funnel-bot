@@ -836,6 +836,11 @@ SCREENS = {
                [("M7", "cb:m:7"), ("M8", "cb:m:8"), ("M9", "cb:m:9")],
                [("\U00002705 M10", "cb:m:10")]],
     },
+    "guide": {
+        "video": "guide_opPxk6Af",
+        "text": "📖 <b>Guide</b>",
+        "kb": [[("⬅️ Back", "cb:home:back", "primary")]],
+    },
     # TODO(Group C): replace stub with the real step-by-step registration guide
     "howto": {
         "photo": "howto",

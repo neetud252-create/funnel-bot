@@ -19,6 +19,8 @@ async def main():
         '💎 Get Bot Access', '📖 Guide', '🎯 Test Signals', '⭐ Review',
         '☎️ Support', '▶️ YouTube', '📢 Channel', '📊 Money Management Sheet', '🌐 Change Language']
     assert rows[0][0].callback_data == 'home:access'
+    assert rows[1][0].callback_data == 'go:guide'
+    assert rows[1][0].url is None
     for value in ('@flashhher', 'https://t.me/flashhher'):
         with patch.object(config, 'SUPPORT', value):
             assert home_menu.keyboard()[2][1][1] == 'url:https://t.me/flashhher'
@@ -57,6 +59,28 @@ async def main():
         assert bot.calls[-1]['body'] == home_menu.TEXT
         assert all(any(c['kind'] == 'delete' and c['id'] == old['id'] for c in bot.calls)
                    for old in sends)
+
+        # Both new and verified users can watch the uploaded guide in the chat.
+        # Returning home removes the guide and restores the full welcome card.
+        home_id = fake_db._users[uid]['ui_msg_id']
+        state.state = 'registration-in-progress'
+        guide_cb = H.FakeCB(uid, rows[1][0].callback_data, home_id)
+        await bot_mod.nav(guide_cb, bot, state)
+        guide = bot.calls[-1]
+        assert guide_cb.answers == [(None, False)]
+        assert guide['kind'] == 'video'
+        assert guide['asset'] == 'assets/guide_opPxk6Af.mp4'
+        assert guide['body'] == config.SCREENS['guide']['text']
+        assert any(c['kind'] == 'delete' and c['id'] == home_id for c in bot.calls)
+        assert fake_db._users[uid]['ui_msg_id'] == guide['id']
+        assert fake_db._users[uid]['verified'] == verified
+        assert state.state is None
+        back = guide['markup'].inline_keyboard[0][0]
+        assert back.callback_data == 'home:back'
+        await bot_mod.home_action(H.FakeCB(uid, back.callback_data, guide['id']), bot, state)
+        assert bot.calls[-1]['asset'] == 'assets/home_banner_loop.mp4'
+        assert bot.calls[-1]['body'] == home_menu.TEXT
+        assert any(c['kind'] == 'delete' and c['id'] == guide['id'] for c in bot.calls)
 
         with patch.object(bot_mod, '_show_menu', AsyncMock()) as menu, \
              patch.object(bot_mod, 'show', AsyncMock()) as show:
@@ -220,6 +244,7 @@ async def main():
 
     # Startup warms the new video key using send_video, not send_animation.
     assert (key, 'mp4') in bot_mod.referenced_assets()
+    assert (config.SCREENS['guide']['video'], 'mp4') in bot_mod.referenced_assets()
     bot = H.FakeBot()
     result.message_id = 900
     bot.send_video = AsyncMock(return_value=result)
