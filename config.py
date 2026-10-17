@@ -838,6 +838,7 @@ SCREENS = {
     },
     "guide": {
         "video": "guide_opPxk6Af",
+        "video_options": {"width": 1080, "height": 1920, "duration": 99},
         "text": "📖 <b>Guide</b>",
         "kb": [[("⬅️ Back", "cb:home:back", "primary")]],
     },

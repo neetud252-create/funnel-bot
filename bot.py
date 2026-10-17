@@ -196,6 +196,15 @@ def media_sender(bot, key, ext):
         return bot.send_animation if key == home_menu.ANIMATION else bot.send_video
     return bot.send_photo
 
+def media_send_options(key, ext):
+    # Supply the source dimensions on the first upload, including cache warming.
+    # Telegram retains the uploaded video's metadata when its file_id is reused.
+    if ext == "mp4":
+        for screen in config.SCREENS.values():
+            if screen.get("video") == key:
+                return dict(screen.get("video_options", {}))
+    return {}
+
 async def send_media(bot, tg_id, key, is_video, text, kb):
     """Send a screen's media, preferring the cached file_id.
 
@@ -205,10 +214,11 @@ async def send_media(bot, tg_id, key, is_video, text, kb):
     """
     ext = "mp4" if is_video else "jpg"
     send = media_sender(bot, key, ext)
+    options = media_send_options(key, ext)
     media = cached_id(key, ext) or FSInputFile(asset_path(key, ext))
     try:
         return await send(tg_id, media, caption=text, parse_mode="HTML",
-                          reply_markup=kb)
+                          reply_markup=kb, **options)
     except TelegramBadRequest:
         if not isinstance(media, str):
             raise               # a fresh upload failed; nothing to retry with
@@ -216,7 +226,7 @@ async def send_media(bot, tg_id, key, is_video, text, kb):
                         "re-uploading", key)
         await _forget(key, ext)
         return await send(tg_id, FSInputFile(asset_path(key, ext)), caption=text,
-                          parse_mode="HTML", reply_markup=kb)
+                          parse_mode="HTML", reply_markup=kb, **options)
 
 async def send_review_album(bot, tg_id):
     """send_media()'s contract, for the one screen that cannot use it.
@@ -307,7 +317,8 @@ async def warm_media_cache(bot):
             continue
         try:
             sender = media_sender(bot, key, ext)
-            m = await sender(chat, FSInputFile(asset_path(key, ext)))
+            m = await sender(chat, FSInputFile(asset_path(key, ext)),
+                             **media_send_options(key, ext))
             if ext == "mp4":
                 await remember_video(key, m)
             else:

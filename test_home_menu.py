@@ -70,6 +70,7 @@ async def main():
         assert guide_cb.answers == [(None, False)]
         assert guide['kind'] == 'video'
         assert guide['asset'] == 'assets/guide_opPxk6Af.mp4'
+        assert (guide['width'], guide['height'], guide['duration']) == (1080, 1920, 99)
         assert guide['body'] == config.SCREENS['guide']['text']
         assert any(c['kind'] == 'delete' and c['id'] == home_id for c in bot.calls)
         assert fake_db._users[uid]['ui_msg_id'] == guide['id']
@@ -255,6 +256,23 @@ async def main():
     bot.send_video.assert_awaited_once()
     assert bot_mod.cached_id(key, 'mp4') == 'video-file-id'
     bot_mod._video_cache.clear()
+    # Warming must upload the portrait dimensions too, because later requests
+    # reuse that video's file_id. Expired IDs must retain them on the retry.
+    guide_key = config.SCREENS['guide']['video']
+    result.video.file_id = 'portrait-guide-id'
+    bot.send_video = AsyncMock(return_value=result)
+    with patch.object(config, 'MEDIA_WARM_CHAT', 72011), \
+         patch.object(bot_mod, 'referenced_assets', return_value={(guide_key, 'mp4')}), \
+         patch.object(bot_mod.asyncio, 'sleep', AsyncMock()):
+        await bot_mod.warm_media_cache(bot)
+    assert bot.send_video.await_args.kwargs == {'width': 1080, 'height': 1920, 'duration': 99}
+    assert bot_mod.cached_id(guide_key, 'mp4') == 'portrait-guide-id'
+    bot.send_video = AsyncMock(side_effect=[rejection, result])
+    await bot_mod.send_media(bot, 72011, guide_key, True, config.SCREENS['guide']['text'], None)
+    assert bot.send_video.await_args_list[0].args[1] == 'portrait-guide-id'
+    assert str(bot.send_video.await_args_list[1].args[1].path) == 'assets/guide_opPxk6Af.mp4'
+    for call in bot.send_video.await_args_list:
+        assert (call.kwargs['width'], call.kwargs['height'], call.kwargs['duration']) == (1080, 1920, 99)
     print('PASS - single video/caption/menu card, old-layout cleanup, fallbacks, video cache, and access routing.')
 
 
