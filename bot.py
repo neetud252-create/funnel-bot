@@ -11,6 +11,8 @@ import uvicorn
 import db, config, panelbot
 import broadcast
 import activity_stats
+import analytics
+import analytics_reports
 import home_menu
 import localization
 import chart_signals
@@ -31,6 +33,7 @@ async def _broadcast_open(cb, bot, state):
 
 # Register before UID handlers; admin drafting never changes the funnel FSM.
 activity_stats.install(dp)
+analytics_reports.install(dp)
 broadcast.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
 
 class Reg(StatesGroup):
@@ -444,6 +447,16 @@ async def wipe(bot, tg_id):
         await db.set_album(tg_id, None)
 
 async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
+                 reply_to_message_id=None, raise_on_error=False, screen_key=None):
+    token = analytics._screen.set(screen_key or analytics.screen_name(text))
+    try:
+        return await _render(bot, tg_id, media_key, text, kb_rows, is_video,
+                             reply_to_message_id=reply_to_message_id, raise_on_error=raise_on_error)
+    finally:
+        analytics._screen.reset(token)
+
+
+async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
                  reply_to_message_id=None, raise_on_error=False):
     is_home_media = media_key in (home_menu.ANIMATION, home_menu.VIDEO)
     if is_home_media and media_missing(media_key, 'mp4'):
@@ -1743,6 +1756,7 @@ async def main():
     async with db.pool.acquire() as conn:
         await conn.execute(broadcast.SCHEMA)
         await conn.execute(activity_stats.SCHEMA)
+        await conn.execute(analytics.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
         await conn.execute(chart_signals.trial.SCHEMA)
     logging.info('Screenshot analysis ready; provider=%s; API configured=%s; model=%s; strategy=%s',
@@ -1754,12 +1768,20 @@ async def main():
                  config.daily_limit(False), config.daily_limit(True))
     # Validate dashboard queries against the live schema before accepting commands.
     await activity_stats.report()
+    for report_name in analytics_reports.QUERIES:
+        await analytics_reports.fetch(report_name, 30, limit=0)
+    detailed_activity = analytics.InboundMiddleware()
+    dp.message.outer_middleware(detailed_activity)
+    dp.callback_query.outer_middleware(detailed_activity)
     activity_middleware = activity_stats.ActivityMiddleware()
     dp.message.outer_middleware(activity_middleware)
     dp.callback_query.outer_middleware(activity_middleware)
     logging.info('Admin activity statistics ready; /stats enabled')
     logging.info('Broadcast schema ready; admin drafting and delivery queue enabled')
     bot = Bot(os.environ["BOT_TOKEN"])
+    bot.session.middleware(analytics.OutboundMiddleware())
+    logging.info('Detailed analytics ready; /analytics and /userstats enabled; link tracking=%s',
+                 bool(config.ANALYTICS_LINK_BASE))
     language_context = localization.UserContextMiddleware()
     dp.message.outer_middleware(language_context)
     dp.callback_query.outer_middleware(language_context)

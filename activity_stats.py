@@ -29,6 +29,9 @@ async def record(uid, kind, campaign=''):
     except Exception:
         # Metrics must never interrupt registration, gifts or signals.
         logging.exception('Activity tracking failed kind=%s', kind)
+    if kind != 'active':
+        import analytics
+        await analytics.record(uid, kind, campaign)
 
 
 class ActivityMiddleware(BaseMiddleware):

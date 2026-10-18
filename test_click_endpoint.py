@@ -455,8 +455,8 @@ async def main_async(server, config, db, records):
           str(r.status_code))
     check("it answers with an image, so onload fires",
           r.media_type == "image/gif", str(r.media_type))
-    check("the image is a real GIF", (r.content or b"")[:6] == b"GIF89a",
-          repr((r.content or b"")[:6]))
+    body = getattr(r, "body", getattr(r, "content", b"")) or b""
+    check("the image is a real GIF", body[:6] == b"GIF89a", repr(body[:6]))
     check("the pixel is never cached, or a repeat beacon is never sent",
           "no-store" in (r.headers or {}).get("Cache-Control", ""),
           str(r.headers))

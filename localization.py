@@ -167,7 +167,7 @@ def localize_method(method, language):
                 callback = button.callback_data or ''
                 # Language names stay recognizable from any selected language.
                 # Admin campaign controls keep their original wording.
-                skip = callback.startswith('lang:') or (
+                skip = callback.startswith(('lang:', 'an:')) or (
                     callback.startswith('bc:') and not callback.startswith(('bc:open:', 'bc:stop')))
                 text = button.text if skip else translate_parts(button.text, language, button=True)
                 buttons.append(button.model_copy(update={'text': text}))

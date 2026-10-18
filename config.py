@@ -123,6 +123,8 @@ def ref_url(sub_id, base=None):
     query.append((REF_SUB_PARAM, str(sub_id)))
     return urlunsplit(parts._replace(query=urlencode(query)))
 ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
+# Existing bot API domain; an empty override keeps URL buttons direct.
+ANALYTICS_LINK_BASE = os.getenv("ANALYTICS_LINK_BASE", "https://track.topxtracker.online").strip().rstrip('/')
 
 # Group F verification thresholds.
 MIN_DEPOSIT = Decimal(os.getenv("MIN_DEPOSIT", "50"))

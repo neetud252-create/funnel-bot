@@ -12,8 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import config
 import db
+import analytics
 
 app = FastAPI()
+app.include_router(analytics.router)
 log = logging.getLogger(__name__)
 
 # Browsers will not POST /click cross-origin without these headers. Added only

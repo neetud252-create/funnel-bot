@@ -94,23 +94,23 @@ async def open_screen(cb, bot, state, render, *, upload=False):
     back = VERIFIED_BACK if verified else BACK
     usage = await usage_text(cb.from_user.id) if verified else ''
     if verified and not left:
-        await render(bot, cb.from_user.id, None, MESSAGES['limit'] + usage, back)
+        await render(bot, cb.from_user.id, None, MESSAGES['limit'] + usage, back, screen_key='chart_limit')
         return
     if not verified and not left:
-        await render(bot, cb.from_user.id, None, EXHAUSTED, ACCESS)
+        await render(bot, cb.from_user.id, None, EXHAUSTED, ACCESS, screen_key='chart_trial_exhausted')
         return
     if not upload:
         intro = TEST_INTRO if os.getenv('CHART_UI_TEST_COPY', '').strip() == '1' else INTRO
         await render(bot, cb.from_user.id, None,
                      VERIFIED + usage if verified else intro.format(left=left),
-                     UPLOAD[:1] + back)
+                     UPLOAD[:1] + back, screen_key='chart_intro')
         return
     if not api.configured():
-        await render(bot, cb.from_user.id, None, MESSAGES['configuration'], back)
+        await render(bot, cb.from_user.id, None, MESSAGES['configuration'], back, screen_key='chart_unavailable')
         return
     await state.set_state(Chart.waiting_image.state)
     await state.update_data(chart_session=secrets.token_hex(12), chart_verified=verified)
-    await render(bot, cb.from_user.id, None, PROMPT + usage, back)
+    await render(bot, cb.from_user.id, None, PROMPT + usage, back, screen_key='chart_upload')
 
 
 def timer_text(timeframe, language):
@@ -217,7 +217,7 @@ async def receive(m, bot, state, render):
             return
         if not await active():
             return
-        loading = await render(bot, tg_id, None, chart_progress.frame(language), back)
+        loading = await render(bot, tg_id, None, chart_progress.frame(language), back, screen_key='chart_processing')
         progress = chart_progress.Progress(bot, tg_id, loading, language, active)
         progress.start()
         try:
@@ -247,7 +247,7 @@ async def receive(m, bot, state, render):
             try:
                 delivery_attempted = True
                 await render(bot, tg_id, None, text, NEW_ANALYSIS[:1] + back,
-                             reply_to_message_id=m.message_id, raise_on_error=True)
+                             reply_to_message_id=m.message_id, raise_on_error=True, screen_key='chart_result')
             except (TelegramBadRequest, TelegramForbiddenError):
                 # Telegram explicitly rejected the send, so no signal was delivered.
                 await trial.release(db.pool, token, delivery_rejected=True)
@@ -256,12 +256,13 @@ async def receive(m, bot, state, render):
         code = str(exc)
         logging.warning('Chart analysis failed: code=%s detail=%s', code, exc.detail)
         if session and await active():
-            await render(bot, tg_id, None, MESSAGES.get(code, MESSAGES['service']), NEW_ANALYSIS[:1] + back)
+            await render(bot, tg_id, None, MESSAGES.get(code, MESSAGES['service']), NEW_ANALYSIS[:1] + back,
+                         screen_key='chart_error')
     except Exception as exc:
         # Avoid logging image content, user captions, credentials or Telegram URLs.
         logging.warning('Chart request failed: type=%s', type(exc).__name__)
         if session and await active():
-            await render(bot, tg_id, None, MESSAGES['service'], back)
+            await render(bot, tg_id, None, MESSAGES['service'], back, screen_key='chart_error')
     finally:
         try:
             if progress is not None:
