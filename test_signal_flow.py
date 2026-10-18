@@ -293,11 +293,13 @@ class FakeBot:
         return FakeMsg(mid, text=text)
 
     async def send_video(self, chat_id, video, caption=None, parse_mode=None,
-                         reply_markup=None, width=None, height=None, duration=None):
+                         reply_markup=None, width=None, height=None, duration=None,
+                         cover=None):
         mid = self._mid()
         self.calls.append({"kind": "video", "id": mid, "body": caption,
                            "markup": reply_markup, "parse_mode": parse_mode,
                            "width": width, "height": height, "duration": duration,
+                           "cover": str(getattr(cover, "path", cover)) if cover else None,
                            "asset": str(getattr(video, "path", video))})
         return FakeMsg(mid, caption=caption)
 

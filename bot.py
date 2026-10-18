@@ -202,7 +202,13 @@ def media_send_options(key, ext):
     if ext == "mp4":
         for screen in config.SCREENS.values():
             if screen.get("video") == key:
-                return dict(screen.get("video_options", {}))
+                options = dict(screen.get("video_options", {}))
+                if cover := screen.get("video_cover"):
+                    # The square cover sizes the chat preview; the video keeps
+                    # its original dimensions in the full-screen player. Send
+                    # the cover even when reusing the video's cached file_id.
+                    options["cover"] = FSInputFile(asset_path(cover, "jpg"))
+                return options
     return {}
 
 async def send_media(bot, tg_id, key, is_video, text, kb):
