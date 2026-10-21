@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramBadRequest
 import uvicorn
 import db, config, panelbot
 import broadcast
+import verification_reminders
 import activity_stats
 import analytics
 import analytics_reports
@@ -35,6 +36,7 @@ async def _broadcast_open(cb, bot, state):
 activity_stats.install(dp)
 analytics_reports.install(dp)
 broadcast.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
+verification_reminders.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
 
 class Reg(StatesGroup):
     waiting_uid = State()
@@ -1755,6 +1757,7 @@ async def main():
     await db.connect()
     async with db.pool.acquire() as conn:
         await conn.execute(broadcast.SCHEMA)
+        await conn.execute(verification_reminders.SCHEMA)
         await conn.execute(activity_stats.SCHEMA)
         await conn.execute(analytics.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
@@ -1802,7 +1805,8 @@ async def main():
     port = int(os.environ.get("PORT", 8000))
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
-    tasks = [server.serve(), dp.start_polling(bot), broadcast.worker(bot)]
+    tasks = [server.serve(), dp.start_polling(bot), broadcast.worker(bot),
+             verification_reminders.worker(bot)]
     if config.ENABLE_AUTO_RETRY:
         logging.info("ENABLE_AUTO_RETRY on - background re-check every 30 min")
         tasks.append(retry_worker(bot))
@@ -1815,3 +1819,4 @@ async def main():
         await chart_signals.api.close_provider_client()
 
 asyncio.run(main())
+

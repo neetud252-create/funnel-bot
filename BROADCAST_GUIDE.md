@@ -35,5 +35,34 @@ and Telegram rate-limit responses are honored. Interrupted or ambiguous sends
 are reported as uncertain and are not automatically repeated: Telegram and the
 database cannot provide an atomic exactly-once acknowledgement.
 
-Broadcasts are manual; this feature does not schedule posts, send campaigns
-automatically, or copy the promotional claims in reference screenshots.
+Broadcast posts remain manual. Verification reminders are a separate automation.
+
+## Automatic verification reminders
+
+Enabled on first deployment. Each existing or future private-chat user who is
+still unverified at least 24 hours after joining receives one neutral reminder
+to open verification and check their Pocket Option Trader ID. Both users without
+a UID and users with a submitted UID are included. Unverified does not mean the
+submitted ID is necessarily incorrect.
+
+Admins, verified users, unsubscribed users and blocked users are excluded. The
+eligibility check runs again before each send. Receiving a reminder does not
+change registration state or verification. **Open verification** uses the existing
+access-checked route. **Stop reminders** and `/unsubscribe` stop reminders and
+broadcasts while preserving bot access; `/subscribe` restores eligibility but
+does not reset a previously sent reminder.
+
+Admin commands, in a private chat with Go+:
+- `/verificationreminders`: status, eligible count, delivery totals and message text.
+- `/remindersoff`: pause automatic verification reminders.
+- `/reminderson`: resume; does not resend completed reminders.
+
+The worker checks every minute, sends at most about one reminder per second and
+obeys Telegram retry-after responses (up to five explicit rate-limit retries).
+The PostgreSQL delivery record survives redeploys; a single-worker advisory lock
+and atomic per-user claim prevent duplicate jobs. Interrupted or ambiguous sends
+are marked **uncertain** and not automatically repeated. Delivery is therefore
+best effort, not a guarantee that every eligible user receives or reads a message.
+Pausing persists across redeploys. An already in-flight message may still finish
+when a user verifies, opts out, or an admin pauses.
+
