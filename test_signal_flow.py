@@ -49,6 +49,7 @@ def _install_stub_modules():
     def _fresh_row():
         return {"ui_msg_id": None, "album_ids": None, "is_premium": False,
                 "welcome_message_id": None, "welcome_pinned_at": None,
+                "welcome_content_hash": None,
                 "signals_used_today": 0, "last_reset_date": None,
                 "verified": False, "verified_at": None, "uid": None,
                 "deposit": 0, "last_checked": None, "nudge_msg_id": None,
@@ -84,6 +85,16 @@ def _install_stub_modules():
         row = _u(tg_id)
         if row['welcome_message_id'] == msg_id and row['welcome_pinned_at'] is None:
             row['welcome_message_id'] = None
+            row['welcome_content_hash'] = None
+
+    async def mark_welcome_content(tg_id, msg_id, content_hash):
+        row = _u(tg_id)
+        if row['welcome_message_id'] == msg_id:
+            row['welcome_content_hash'] = content_hash
+
+    async def welcome_users_after(tg_id, limit=100):
+        return [{'tg_id': uid} for uid, row in sorted(db._users.items())
+                if uid > tg_id and row.get('welcome_message_id') is not None][:limit]
 
     async def set_album(tg_id, ids):
         _u(tg_id)["album_ids"] = ids
@@ -246,6 +257,7 @@ def _install_stub_modules():
         _u(tg_id)['broadcast_opt_out'] = not enabled
 
     for fn in (claim_welcome_message, mark_welcome_pinned, clear_missing_welcome,
+               mark_welcome_content, welcome_users_after,
                set_setup_stage, confirm_eligibility, clear_eligibility, record_access_check,
                set_notifications, get_user, set_ui_msg, set_album, signal_state, consume_signal,
                set_premium, is_premium, touch_user, save_ref_code,
@@ -310,6 +322,7 @@ class FakeBot:
     def __init__(self):
         self.calls = []
         self.pins = []
+        self.edits = []
         self._next = 1000
 
     def _mid(self):
@@ -379,6 +392,14 @@ class FakeBot:
 
     async def pin_chat_message(self, chat_id, message_id, disable_notification=None):
         self.pins.append((chat_id, message_id, disable_notification))
+        return True
+
+    async def edit_message_caption(self, **kwargs):
+        self.edits.append(dict(kind='caption', **kwargs))
+        return True
+
+    async def edit_message_text(self, **kwargs):
+        self.edits.append(dict(kind='text', **kwargs))
         return True
 
 

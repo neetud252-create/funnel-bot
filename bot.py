@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, FSInputFile, InputMediaPhoto, ReplyParameters)
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 import uvicorn
 import db, config, panelbot
 import broadcast
@@ -16,6 +16,7 @@ import activity_stats
 import analytics
 import analytics_reports
 import home_menu
+import start_here
 import journey
 import localization
 import chart_signals
@@ -90,6 +91,7 @@ _uid_lookup_at = {}
 _verify_inflight = {}
 _premium_checks = set()
 _welcome_locks = weakref.WeakValueDictionary()
+_welcome_sync_locks = weakref.WeakValueDictionary()
 
 # Cache entries are (file_id, content_hash). The hash is of the file's BYTES at
 # the moment Telegram issued that file_id, so replacing artwork on disk changes
@@ -473,6 +475,8 @@ async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
         media_key, is_video = home_menu.PHOTO, False
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
+    if user and user.get('welcome_message_id'):
+        await _sync_welcome(bot, tg_id)
     msg_id = user["ui_msg_id"] if user else None
     # Keep the pinned welcome; delete the current disposable screen FIRST,
     # then send its replacement. This is the
@@ -633,6 +637,8 @@ async def _pin_welcome(bot, tg_id, message):
         return
     try:
         saved = await db.claim_welcome_message(tg_id, message.message_id)
+        if saved:
+            await _sync_welcome(bot, tg_id)
         if not saved or saved['welcome_pinned_at']:
             # Respect a user's later unpin/hide; don't force the pin back.
             return
@@ -653,6 +659,76 @@ async def _pin_welcome(bot, tg_id, message):
     except Exception:
         logging.warning('Welcome pin unavailable for tg_id=%s; menu remains usable',
                         tg_id, exc_info=True)
+
+
+async def _sync_welcome(bot, tg_id, *, raise_retry_after=False):
+    """Edit the saved card in place; never re-pin a user's dismissed message."""
+    lock = _welcome_sync_locks.setdefault(tg_id, asyncio.Lock())
+    try:
+        async with lock, asyncio.timeout(10):
+            # Re-read under the lock so a verification during migration wins.
+            user = await db.get_user(tg_id)
+            message_id = user.get('welcome_message_id') if user else None
+            if not message_id:
+                return 'unchanged'
+            signature = start_here.signature(user)
+            if user.get('welcome_content_hash') == signature:
+                return 'unchanged'
+            kwargs = dict(chat_id=tg_id, message_id=message_id, parse_mode='HTML',
+                          reply_markup=build_kb(start_here.keyboard(user)))
+            try:
+                try:
+                    # Keep the approved GIF (or still image) and replace its caption.
+                    await bot.edit_message_caption(caption=start_here.TEXT, **kwargs)
+                except TelegramBadRequest as error:
+                    description = str(error).lower()
+                    if ('no caption' not in description and
+                            'not a media message' not in description):
+                        raise
+                    # A welcome sent during a media outage may be text-only.
+                    await bot.edit_message_text(text=start_here.TEXT, **kwargs)
+            except TelegramBadRequest as error:
+                if 'message is not modified' not in str(error).lower():
+                    raise
+            # Persist only after Telegram accepts the edit, including a retry
+            # whose previous edit succeeded but whose database write failed.
+            await db.mark_welcome_content(tg_id, message_id, signature)
+            return 'updated'
+    except TelegramRetryAfter:
+        if raise_retry_after:
+            raise
+        logging.warning('Start Here update rate limited for tg_id=%s; will retry', tg_id)
+    except Exception:
+        logging.warning('Start Here update unavailable for tg_id=%s; menu remains usable',
+                        tg_id, exc_info=True)
+    return 'unavailable'
+
+
+async def _refresh_saved_welcomes(bot):
+    """Upgrade existing cards at startup without sending or pinning new messages."""
+    after = 0
+    counts = dict(updated=0, unchanged=0, unavailable=0)
+    try:
+        while rows := await db.welcome_users_after(after):
+            for row in rows:
+                tg_id = row['tg_id']
+                for attempt in range(3):
+                    try:
+                        result = await _sync_welcome(bot, tg_id, raise_retry_after=True)
+                        break
+                    except TelegramRetryAfter as error:
+                        await asyncio.sleep(error.retry_after + 1)
+                else:
+                    result = 'unavailable'
+                counts[result] += 1
+                after = tg_id
+                # Leave headroom for normal bot replies and other background jobs.
+                if result != 'unchanged':
+                    await asyncio.sleep(1)
+        logging.info('Start Here refresh complete: updated=%d unchanged=%d unavailable=%d',
+                     counts['updated'], counts['unchanged'], counts['unavailable'])
+    except Exception:
+        logging.exception('Start Here refresh interrupted; remaining cards retry on interaction or restart')
 
 
 async def _journey(bot, tg_id, content, media=None, key=None):
@@ -2004,7 +2080,7 @@ async def main():
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
     tasks = [server.serve(), dp.start_polling(bot), broadcast.worker(bot),
-             verification_reminders.worker(bot)]
+             verification_reminders.worker(bot), _refresh_saved_welcomes(bot)]
     if config.ENABLE_AUTO_RETRY:
         logging.info("ENABLE_AUTO_RETRY on - background re-check every 30 min")
         tasks.append(retry_worker(bot))
