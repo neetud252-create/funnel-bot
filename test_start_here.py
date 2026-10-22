@@ -42,13 +42,15 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edit['caption'], start_here.TEXT)
         self.assertLess(len(start_here.TEXT), 1024)
         self.assertEqual(self.labels(), [
-            ['🎯 Try Free Analysis', '🚀 Account Setup'],
-            ['📖 How It Works', '💬 Support'], ['⭐ Reviews', '📢 Community']])
+            ['🎯 Try Free Analysis'], ['🚀 Account Setup'],
+            ['📖 How It Works', '📢 Community'], ['⭐ Reviews', '💬 Support']])
         self.assertEqual(self.bot.pins, [(self.uid, anchor, True)])
         self.assertEqual(self.bot.calls[-1]['asset'], 'assets/home_banner_loop.mp4')
         callbacks = [b.callback_data for r in edit['reply_markup'].inline_keyboard for b in r]
         self.assertEqual(callbacks, ['home:test', 'home:access', 'flow:how',
-                                     'flow:support', 'flow:reviews', 'flow:community'])
+                                     'flow:community', 'flow:reviews', 'flow:support'])
+        self.assertEqual([b.style for r in edit['reply_markup'].inline_keyboard for b in r],
+                         ['success', 'primary', 'primary', 'primary', 'danger', 'danger'])
         # Exercise the actual handlers, including the trial gate and configured links.
         trial = await self.tap(callbacks[0], anchor)
         self.assertIn('free', trial['body'].lower())
@@ -69,7 +71,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
                 self.mod.config.VERIFY_GRANTED, Decimal('50')))):
             await self.tap('flow:recheck', anchor)
         self.assertTrue(row['verified'])
-        self.assertEqual(self.labels()[0], ['📸 Analyse My Chart', '🏠 My Dashboard'])
+        self.assertEqual(self.labels()[:2], [['📸 Analyse My Chart'], ['🏠 My Dashboard']])
         self.assertEqual(self.bot.edits[-1]['message_id'], anchor)
         self.assertEqual(len(self.bot.pins), 1)
         chart = await self.tap('home:test', anchor)
@@ -82,7 +84,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bot.pins), 1)
         await self.db.unverify(self.uid)
         await self.start()
-        self.assertEqual(self.labels()[0], ['🎯 Try Free Analysis', '🚀 Account Setup'])
+        self.assertEqual(self.labels()[:2], [['🎯 Try Free Analysis'], ['🚀 Account Setup']])
 
     async def test_startup_upgrades_old_pins_in_place_with_pagination(self):
         for uid in (12, 13, 14):
@@ -96,7 +98,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
              patch.object(self.mod.asyncio, 'sleep', AsyncMock()):
             await self.mod._refresh_saved_welcomes(self.bot)
         self.assertEqual([e['message_id'] for e in self.bot.edits], [212, 213, 214])
-        self.assertEqual(self.bot.edits[1]['reply_markup'].inline_keyboard[0][1].text, '🏠 My Dashboard')
+        self.assertEqual(self.bot.edits[1]['reply_markup'].inline_keyboard[1][0].text, '🏠 My Dashboard')
         self.assertEqual(self.bot.calls, [])
         self.assertEqual(self.bot.pins, [])
         await self.mod._refresh_saved_welcomes(self.bot)
@@ -128,7 +130,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(screen['markup'])
         self.assertEqual(row['welcome_content_hash'], previous_hash)
         await self.tap('home:access', anchor)
-        self.assertEqual(self.labels()[0], ['📸 Analyse My Chart', '🏠 My Dashboard'])
+        self.assertEqual(self.labels()[:2], [['📸 Analyse My Chart'], ['🏠 My Dashboard']])
         self.assertEqual(len(self.bot.pins), 1)
         # Deleted successful pins must not be re-created or forced back.
         row['welcome_content_hash'] = None

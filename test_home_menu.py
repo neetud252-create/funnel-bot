@@ -14,10 +14,12 @@ async def main():
     import config
 
     rows = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard
-    assert [len(row) for row in rows] == [1, 1, 2, 2, 2]
+    assert [len(row) for row in rows] == [1, 1, 2, 2, 1, 1]
     assert [b.callback_data for row in rows for b in row] == [
-        'home:test', 'home:access', 'flow:how', 'flow:reviews',
-        'flow:support', 'flow:community', 'flow:tools', 'home:language']
+        'home:test', 'home:access', 'flow:how', 'flow:community',
+        'flow:reviews', 'flow:support', 'flow:tools', 'home:language']
+    assert [b.style for row in rows for b in row] == [
+        'success', 'primary', 'primary', 'primary', 'danger', 'danger', 'primary', 'danger']
     for verified in (False, True):
         uid = 72000 + int(verified)
         fake_db._users[uid] = dict(fake_db._fresh_row(), verified=verified,

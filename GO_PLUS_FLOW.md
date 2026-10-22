@@ -45,10 +45,12 @@ it. A failed pin never blocks the menu; an unfinished pin is retried on the next
 start, and a deleted pending message can be replaced with the fresh welcome.
 
 The persistent card's caption is the owner's **POCKET IQ — START HERE** copy.
-Its three button rows are Try Free Analysis / Account Setup, How It Works /
-Support, and Reviews / Community. Verified accounts see Analyse My Chart /
-My Dashboard in the first row. The approved GIF stays on the card; the full
-home menu still contains Tools & FAQ and Language.
+Try Free Analysis and Account Setup each have a full-width button row.
+Verified accounts see Analyse My Chart and My Dashboard in these two rows.
+How It Works / Community share a blue row; Reviews / Support share a red row.
+The approved GIF, caption and buttons stay on one card. The full home menu
+adds full-width Tools & FAQ and Language rows. Telegram controls the actual
+font size and button height; the bot chooses the row layout and native colors.
 
 Startup edits saved cards in place, with pagination and rate-limit backoff;
 it does not send replacement messages or re-pin dismissed cards. Every menu
