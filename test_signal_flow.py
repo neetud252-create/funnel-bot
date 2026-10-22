@@ -326,10 +326,11 @@ class FakeBot:
         return FakeMsg(mid, caption=caption)
 
     async def send_animation(self, chat_id, animation, caption=None, parse_mode=None,
-                             reply_markup=None):
+                             reply_markup=None, width=None, height=None, duration=None):
         mid = self._mid()
         self.calls.append({"kind": "animation", "id": mid, "body": caption,
                            "markup": reply_markup, "parse_mode": parse_mode,
+                           "width": width, "height": height, "duration": duration,
                            "asset": str(getattr(animation, "path", animation))})
         return FakeMsg(mid, caption=caption)
 
@@ -659,15 +660,15 @@ async def devstart_tests(bot_mod, fake_db, config):
 
         # --- and the funnel restarts exactly as it does for a new user -------
         sends = [c for c in fake_bot.calls if c["kind"] != "delete"]
-        check("/devstart sends one video card with its caption and menu",
-              [c['kind'] for c in sends] == ['video'],
+        check("/devstart sends one animation card with its caption and menu",
+              [c['kind'] for c in sends] == ['animation'],
               str([c["kind"] for c in sends]))
         check("the old companion message tracking is cleared",
               row['album_ids'] is None, repr(row['album_ids']))
         check("/devstart lands on the welcome menu",
               bot_mod.home_menu.TEXT == sends[-1]["body"], repr(sends[-1]["body"]))
         check("/devstart attaches the welcome menu to the existing MP4",
-              sends[-1]["kind"] == "video" and sends[-1]["asset"] == 'assets/home_banner_loop.mp4'
+              sends[-1]["kind"] == "animation" and sends[-1]["asset"] == 'assets/home_banner_loop.mp4'
               and sends[-1]['markup'] is not None)
         check("the new welcome message becomes the tracked screen",
               row["ui_msg_id"] == sends[-1]["id"],
@@ -750,7 +751,7 @@ async def devstart_tests(bot_mod, fake_db, config):
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
-          'await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(user), is_video=True)' in bot_src)
+          'await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(user), is_video=True)' in bot_src)
     check("Get Bot Access opens the registration entry",
           "await _open_registration(bot, tg_id, state)" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",
