@@ -8,10 +8,11 @@ ANIMATION = 'home_banner_loop'
 VIDEO = 'home_banner_video'
 
 TEXT = (
-    "👋 <b>Welcome to Go+ — Your Personal AI Trading Assistant!</b>\n\n"
-    "🤖 Explore <b>AI-powered market analysis, trading signals, and easy-to-follow guides</b>"
-    "—all in one place.\n\n"
-    "⚡️ Get started below, view the guide, or contact our support team."
+    "👋 <b>Welcome to Go Plus</b>\n\n"
+    "Upload a chart screenshot and explore <b>two free analyses</b> before deciding "
+    "whether to set up access.\n\n"
+    "See how it works, read community feedback, or speak to support.\n\n"
+    "<i>Predictions can be wrong. Returns are not guaranteed.</i>"
 )
 
 
@@ -19,20 +20,18 @@ SHEET_CAPTION = "📊 <b>Money Management Sheet</b>\n\nDownload your Excel sheet
 SHEET_UNAVAILABLE = "The money management sheet is temporarily unavailable. Please try again shortly or contact support."
 
 
-def keyboard():
-    # SUPPORT accepts either a Telegram handle or a full URL.
-    support = config.SUPPORT.strip()
-    support = support if support.startswith(('https://', 'http://')) else 'https://t.me/' + support.lstrip('@')
+def keyboard(user=None):
+    user = user or {}
+    access = ('🏠 Open My Dashboard' if user.get('verified') else
+              '🚀 Continue Setup' if user.get('uid') or user.get('setup_stage') not in (None, 'new')
+              else '🚀 Set Up My Account')
+    trial = '📸 Analyse My Chart' if user.get('verified') else '🎯 Try 2 Free Analyses'
     return [
-        [('💎 Get Bot Access', 'cb:home:access', 'success')],
-        [('📖 Guide', 'cb:go:guide', 'primary'),
-         ('🎯 Test Signals', 'cb:home:test', 'primary')],
-        [('⭐ Review', 'url:https://t.me/goplustrade_reviews', 'danger'),
-         ('☎️ Support', 'url:' + support, 'danger')],
-        [('▶️ YouTube', 'url:' + config.YOUTUBE_URL, 'primary'),
-         ('📢 Channel', 'url:https://t.me/goplusaitrader', 'primary')],
-        [('📊 Money Management Sheet', 'cb:home:sheet', 'primary')],
-        [('🌐 Change Language', 'cb:home:language', 'danger')],
+        [(trial, 'cb:home:test', 'success')],
+        [(access, 'cb:home:access', 'primary')],
+        [('📖 How It Works', 'cb:flow:how'), ('⭐ Reviews', 'cb:flow:reviews')],
+        [('💬 Support', 'cb:flow:support'), ('📢 Community', 'cb:flow:community')],
+        [('🧰 Tools & FAQ', 'cb:flow:tools'), ('🌐 Language', 'cb:home:language')],
     ]
 
 

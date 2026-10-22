@@ -13,3 +13,4 @@ session_out.txt
 
 # local agent tool state - never commit
 .codewhale/
+test-results/

@@ -80,9 +80,11 @@ def message_sources():
     import config
     import home_menu
     import chart_signals
+    import journey
     result = list(EXTRA_MESSAGES) + [home_menu.TEXT, home_menu.SHEET_CAPTION,
                                        home_menu.SHEET_UNAVAILABLE] + list(home_menu.PENDING.values())
     result.extend(chart_signals.SOURCES)
+    result.extend(journey.SOURCES)
     result.extend(screen['text'] for screen in config.SCREENS.values())
     result.extend(value for name, value in vars(config).items()
                   if isinstance(value, str) and value and (
@@ -98,12 +100,43 @@ def _compile_source(source):
 
 
 _sources = None
+_english_sources = None
+
+# Preserve the established translations. New setup copy stays wholly in English
+# until reviewed translations are supplied, rather than mixing fragments or
+# accidentally changing the meaning of deposit/eligibility conditions.
+ENGLISH_NOTICE = {
+    'ru': 'Новые экраны настройки пока доступны на английском языке.',
+    'uk': 'Нові екрани налаштування поки доступні англійською мовою.',
+    'hi': 'नए सेटअप पृष्ठ अभी अंग्रेज़ी में उपलब्ध हैं।',
+    'bn': 'নতুন সেটআপ পৃষ্ঠাগুলি আপাতত ইংরেজিতে উপলব্ধ।',
+    'ur': 'نئے سیٹ اپ صفحات فی الحال انگریزی میں دستیاب ہیں۔',
+    'vi': 'Các màn hình thiết lập mới hiện có bằng tiếng Anh.',
+    'id': 'Layar pengaturan baru saat ini tersedia dalam bahasa Inggris.',
+    'tr': 'Yeni kurulum ekranları şu anda İngilizce olarak sunulmaktadır.',
+    'es': 'Las nuevas pantallas de configuración están disponibles por ahora en inglés.',
+    'ar': 'شاشات الإعداد الجديدة متاحة حاليًا باللغة الإنجليزية.',
+    'pt': 'As novas telas de configuração estão disponíveis por enquanto em inglês.',
+}
+
+
+def english_flow_sources():
+    import journey
+    import home_menu
+    import chart_signals
+    import config
+    return (*journey.SOURCES, home_menu.TEXT, chart_signals.INTRO, chart_signals.VERIFIED,
+            chart_signals.EXHAUSTED, chart_signals.PROMPT, config.MSG_TEST_MODE)
 
 
 def translate_message(text, language):
-    global _sources
+    global _sources, _english_sources
     if not text or language == 'en' or language not in CODES:
         return text
+    if _english_sources is None:
+        _english_sources = tuple(_compile_source(source) for source in english_flow_sources())
+    if any(pattern.fullmatch(text) for pattern in _english_sources):
+        return '<i>' + ENGLISH_NOTICE[language] + '</i>\n\n' + text
     if _sources is None:
         _sources = tuple(_compile_source(source) for source in message_sources())
     if any(pattern.fullmatch(text) for pattern in _sources):

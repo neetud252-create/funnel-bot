@@ -174,7 +174,8 @@ def _parse_ts(v):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    # Public, non-sensitive release marker for verifying the deployed chat flow.
+    return {"ok": True, "flow_version": "trust-first-v1"}
 
 
 def _lower_map(d):

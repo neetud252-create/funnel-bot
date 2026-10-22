@@ -146,7 +146,7 @@ def main():
               guide.url == "https://youtu.be/uJHBwXZVnNI?si=bhC7oMFLvoJfiQy",
               repr(guide.url))
         check("the same guide is available from the welcome menu",
-              guide.url in str(home_menu.keyboard()), str(home_menu.keyboard()))
+              'cb:flow:how' in str(home_menu.keyboard()), str(home_menu.keyboard()))
 
     # --- 5 & 6. the paired rows --------------------------------------------
     print("\n[access-menu] the layout matches the design")

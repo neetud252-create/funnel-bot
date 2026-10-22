@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
+-- Only setup progress and self-attested eligibility; never broker identity verification.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_stage TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS account_kind TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS eligibility_confirmed_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_check_status TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_check_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS access_check_deposit NUMERIC(12,2);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 -- Backfill for users verified before verified_at existed. set_verified wrote
 -- last_checked at the moment of verification, so it is the best record we have.
@@ -228,6 +235,39 @@ async def user_by_ref_code(code: str):
 async def get_user(tg_id: int):
     async with pool.acquire() as c:
         return await c.fetchrow("SELECT * FROM users WHERE tg_id=$1", tg_id)
+
+async def set_setup_stage(tg_id, stage, *, account_kind=None):
+    if stage not in ('new', 'requirements', 'eligibility', 'register', 'id', 'deposit', 'help', 'active'):
+        raise ValueError('Unknown setup stage')
+    if account_kind not in (None, 'new', 'existing'):
+        raise ValueError('Unknown account path')
+    async with pool.acquire() as c:
+        await c.execute('UPDATE users SET setup_stage=$2, account_kind=COALESCE($3,account_kind) WHERE tg_id=$1',
+                        tg_id, stage, account_kind)
+
+async def confirm_eligibility(tg_id):
+    async with pool.acquire() as c:
+        await c.execute('UPDATE users SET eligibility_confirmed_at=now() WHERE tg_id=$1', tg_id)
+
+async def clear_eligibility(tg_id):
+    async with pool.acquire() as c:
+        await c.execute('UPDATE users SET eligibility_confirmed_at=NULL WHERE tg_id=$1', tg_id)
+
+async def record_access_check(tg_id, status, deposit=None):
+    import config
+    if status not in (config.VERIFY_GRANTED, config.VERIFY_NEED_DEPOSIT,
+                      config.VERIFY_WRONG_LINK, config.VERIFY_TEMPORARY):
+        raise ValueError('Unknown verification result')
+    # Pending/error responses must never be shown as a confirmed zero deposit.
+    amount = deposit if status in (config.VERIFY_GRANTED, config.VERIFY_NEED_DEPOSIT) else None
+    async with pool.acquire() as c:
+        await c.execute('UPDATE users SET access_check_status=$2, access_check_at=now(), '
+                        'access_check_deposit=$3 WHERE tg_id=$1', tg_id, status, amount)
+
+async def set_notifications(tg_id, enabled):
+    # Shared opt-out governs both existing broadcasts and verification reminders.
+    async with pool.acquire() as c:
+        await c.execute('UPDATE users SET broadcast_opt_out=$2 WHERE tg_id=$1', tg_id, not enabled)
 
 async def set_language(tg_id: int, language: str):
     from localization import CODES
@@ -524,6 +564,12 @@ _RESET_SQL = """
            ref_code_at        = NULL,
            gift_sent_at       = NULL,
            gift_acknowledged_at = NULL,
+           setup_stage        = 'new',
+           account_kind       = NULL,
+           eligibility_confirmed_at = NULL,
+           access_check_status = NULL,
+           access_check_at    = NULL,
+           access_check_deposit = NULL,
            last_checked       = NULL
      WHERE tg_id = $1
     RETURNING tg_id
@@ -598,4 +644,5 @@ async def consume_signal(tg_id: int, limit: int):
 async def unverified_with_uid():
     async with pool.acquire() as c:
         return await c.fetch(
-            "SELECT tg_id, uid FROM users WHERE uid IS NOT NULL AND verified=FALSE")
+            "SELECT tg_id, uid FROM users WHERE uid IS NOT NULL AND verified=FALSE "
+            "AND eligibility_confirmed_at IS NOT NULL")

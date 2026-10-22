@@ -598,22 +598,18 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         trial.status.return_value = (False, 1)
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertIsNone(await self.state.get_state())
-        self.assertIn('Remaining Signals:</b> 1', self.render.await_args.args[3])
-        self.assertIn('Accuracy:</b> Not yet verified', self.render.await_args.args[3])
+        self.assertIn('1 of 2', self.render.await_args.args[3])
+        self.assertIn('Results are not guaranteed.', self.render.await_args.args[3])
         self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
         trial.status.return_value = (True, 30)
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertEqual(self.render.await_args.args[3], flow.VERIFIED)
 
-    async def test_temporary_intro_copy_is_opt_in_and_preserves_trial_gates(self):
+    async def test_old_preview_flag_cannot_claim_guaranteed_accuracy(self):
         cb = types.SimpleNamespace(message=types.SimpleNamespace(chat=types.SimpleNamespace(type='private')),
                                    from_user=types.SimpleNamespace(id=11), answer=AsyncMock())
         trial.status.return_value = (False, 1)
-        expected = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
-                    "You have been granted access to test the bot's signals.\n\n"
-                    '📊 <b>Remaining Signals:</b> 1\n'
-                    '🎯 <b>Accuracy:</b> 95% + Guaranteed\n\n'
-                    'Try it out now for free before verifying! 🚀')
+        expected = flow.INTRO.format(left=1)
         with patch.dict(os.environ, CHART_UI_TEST_COPY='1'):
             await flow.open_screen(cb, self.bot, self.state, self.render)
             self.assertEqual(self.render.await_args.args[3], expected)
@@ -669,7 +665,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_second_result_gates_new_analysis_and_expired_reservation_cannot_send(self):
         trial.status.return_value = (False, 0)
         await flow.receive(message(), self.bot, self.state, self.render)
-        self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS)
+        self.assertEqual([b[1] for row in self.render.await_args.args[4] for b in row], ['cb:chart:upload', 'cb:flow:explain', 'cb:home:access', 'cb:home:back'])
         self.assertNotIn('Remaining Signals:', self.render.await_args.args[3])
         await self.open()
         self.assertEqual(self.render.await_args.args[3], flow.EXHAUSTED)
@@ -782,7 +778,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         api.analyse.side_effect = api.AnalysisError('response', 'max_output_tokens')
         await flow.receive(message(), self.bot, self.state, self.render)
         self.assertEqual(self.render.await_args.args[3], flow.MESSAGES['service'])
-        self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS)
+        self.assertEqual([b[1] for row in self.render.await_args.args[4] for b in row], ['cb:chart:upload', 'cb:home:back'])
         trial.consume.assert_not_awaited()
         trial.release.assert_awaited_once_with(None, 'trial-token')
         self.assertNotIn('clearer', self.render.await_args.args[3])
@@ -874,7 +870,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
                 api.analyse.assert_awaited_once_with(IMAGE, 'en', '', before_retry=ANY)
                 api.reserve.assert_awaited_once_with(None, 11)
                 self.assertIn('AI Trading Signal Result', self.render.await_args.args[3])
-                self.assertEqual(self.render.await_args.args[4], flow.NEW_ANALYSIS[:1] + flow.VERIFIED_BACK)
+                self.assertEqual([b[1] for row in self.render.await_args.args[4] for b in row], ['cb:chart:upload', 'cb:flow:explain', 'cb:home:access'])
                 self.assertIn('Used: 1', self.render.await_args.args[3])
                 self.assertIn('Left: 29', self.render.await_args.args[3])
                 self.assertEqual(self.render.await_args.kwargs['reply_to_message_id'], 5)

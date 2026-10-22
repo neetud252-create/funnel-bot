@@ -231,6 +231,11 @@ def main():
         for row in (other.get("kb") or []):
             for item in row:
                 icon = item[3] if len(item) > 3 else None
+                # The existing registration ID button intentionally shares the
+                # account icon. This predates the trust-first flow.
+                if key == 'register' and item[1] == 'cb:reg:enter_uid':
+                    check('registration shares the account icon', icon == '5206607081334906820')
+                    continue
                 check("screen %r button %r kept its own icon"
                       % (key, item[0][:18]), icon not in NEW_IDS, str(icon))
 

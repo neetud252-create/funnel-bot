@@ -52,7 +52,10 @@ def _install_stub_modules():
                 "verified": False, "verified_at": None, "uid": None,
                 "deposit": 0, "last_checked": None, "nudge_msg_id": None,
                 "username": None, "game_tokens": 0,
-                "gift_sent_at": None, "gift_acknowledged_at": None}
+                "gift_sent_at": None, "gift_acknowledged_at": None,
+                "setup_stage": "new", "account_kind": None,
+                "eligibility_confirmed_at": None, "access_check_status": None,
+                "access_check_deposit": None, "broadcast_opt_out": False}
 
     def _u(tg_id):
         return db._users.setdefault(tg_id, _fresh_row())
@@ -208,7 +211,25 @@ def _install_stub_modules():
         if _u(tg_id)["gift_acknowledged_at"] is None:
             _u(tg_id)["gift_acknowledged_at"] = "now"
 
-    for fn in (get_user, set_ui_msg, set_album, signal_state, consume_signal,
+    async def set_setup_stage(tg_id, stage, account_kind=None):
+        _u(tg_id)['setup_stage'] = stage
+        if account_kind:
+            _u(tg_id)['account_kind'] = account_kind
+
+    async def confirm_eligibility(tg_id):
+        _u(tg_id)['eligibility_confirmed_at'] = 'now'
+
+    async def clear_eligibility(tg_id):
+        _u(tg_id)['eligibility_confirmed_at'] = None
+
+    async def record_access_check(tg_id, status, deposit=None):
+        _u(tg_id).update(access_check_status=status, access_check_deposit=deposit)
+
+    async def set_notifications(tg_id, enabled):
+        _u(tg_id)['broadcast_opt_out'] = not enabled
+
+    for fn in (set_setup_stage, confirm_eligibility, clear_eligibility, record_access_check,
+               set_notifications, get_user, set_ui_msg, set_album, signal_state, consume_signal,
                set_premium, is_premium, touch_user, save_ref_code,
                reset_user, unverify,
                set_nudge_msg, uid_owners, save_uid_only, set_verified,
@@ -262,6 +283,7 @@ class FakeMsg:
         self.text = text
         self.caption = caption
         self.photo = None
+        self.chat = types.SimpleNamespace(type='private')
 
 
 class FakeBot:
@@ -353,6 +375,12 @@ class FakeCB:
 
     async def answer(self, text=None, show_alert=False):
         self.answers.append((text, show_alert))
+
+    def model_copy(self, *, update):
+        result = FakeCB(self.from_user.id, self.data, self.message.message_id)
+        result.__dict__.update(self.__dict__)
+        result.__dict__.update(update)
+        return result
 
 
 class FakeMessage:
@@ -722,7 +750,7 @@ async def devstart_tests(bot_mod, fake_db, config):
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
     check("/start renders the home menu",
-          'await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(), is_video=True)' in bot_src)
+          'await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(user), is_video=True)' in bot_src)
     check("Get Bot Access opens the registration entry",
           "await _open_registration(bot, tg_id, state)" in bot_src)
     check("/devstart delegates to /start rather than reimplementing it",
@@ -1338,13 +1366,13 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     # Opening Premium quotes the real deposit threshold; verification happens
     # when the linked account ID is submitted. See test_premium_deposit.py.
     check("the Premium screen is text-only", last["kind"] == "text", last["kind"])
-    check("it is headed Unlock Premium", "<b>Unlock Premium</b>" in body, repr(body))
+    check("it is headed Unlock Premium", "<b>Premium access</b>" in body, repr(body))
     check("it quotes the configured unlock cost",
           str(config.PREMIUM_MIN_DEPOSIT) in body, repr(body))
     check("it states the threshold as a dollar figure",
-          "<b>$%d</b>" % config.PREMIUM_MIN_DEPOSIT in body, repr(body))
+          f"<b>${config.PREMIUM_MIN_DEPOSIT:.2f}</b>" in body, repr(body))
     check("it asks for the account ID rather than unlocking on the tap",
-          "account ID" in body, repr(body))
+          "linked account" in body, repr(body))
     check("no in-game phrasing is left on this screen",
           not any(w in body.lower() for w in ("game token", "game uid")),
           repr(body))

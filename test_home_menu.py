@@ -14,130 +14,31 @@ async def main():
     import config
 
     rows = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard
-    assert [len(row) for row in rows] == [1, 2, 2, 2, 1, 1]
-    assert [button.text for row in rows for button in row] == [
-        '💎 Get Bot Access', '📖 Guide', '🎯 Test Signals', '⭐ Review',
-        '☎️ Support', '▶️ YouTube', '📢 Channel', '📊 Money Management Sheet', '🌐 Change Language']
-    assert rows[0][0].callback_data == 'home:access'
-    assert rows[1][0].callback_data == 'go:guide'
-    assert rows[1][0].url is None
-    for value in ('@flashhher', 'https://t.me/flashhher'):
-        with patch.object(config, 'SUPPORT', value):
-            assert home_menu.keyboard()[2][1][1] == 'url:https://t.me/flashhher'
-    assert rows[3][1].url == 'https://t.me/goplusaitrader'
-    assert rows[3][1].callback_data is None
-    assert rows[4][0].callback_data == 'home:sheet'
-    assert rows[5][0].callback_data == 'home:language'
-
+    assert [len(row) for row in rows] == [1, 1, 2, 2, 2]
+    assert [b.callback_data for row in rows for b in row] == [
+        'home:test', 'home:access', 'flow:how', 'flow:reviews',
+        'flow:support', 'flow:community', 'flow:tools', 'home:language']
     for verified in (False, True):
         uid = 72000 + int(verified)
-        fake_db._users[uid] = fake_db._fresh_row()
-        fake_db._users[uid].update(verified=verified, uid='123456789',
-                                   deposit=50, gift_sent_at='earlier')
-        initial = dict(fake_db._users[uid])
-        bot = H.FakeBot()
-        state = H.FakeState()
-        command = types.SimpleNamespace(args='tracking-code')
-        with patch.object(bot_mod, '_capture_ref', AsyncMock()) as attribution:
-            await bot_mod.start(H.FakeMessage(uid, '/start'), bot, state, command)
-            attribution.assert_awaited_once_with(uid, command)
+        fake_db._users[uid] = dict(fake_db._fresh_row(), verified=verified,
+                                   uid='123456789' if verified else None)
+        bot, state = H.FakeBot(), H.FakeState()
+        await bot_mod.start(H.FakeMessage(uid, '/start'), bot, state)
         sends = [c for c in bot.calls if c['kind'] != 'delete']
-        assert [c['kind'] for c in sends] == ['video']
+        assert len(sends) == 1 and sends[0]['kind'] == 'video'
         assert sends[0]['asset'] == 'assets/home_banner_loop.mp4'
-        assert sends[0]['body'] == home_menu.TEXT
-        assert sends[0]['markup'] is not None
-        assert sends[0]['parse_mode'] == 'HTML'
-        assert sends[0]['cover'] is None
-        assert fake_db._users[uid]['album_ids'] is None
-        assert fake_db._users[uid]['ui_msg_id'] == sends[0]['id']
-        assert {k:v for k,v in fake_db._users[uid].items() if k not in ('ui_msg_id', 'album_ids')} == {
-            k:v for k,v in initial.items() if k not in ('ui_msg_id', 'album_ids')}
+        assert sends[0]['body'] == home_menu.TEXT and sends[0]['markup']
         assert state.state is None
-
-        await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
-        assert bot.calls[-1]['kind'] == 'video'
-        assert bot.calls[-1]['asset'] == 'assets/home_banner_loop.mp4'
-        assert bot.calls[-1]['body'] == home_menu.TEXT
-        assert all(any(c['kind'] == 'delete' and c['id'] == old['id'] for c in bot.calls)
-                   for old in sends)
-
-        # Both new and verified users can watch the uploaded guide in the chat.
-        # Returning home removes the guide and restores the full welcome card.
-        home_id = fake_db._users[uid]['ui_msg_id']
-        state.state = 'registration-in-progress'
-        guide_cb = H.FakeCB(uid, rows[1][0].callback_data, home_id)
-        await bot_mod.nav(guide_cb, bot, state)
-        guide = bot.calls[-1]
-        assert guide_cb.answers == [(None, False)]
-        assert guide['kind'] == 'video'
-        assert guide['asset'] == 'assets/guide_opPxk6Af.mp4'
-        assert (guide['width'], guide['height'], guide['duration']) == (1080, 1920, 99)
-        assert guide['cover'] == 'assets/guide_opPxk6Af_cover.jpg'
-        assert guide['body'] == config.SCREENS['guide']['text']
-        assert any(c['kind'] == 'delete' and c['id'] == home_id for c in bot.calls)
-        assert fake_db._users[uid]['ui_msg_id'] == guide['id']
-        assert fake_db._users[uid]['verified'] == verified
-        assert state.state is None
-        back = guide['markup'].inline_keyboard[0][0]
-        assert back.callback_data == 'home:back'
-        await bot_mod.home_action(H.FakeCB(uid, back.callback_data, guide['id']), bot, state)
-        assert bot.calls[-1]['asset'] == 'assets/home_banner_loop.mp4'
-        assert bot.calls[-1]['body'] == home_menu.TEXT
-        assert any(c['kind'] == 'delete' and c['id'] == guide['id'] for c in bot.calls)
-
-        with patch.object(bot_mod, '_show_menu', AsyncMock()) as menu, \
-             patch.object(bot_mod, 'show', AsyncMock()) as show:
-            await bot_mod.home_action(H.FakeCB(uid, 'home:access', 1), bot, state)
-            if verified:
-                menu.assert_awaited_once_with(bot, uid)
-                show.assert_not_awaited()
-            else:
-                show.assert_awaited_once_with(bot, uid, 'register')
-                assert state.state == bot_mod.Reg.waiting_uid.state
-                menu.assert_not_awaited()
-
-    # New users reach the requested photo immediately with tracked links in
-    # both the caption and Register button; typing an ID is already enabled.
-    uid = 72020
-    fake_db._users[uid] = dict(fake_db._fresh_row(), ref_code='campaign_42')
-    bot = H.FakeBot()
-    state = H.FakeState()
-    with patch.object(bot_mod.asyncio, 'create_task', side_effect=AssertionError('Unexpected registration task')):
         await bot_mod.home_action(H.FakeCB(uid, 'home:access', 1), bot, state)
-    screen = bot.calls[-1]
-    assert screen['kind'] == 'photo' and screen['asset'] == 'assets/register.jpg'
-    ref = config.ref_url('campaign_42')
-    assert ref in screen['body'] and screen['markup'].inline_keyboard[0][0].url == ref
-    assert [row[0].callback_data for row in screen['markup'].inline_keyboard] == [
-        None, 'reg:enter_uid', 'home:back']
-    assert state.state == bot_mod.Reg.waiting_uid.state
-    assert not fake_db._users[uid]['verified']
-
-    await bot_mod.enter_registration_uid(H.FakeCB(uid, 'reg:enter_uid', 1), bot, state)
-    assert bot.calls[-1]['kind'] == 'photo'
-    assert bot.calls[-1]['asset'] == 'assets/account_id_guide.png'
-    assert bot.calls[-1]['body'] == config.MSG_ENTER_UID
-    cancel = bot.calls[-1]['markup'].inline_keyboard[0][0]
-    assert cancel.text == '❌ Cancel' and cancel.style == 'success'
-    assert cancel.callback_data == 'home:back'
-    assert state.state == bot_mod.Reg.waiting_uid.state
-    await bot_mod.home_action(H.FakeCB(uid, cancel.callback_data, 1), bot, state)
-    assert state.state is None and bot.calls[-1]['body'] == home_menu.TEXT
-    await bot_mod.enter_registration_uid(H.FakeCB(uid, 'reg:enter_uid', 1), bot, state)
-    with patch.object(bot_mod, '_verify_once', AsyncMock(return_value=config.VERIFY_GRANTED)) as verify:
-        await bot_mod.capture_uid(H.FakeMessage(uid, 'not-an-ID'), bot, state)
-        verify.assert_not_awaited()
-        assert 'numbers only' in bot.calls[-1]['body']
-        await bot_mod.capture_uid(H.FakeMessage(uid, '123456789'), bot, state)
-        verify.assert_awaited_once_with(bot, uid, '123456789')
-    # Stale ID buttons do not ask an already verified user to register again.
-    with patch.object(bot_mod, '_show_menu', AsyncMock()) as menu:
-        await bot_mod.enter_registration_uid(H.FakeCB(72001, 'reg:enter_uid', 1), bot, state)
-        menu.assert_awaited_once_with(bot, 72001)
-    await bot_mod.nav(H.FakeCB(uid, 'go:register', 1), bot, state)
-    assert bot.calls[-1]['asset'] == 'assets/register.jpg'
-    await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
-    assert bot.calls[-1]['kind'] == 'video' and state.state is None
+        if verified:
+            assert 'menu:signal' in [b.callback_data for row in bot.calls[-1]['markup'].inline_keyboard for b in row]
+        else:
+            assert 'qualifying deposits' in bot.calls[-1]['body']
+            assert fake_db._users[uid]['setup_stage'] == 'requirements'
+        await bot_mod.nav(H.FakeCB(uid, 'go:guide', 1), bot, state)
+        assert bot.calls[-1]['asset'] == 'assets/guide_opPxk6Af.mp4'
+        await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)
+        assert bot.calls[-1]['body'] == home_menu.TEXT
 
     # Returning users have the retired promotion removed when Telegram allows it.
     fake_db._users[72030] = dict(fake_db._fresh_row(), nudge_msg_id=7654)

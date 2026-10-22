@@ -245,6 +245,8 @@ OPTIONAL_COLUMNS = ("event_id", "fbclid", "fbp", "client_ts", "referrer",
 
 
 async def main_async(server, config, db, records):
+    check('health exposes the deployed flow version without configuration values',
+          await server.health() == {'ok': True, 'flow_version': 'trust-first-v1'})
     server_src = open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
 
     def beacon(**overrides):

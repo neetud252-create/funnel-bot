@@ -16,21 +16,17 @@ import chart_progress
 import config
 import localization
 
-INTRO = ('🤖 <b>Go+ AI Test Mode Active!</b> ⚡\n\n'
-         "You have been granted access to test the bot's signals.\n\n"
-         '📊 <b>Remaining Signals:</b> {left}\n'
-         '🎯 <b>Accuracy:</b> Not yet verified\n\n'
-         'Try it out now for free before verifying! 🚀')
-# Opt-in UI preview only; this sample percentage is not measured accuracy.
-TEST_INTRO = INTRO.replace('Not yet verified', '95% + Guaranteed')
+INTRO = ('📸 <b>Try Go Plus chart analysis</b>\n\n'
+         'Free analyses remaining: <b>{left} of 2</b>. No deposit is needed to try.\n\n'
+         'Upload a clear chart screenshot to see the trend and momentum. '
+         'AI predictions can be wrong. Results are not guaranteed.')
 VERIFIED = ('🤖 <b>Go+ AI Chart Analysis</b>\n\n'
-            'Your account is verified. Tap Test Signals to upload your chart.')
+            'Your account is verified. Tap Upload Chart to analyse your screenshot.')
 EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
-             'Verify your account to continue receiving chart analysis.\n'
-             'Tap Get Bot Access below to continue.')
+             'You can review access requirements, read the guide, or contact support.')
 PROMPT = ('🔲 AI Chart Analyzer\n\n'
           '📊 Send your trading chart screenshot.\n'
-          '⚡ AI will analyse your chart and return BUY or SELL.\n\n'
+          'AI will describe the chart and provide an uncertain directional interpretation.\n\n'
           '<i>Crop out personal details before sending. Timer shows the chart interval.</i>')
 MESSAGES = {
     'configuration': 'Chart analysis is temporarily unavailable. Please try again later.',
@@ -56,13 +52,14 @@ EXTRA = ('Not visible', '(tentative)', '{count} minute', '{count} minutes',
 DAILY_STATUS = ('\n\n⚡ <b>Signals</b>\n'
                 '— Available today: {limit} signals\n'
                 '— Used: {used}\n— Left: {left}')
-SOURCES = (INTRO, TEST_INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
+SOURCES = (INTRO, VERIFIED, EXHAUSTED, PROMPT, RESULT, *MESSAGES.values(), *EXTRA,
            DAILY_STATUS, 'Remaining Signals: {left}', 'New Analysis', *chart_progress.SOURCES)
 BACK = [[('🔙 Back', 'cb:home:back', 'success')]]
 VERIFIED_BACK = [[('🔙 Back', 'cb:home:access', 'success')]]
-UPLOAD = [[('🎯 Test Signals', 'cb:chart:upload', 'primary')], *BACK]
+HELP = [[('📖 Screenshot Guide', 'cb:flow:screenshot'), ('💬 Support', 'cb:flow:support')]]
+UPLOAD = [[('📸 Upload Chart', 'cb:chart:upload', 'primary')], *HELP, *BACK]
 NEW_ANALYSIS = [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]
-ACCESS = [[('💎 Get Bot Access', 'cb:home:access', 'success')], *BACK]
+ACCESS = [[('🚀 View Access Requirements', 'cb:home:access', 'success')], *HELP, *BACK]
 _inflight = set()
 
 
@@ -100,17 +97,16 @@ async def open_screen(cb, bot, state, render, *, upload=False):
         await render(bot, cb.from_user.id, None, EXHAUSTED, ACCESS, screen_key='chart_trial_exhausted')
         return
     if not upload:
-        intro = TEST_INTRO if os.getenv('CHART_UI_TEST_COPY', '').strip() == '1' else INTRO
         await render(bot, cb.from_user.id, None,
-                     VERIFIED + usage if verified else intro.format(left=left),
-                     UPLOAD[:1] + back, screen_key='chart_intro')
+                     VERIFIED + usage if verified else INTRO.format(left=left),
+                     UPLOAD[:1] + HELP + back, screen_key='chart_intro')
         return
     if not api.configured():
         await render(bot, cb.from_user.id, None, MESSAGES['configuration'], back, screen_key='chart_unavailable')
         return
     await state.set_state(Chart.waiting_image.state)
     await state.update_data(chart_session=secrets.token_hex(12), chart_verified=verified)
-    await render(bot, cb.from_user.id, None, PROMPT + usage, back, screen_key='chart_upload')
+    await render(bot, cb.from_user.id, None, PROMPT + usage, HELP + back, screen_key='chart_upload')
 
 
 def timer_text(timeframe, language):
@@ -246,7 +242,10 @@ async def receive(m, bot, state, render):
                 return
             try:
                 delivery_attempted = True
-                await render(bot, tg_id, None, text, NEW_ANALYSIS[:1] + back,
+                result_rows = NEW_ANALYSIS[:1] + [[('📖 Understand This Result', 'cb:flow:explain')]]
+                if not usage:
+                    result_rows += [[('🚀 View Access Requirements', 'cb:home:access')]]
+                await render(bot, tg_id, None, text, result_rows + back,
                              reply_to_message_id=m.message_id, raise_on_error=True, screen_key='chart_result')
             except (TelegramBadRequest, TelegramForbiddenError):
                 # Telegram explicitly rejected the send, so no signal was delivered.

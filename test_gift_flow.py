@@ -17,9 +17,8 @@ async def main():
     db._users[tg_id] = row
     await db.set_setting(mod.GIFT_FILE_ID_KEY, 'go-plus-file-id')
     await db.set_setting(mod.GIFT_FILE_NAME_KEY, 'Apex MM.xlsx')
-    assert home_menu.keyboard()[-2:] == [
-        [('📊 Money Management Sheet', 'cb:home:sheet', 'primary')],
-        [('🌐 Change Language', 'cb:home:language', 'danger')]]
+    import journey
+    assert journey.screen('tools')[1][0][0][1] == 'cb:home:sheet'
 
     # Everyone can download directly, repeatedly, without changing their access,
     # account ID, quota, or an in-progress registration/Premium conversation.
@@ -51,7 +50,7 @@ async def main():
             assert await mod._run_verification(bot,tg_id,'123456789') == expected
         assert not any(c['kind']=='document' for c in bot.calls)
         if amount == 0:
-            assert config.MSG_NEED_DEPOSIT in [c['body'] for c in bot.calls]
+            assert journey.deposit(amount)[0] in [c['body'] for c in bot.calls]
 
     # Returning to the menu or resubmitting a verified ID no longer sends it.
     bot = H.FakeBot()

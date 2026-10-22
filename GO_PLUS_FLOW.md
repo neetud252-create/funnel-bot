@@ -1,0 +1,77 @@
+# Go Plus Telegram chat flow
+
+This updates the existing aiogram bot. There is no Mini App or second polling service.
+
+```mermaid
+flowchart TD
+  Home[Welcome video and home menu] --> Trial[Two free lifetime chart analyses]
+  Home --> Learn[How it works / Reviews / Community / Tools / Support]
+  Home --> Requirements[Access requirements and referral disclosure]
+  Requirements --> Kind{New or existing account?}
+  Kind --> Eligibility[Read eligibility rules and self-confirm]
+  Eligibility --> New[New account: existing tracked referral link]
+  Eligibility --> Existing[Existing account: keep current account]
+  New --> ID[Submit Trader ID]
+  Existing --> ID
+  ID --> Check{Live affiliate verification}
+  Check -->|Qualifies| Dashboard[Chart analysis / Access and usage / Tools / Settings]
+  Check -->|Deposit below requirement| Deposit[Confirmed amount and remaining requirement]
+  Deposit --> Broker[Official broker account and payment guide]
+  Broker --> Recheck[Check Again reuses saved ID]
+  Recheck --> Check
+  Check -->|Unavailable| Retry[Pending status / Retry / Support]
+  Check -->|Not linked| Help[Correct ID / Support; no duplicate account]
+```
+
+Home has Try 2 Free Analyses; Set Up My Account (or Continue Setup / Open My Dashboard);
+How It Works; Reviews; Support; Community; Tools & FAQ; Language.
+Community contains the existing Telegram channel, YouTube, and reviews destinations.
+Tools contains the money-management workbook, screenshot guide/example, FAQs, and risk/referral information.
+Settings contains language, shared notification preferences, and privacy information.
+The dashboard links to the same screenshot analyser and persisted daily allowance.
+Premium compares allowances, explains the qualifying deposit requirement, and checks the saved linked ID.
+
+## State and validation
+
+`db.SCHEMA` adds setup progress, account path, eligibility timestamp, and the last access-check outcome.
+All migrations use `ADD COLUMN IF NOT EXISTS`; existing verification, language, attribution, and quotas remain.
+Returning setup resumes from persisted account state. Eligibility is a self-declaration, not broker KYC.
+The optional background retry only checks users who have confirmed eligibility.
+The existing panel campaign check and qualifying-deposit totals decide access.
+Missing, non-finite, or invalid deposit data produces pending status, never a confirmed zero or access grant.
+Typed ID retries remain single-flight and throttled. Premium stays tied to the verified account and real deposit check.
+`VERIFY_MODE=test` can bypass Standard verification only for configured admins and labels that screen explicitly.
+The old `CHART_UI_TEST_COPY` flag no longer enables unsupported accuracy claims.
+
+## Configuration
+
+Existing live credentials and `REF_LINK`, attribution parameters, campaign, and thresholds are reused.
+No new required environment variables or runtime dependencies are introduced.
+Optional public URL overrides: `REVIEWS_URL`, `COMMUNITY_URL`, `SETUP_GUIDE_URL`, and `BROKER_ACCOUNT_URL`.
+Support accepts either an @handle or full Telegram URL. Missing/placeholder URLs lead to a support fallback.
+The workbook still uses the existing stored Telegram file ID and `/setgift` command.
+
+Official reference pages: [broker terms](https://pocketoption.com/en/public-offer/) and
+[payment policy](https://pocketoption.com/en/payment-policy/), checked 2026-10-23.
+
+## Language scope
+
+Existing 12-language translations and saved choices remain. New setup/help copy is English in this release,
+with an explicit notice in the selected language. It is deliberately not partially translated through old phrases.
+Full translations of the new screens remain a separate content task.
+
+## Release and rollback
+
+The existing deployment uses `Procfile` (`web: python bot.py`) and the repository's `main` branch.
+After release, `/health` returns `flow_version: trust-first-v1`. This verifies the HTTP deployment,
+not a real trading account or a live chart inference. Do not run a second bot poller to test production.
+For rollback, redeploy the previous commit; the added nullable/defaulted columns can remain.
+
+## Validation
+
+Run `python scripts/check_offline.py` with the existing requirements installed.
+It isolates each test process and excludes tests requiring live AI or a PostgreSQL test database.
+Navigation tests cover eligibility, new/existing accounts, resume after restart, saved-ID deposit retries,
+unavailable/wrong-link states, notification preferences, every help screen, and Premium checks.
+Existing suites cover quota refunds, duplicate uploads, cancellation, panel single-flight checks,
+media fallbacks, localization, analytics, reminders, and broadcasts.

@@ -21,6 +21,7 @@ import test_signal_flow as H
 def sample(source):
     values = dict(uid='123456789', limit=30, premium_limit=50, used=2, left=28,
                   level=config.LEVEL_LABELS_TG['start'], name='Start',
+                  required=50, confirmed=12, remaining=38, standard=30, premium=70,
                   icon=config.LEVEL_ICONS_TG['start'], tokens=12, cost=50,
                   balance=12, needed=38, seconds=20, wait='00:30', pair='GBP/USD OTC',
                   expiry='M1', direction=config.SIGNAL_DIRECTIONS[0][0],
@@ -44,7 +45,11 @@ def check_catalog():
                'Register & Get Gift', 'Open Go+', 'Continue', 'Stop broadcast messages']
     # Coverage must fail when a new English screen/phrase is added without translations.
     allowed = re.compile(r'Go Plus|Go\+|Premium|Start|YouTube|OTC|FIN|\b[SM]\d+\b|\b[A-Z]{3}/[A-Z]{3}\b')
+    english_only = set(L.english_flow_sources())
+    english_labels = {button[0] for row in home_menu.keyboard() for button in row}
     for text in (*L.message_sources(), *labels):
+        if text in english_only or text in english_labels:
+            continue
         for part in L._protected.split(text)[::2]:
             residue = re.sub(r'\{[^}]+\}', '', L._phrases.sub('', part))
             assert not re.search('[A-Za-z]', allowed.sub('', residue)), (text, residue)
@@ -52,7 +57,10 @@ def check_catalog():
         for source in L.message_sources():
             text = sample(source)
             translated = L.translate_message(text, language)
-            assert L._protected.findall(text) == L._protected.findall(translated), (language, source)
+            if source in english_only and language != 'en':
+                assert translated == '<i>' + L.ENGLISH_NOTICE[language] + '</i>\n\n' + text
+            else:
+                assert L._protected.findall(text) == L._protected.findall(translated), (language, source)
             # Template variables, IDs and cash values cannot disappear or change.
             for value in ('123456789', '$50', 'GBP/USD OTC', 'M1', '00:30'):
                 if value in text:
@@ -119,14 +127,14 @@ async def check_delivery_and_selector():
         InlineKeyboardButton(text='Register & Get Access', url='https://example.com/Start?click_id=abc')]])
     original = SendMessage(chat_id=2, text=home_menu.TEXT, reply_markup=markup, parse_mode='HTML')
     result = await outbound(transport, None, original)
-    assert 'Добро пожаловать' in result.text
+    assert L.ENGLISH_NOTICE['ru'] in result.text
     assert original.text == home_menu.TEXT and markup.inline_keyboard[0][0].text == '💎 Get Bot Access'
     assert result.reply_markup.inline_keyboard[0][0].callback_data == 'home:access'
     assert result.reply_markup.inline_keyboard[0][0].style == 'success'
     assert result.reply_markup.inline_keyboard[0][1].url == markup.inline_keyboard[0][1].url
     assert result.model_dump(exclude_defaults=True)['reply_markup']['inline_keyboard'][0][0]['text'] == 'Получить доступ'
     assert result.reply_markup.inline_keyboard[0][0].icon_custom_emoji_id == '5427168083074628963'
-    assert '5773793517482546530' in result.text
+    assert result.text == emoji_theme.html(L.translate_message(home_menu.TEXT, 'ru'))
 
     for language in L.CODES:
         video = SendVideo(chat_id=2, video='banner-video-id',
