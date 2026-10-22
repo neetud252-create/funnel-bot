@@ -4,7 +4,7 @@ This updates the existing aiogram bot. There is no Mini App or second polling se
 
 ```mermaid
 flowchart TD
-  Home[Welcome video and home menu] --> Trial[Two free lifetime chart analyses]
+  Home[Pocket IQ welcome animation and home menu] --> Trial[Two free lifetime chart analyses]
   Home --> Learn[How it works / Reviews / Community / Tools / Support]
   Home --> Requirements[Access requirements and referral disclosure]
   Requirements --> Kind{New or existing account?}
@@ -30,6 +30,12 @@ Tools contains the money-management workbook, screenshot guide/example, FAQs, an
 Settings contains language, shared notification preferences, and privacy information.
 The dashboard links to the same screenshot analyser and persisted daily allowance.
 Premium compares allowances, explains the qualifying deposit requirement, and checks the saved linked ID.
+
+The welcome uses the approved Pocket IQ 3D artwork: `assets/home_banner_loop.mp4`
+is a silent 1280×720, six-second H.264 animation, sent through Telegram `sendAnimation`
+for GIF-style playback. `assets/home_banner.png` is its matching still fallback.
+Both keep the caption and buttons on one message. Content hashes invalidate older
+Telegram media IDs automatically; animation IDs remain separate from video IDs.
 
 ## State and validation
 

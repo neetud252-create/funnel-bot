@@ -207,6 +207,8 @@ def media_send_options(key, ext):
     # Supply the source dimensions on the first upload, including cache warming.
     # Telegram retains the uploaded video's metadata when its file_id is reused.
     if ext == "mp4":
+        if key in (home_menu.ANIMATION, home_menu.VIDEO):
+            return {"width": 1280, "height": 720, "duration": 6}
         for screen in config.SCREENS.values():
             if screen.get("video") == key:
                 options = dict(screen.get("video_options", {}))
@@ -294,7 +296,7 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
+    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4'),
            (config.UID_GUIDE_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
@@ -613,7 +615,7 @@ async def start(m: Message, bot: Bot, state: FSMContext,
 
 async def _show_home(bot, tg_id):
     user = await db.get_user(tg_id)
-    await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(user), is_video=True)
+    await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(user), is_video=True)
 
 
 async def _journey(bot, tg_id, content, media=None, key=None):

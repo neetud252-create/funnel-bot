@@ -1,4 +1,4 @@
-"""Public /start menu: one video card containing the welcome caption and buttons."""
+"""Public /start menu: one looping animation with welcome caption and buttons."""
 import config
 
 PHOTO = 'home_banner'
@@ -8,7 +8,7 @@ ANIMATION = 'home_banner_loop'
 VIDEO = 'home_banner_video'
 
 TEXT = (
-    "👋 <b>Welcome to Go Plus</b>\n\n"
+    "👋 <b>Welcome to Pocket IQ</b>\n\n"
     "Upload a chart screenshot and explore <b>two free analyses</b> before deciding "
     "whether to set up access.\n\n"
     "See how it works, read community feedback, or speak to support.\n\n"
