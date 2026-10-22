@@ -48,6 +48,7 @@ def _install_stub_modules():
     # nudge_msg_id) that /start and _clear_nudge now read.
     def _fresh_row():
         return {"ui_msg_id": None, "album_ids": None, "is_premium": False,
+                "welcome_message_id": None, "welcome_pinned_at": None,
                 "signals_used_today": 0, "last_reset_date": None,
                 "verified": False, "verified_at": None, "uid": None,
                 "deposit": 0, "last_checked": None, "nudge_msg_id": None,
@@ -67,6 +68,22 @@ def _install_stub_modules():
 
     async def set_ui_msg(tg_id, msg_id):
         _u(tg_id)["ui_msg_id"] = msg_id
+
+    async def claim_welcome_message(tg_id, msg_id):
+        row = _u(tg_id)
+        if row['welcome_message_id'] is None:
+            row['welcome_message_id'] = msg_id
+        return dict(row)
+
+    async def mark_welcome_pinned(tg_id, msg_id):
+        row = _u(tg_id)
+        if row['welcome_message_id'] == msg_id:
+            row['welcome_pinned_at'] = 'now'
+
+    async def clear_missing_welcome(tg_id, msg_id):
+        row = _u(tg_id)
+        if row['welcome_message_id'] == msg_id and row['welcome_pinned_at'] is None:
+            row['welcome_message_id'] = None
 
     async def set_album(tg_id, ids):
         _u(tg_id)["album_ids"] = ids
@@ -228,7 +245,8 @@ def _install_stub_modules():
     async def set_notifications(tg_id, enabled):
         _u(tg_id)['broadcast_opt_out'] = not enabled
 
-    for fn in (set_setup_stage, confirm_eligibility, clear_eligibility, record_access_check,
+    for fn in (claim_welcome_message, mark_welcome_pinned, clear_missing_welcome,
+               set_setup_stage, confirm_eligibility, clear_eligibility, record_access_check,
                set_notifications, get_user, set_ui_msg, set_album, signal_state, consume_signal,
                set_premium, is_premium, touch_user, save_ref_code,
                reset_user, unverify,
@@ -291,6 +309,7 @@ class FakeBot:
 
     def __init__(self):
         self.calls = []
+        self.pins = []
         self._next = 1000
 
     def _mid(self):
@@ -358,6 +377,10 @@ class FakeBot:
         self.calls.append({"kind": "delete", "id": message_id, "body": None,
                            "markup": None, "parse_mode": None, "asset": None})
 
+    async def pin_chat_message(self, chat_id, message_id, disable_notification=None):
+        self.pins.append((chat_id, message_id, disable_notification))
+        return True
+
 
 class FakeUser:
     def __init__(self, tg_id, username=None):
@@ -391,6 +414,7 @@ class FakeMessage:
         self.from_user = FakeUser(tg_id)
         self.text = text
         self.message_id = message_id
+        self.chat = types.SimpleNamespace(type='private', id=tg_id)
         self.replies = []
 
     async def answer(self, text=None, **kw):

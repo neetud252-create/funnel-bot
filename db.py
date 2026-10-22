@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS users (
     created_at   TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
+-- The pinned welcome is permanent chat content, separate from disposable UI.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_message_id BIGINT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_pinned_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
 -- Only setup progress and self-attested eligibility; never broker identity verification.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_stage TEXT NOT NULL DEFAULT 'new';
@@ -282,6 +285,31 @@ async def set_language(tg_id: int, language: str):
 async def set_ui_msg(tg_id: int, msg_id: int):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET ui_msg_id=$1 WHERE tg_id=$2", msg_id, tg_id)
+
+async def claim_welcome_message(tg_id: int, msg_id: int):
+    """Keep the first welcome across repeated starts and process restarts."""
+    async with pool.acquire() as c:
+        return await c.fetchrow("""
+            UPDATE users SET welcome_message_id = COALESCE(welcome_message_id, $2)
+             WHERE tg_id = $1
+             RETURNING welcome_message_id, welcome_pinned_at
+        """, tg_id, msg_id)
+
+async def mark_welcome_pinned(tg_id: int, msg_id: int):
+    async with pool.acquire() as c:
+        await c.execute("""
+            UPDATE users SET welcome_pinned_at = now()
+             WHERE tg_id = $1 AND welcome_message_id = $2
+        """, tg_id, msg_id)
+
+async def clear_missing_welcome(tg_id: int, msg_id: int):
+    async with pool.acquire() as c:
+        await c.execute("""
+            UPDATE users SET welcome_message_id = NULL, welcome_pinned_at = NULL
+             WHERE tg_id = $1 AND welcome_message_id = $2
+               AND welcome_pinned_at IS NULL
+        """, tg_id, msg_id)
+
 async def set_nudge_msg(tg_id: int, msg_id):
     # msg_id None clears it, so a deleted (or undeletable) nudge is not retried.
     async with pool.acquire() as c:
@@ -531,8 +559,9 @@ async def set_tokens(tg_id: int, amount: int):
 # interchangeable: unverify() undoes only the verification stamp and keeps the
 # uid so the same account id can be re-sent immediately, which is what you want
 # when re-testing the verification step alone. reset_user() additionally clears
-# the uid, the daily quota, the tier and every message-tracking id, which is
+# the uid, the daily quota, the tier and disposable message-tracking ids, which is
 # what you want when testing the funnel from the very first screen.
+# The persistent welcome reference is retained so /devstart cannot duplicate pins.
 
 # Deliberately a single statement: in Postgres that is its own transaction, so
 # the row can never be left half-reset (uid cleared but still verified, say) by
