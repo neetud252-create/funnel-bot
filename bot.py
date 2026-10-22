@@ -15,6 +15,7 @@ import activity_stats
 import analytics
 import analytics_reports
 import home_menu
+import journey
 import localization
 import chart_signals
 from server import app
@@ -29,7 +30,8 @@ async def _broadcast_open(cb, bot, state):
         await state.clear()
         await _show_menu(bot, cb.from_user.id)
     else:
-        await nav(cb.model_copy(update={'data': 'go:register'}), bot, state)
+        await state.clear()
+        await _resume_setup(bot, cb.from_user.id)
 
 
 # Register before UID handlers; admin drafting never changes the funnel FSM.
@@ -544,8 +546,16 @@ async def _screen_error(bot, tg_id):
                           tg_id)
 
 async def show(bot, tg_id, key):
-    if key == 'register':
-        await activity_stats.record(tg_id, 'registration_opened')
+    # Previously sent buttons remain usable, but old promotional cards no longer
+    # bypass requirements or display unsupported profit/accuracy claims.
+    legacy = {'welcome': 'how', 'how': 'how', 'tech': 'how', 'ai': 'explain',
+              'results': 'reviews', 'howto': 'account_help'}
+    if key in legacy:
+        await _journey(bot, tg_id, journey.screen(legacy[key], await db.get_user(tg_id)))
+        return
+    if key in ('access', 'final'):
+        await _resume_setup(bot, tg_id)
+        return
     s = config.SCREENS[key]
     if key == "menu":
         # The menu caption is a template ({limit}/{used}/{left}); routing it
@@ -598,7 +608,150 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     await _capture_ref(tg_id, command)
     await _clear_nudge(bot, tg_id)
     # Send the existing MP4 as one video card with its caption and menu attached.
-    await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(), is_video=True)
+    await _show_home(bot, tg_id)
+
+
+async def _show_home(bot, tg_id):
+    user = await db.get_user(tg_id)
+    await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(user), is_video=True)
+
+
+async def _journey(bot, tg_id, content, media=None, key=None):
+    text, rows = content
+    await render(bot, tg_id, media, text, rows, screen_key=key)
+
+
+async def _resume_setup(bot, tg_id):
+    user = await db.get_user(tg_id)
+    if user and user.get('verified'):
+        await _show_menu(bot, tg_id)
+    elif not user or not user.get('eligibility_confirmed_at'):
+        if user and user.get('account_kind'):
+            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
+        else:
+            await db.set_setup_stage(tg_id, 'requirements')
+            await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+    elif user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT and user.get('uid'):
+        await _journey(bot, tg_id, journey.deposit(user['access_check_deposit']), key='deposit_requirements')
+    elif user.get('access_check_status') == config.VERIFY_WRONG_LINK:
+        await _journey(bot, tg_id, journey.unlinked(), key='account_unlinked')
+    elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
+        await _journey(bot, tg_id, journey.pending(), key='verification_pending')
+    elif user.get('account_kind') == 'existing' or user.get('uid'):
+        await _journey(bot, tg_id, journey.existing(), key='existing_account')
+    elif user.get('account_kind') == 'new':
+        await _show_register(bot, tg_id)
+    else:
+        await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+
+
+@dp.callback_query(F.data.startswith('flow:'))
+async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
+    if not cb.message or cb.message.chat.type != 'private':
+        await cb.answer('Open Go Plus in a private chat.', show_alert=True)
+        return
+    await cb.answer()
+    tg_id = cb.from_user.id
+    action = cb.data.split(':', 1)[1]
+    await state.clear()
+    user = await db.get_user(tg_id) or {}
+    if action == 'home':
+        await _show_home(bot, tg_id)
+    elif action == 'dashboard':
+        await _show_menu(bot, tg_id)
+    elif action == 'setup':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        await db.set_setup_stage(tg_id, 'requirements')
+        await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+    elif action in ('new', 'existing'):
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        # A saved account must never be steered into creating a duplicate.
+        kind = 'existing' if user.get('uid') else action
+        await db.set_setup_stage(tg_id, 'eligibility', account_kind=kind)
+        if not user.get('eligibility_confirmed_at'):
+            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
+        elif kind == 'existing':
+            await _journey(bot, tg_id, journey.existing(), key='existing_account')
+        else:
+            await _show_register(bot, tg_id)
+    elif action == 'eligible':
+        if user.get('account_kind') not in ('new', 'existing'):
+            await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+            return
+        await db.confirm_eligibility(tg_id)
+        await _resume_setup(bot, tg_id)
+    elif action == 'ineligible':
+        await db.clear_eligibility(tg_id)
+        await db.set_setup_stage(tg_id, 'help')
+        await _journey(bot, tg_id, journey.screen('ineligible', user), key='eligibility_declined')
+    elif action == 'enter_id':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        if not user.get('eligibility_confirmed_at'):
+            await _resume_setup(bot, tg_id)
+            return
+        await db.set_setup_stage(tg_id, 'id')
+        await state.set_state(Reg.waiting_uid.state)
+        await _journey(bot, tg_id, journey.uid(), key='account_id_prompt')
+    elif action == 'id_guide':
+        await _journey(bot, tg_id, (config.MSG_ENTER_UID,
+            [[journey.cb('✅ Ready — Enter My ID', 'enter_id')], *journey.back('setup')]),
+            media=config.UID_GUIDE_PHOTO, key='account_id_guide')
+    elif action == 'recheck':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+        elif not user.get('eligibility_confirmed_at') or not user.get('uid'):
+            await _resume_setup(bot, tg_id)
+        else:
+            await _submit_uid(tg_id, str(user['uid']), bot, state)
+    elif action == 'usage':
+        if not user.get('verified'):
+            await _resume_setup(bot, tg_id)
+            return
+        premium, limit = await _user_quota(tg_id)
+        used, left = await db.signal_state(tg_id, limit)
+        await _journey(bot, tg_id, (config.MSG_LEVEL.format(icon=config.level_icon_tg(premium),
+            name=config.level_name(premium), limit=limit, used=used, left=left),
+            [[journey.cb('👑 View Premium Requirements', 'compare')],
+             [journey.cb('💬 Access Help', 'support')], *journey.back('dashboard')]), key='access_usage')
+    elif action == 'compare':
+        if not user.get('verified'):
+            await _resume_setup(bot, tg_id)
+        elif user.get('is_premium'):
+            await _journey(bot, tg_id, (config.MSG_PREMIUM_ALREADY.format(limit=config.daily_limit(True)),
+                journey.back('dashboard')), key='premium_active')
+        else:
+            await _journey(bot, tg_id, journey.premium(), key='premium_requirements')
+    elif action == 'premium_check':
+        if tg_id in _premium_checks:
+            await bot.send_message(tg_id, config.MSG_PREMIUM_CHECKING, parse_mode='HTML')
+            return
+        if not user.get('verified') or not user.get('uid'):
+            await _resume_setup(bot, tg_id)
+            return
+        _premium_checks.add(tg_id)
+        try:
+            await _check_premium(tg_id, str(user['uid']), bot, state)
+        finally:
+            _premium_checks.discard(tg_id)
+    elif action in ('notifications', 'notifications_on', 'notifications_off'):
+        if action != 'notifications':
+            await db.set_notifications(tg_id, action == 'notifications_on')
+            user = await db.get_user(tg_id) or {}
+        await _journey(bot, tg_id, journey.notifications(user), key='notifications')
+    elif action == 'example':
+        await _journey(bot, tg_id, (journey.TEXTS['screenshot'],
+            [[('📸 Upload Chart', 'cb:chart:upload', 'success')], *journey.back('screenshot')]),
+            media='chart_example', key='screenshot_example')
+    elif action in journey.TEXTS:
+        await _journey(bot, tg_id, journey.screen(action, user), key='flow_' + action)
+    else:
+        await _show_home(bot, tg_id)
 
 
 @dp.callback_query(F.data.startswith("home:"))
@@ -628,7 +781,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await cb.answer()
         await state.clear()
         await _clear_nudge(bot, cb.from_user.id)
-        await render(bot, cb.from_user.id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(), is_video=True)
+        await _show_home(bot, cb.from_user.id)
         return
     if action in home_menu.PENDING:
         await cb.answer(home_menu.PENDING[action], show_alert=True)
@@ -644,22 +797,12 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         # Trust the saved verification just as /start did before the welcome menu.
         await _show_menu(bot, tg_id)
     else:
-        await _open_registration(bot, tg_id, state)
+        await _resume_setup(bot, tg_id)
 
 
 @dp.callback_query(F.data == 'reg:enter_uid')
 async def enter_registration_uid(cb: CallbackQuery, bot: Bot, state: FSMContext):
-    await cb.answer()
-    tg_id = cb.from_user.id
-    user = await db.get_user(tg_id)
-    if user and user['verified']:
-        await state.clear()
-        await _show_menu(bot, tg_id)
-        return
-    await _clear_nudge(bot, tg_id)
-    await state.set_state(Reg.waiting_uid.state)
-    await render(bot, tg_id, config.UID_GUIDE_PHOTO, config.MSG_ENTER_UID,
-                 [[('❌ Cancel', 'cb:home:back', 'success')]])
+    await flow_action(cb.model_copy(update={'data': 'flow:enter_id'}), bot, state)
 
 
 @dp.callback_query(F.data.startswith('lang:'))
@@ -738,18 +881,7 @@ async def _send_gift(bot, tg_id):
 
 
 async def _show_start_trading(bot, tg_id):
-    user = await db.get_user(tg_id)
-    if user and user["verified"]:
-        text = ("✅ <b>Your account and deposit are verified.</b>\n\n"
-                "Tap Start Trading to open Go+.")
-    else:
-        text = ("🚀 <b>Your gift is unlocked.</b>\n\n"
-                "Tap Start Trading. Deposit at least "
-                f"<b>${config.MIN_DEPOSIT}</b>, then send your account ID "
-                "again so the bot can confirm your balance and unlock Go+.")
-    await bot.send_message(
-        tg_id, text, parse_mode="HTML",
-        reply_markup=build_kb([[('Start Trading', 'cb:gift:start', 'success')]]))
+    await _resume_setup(bot, tg_id)
 
 
 @dp.callback_query(F.data == "gift:downloaded")
@@ -768,15 +900,8 @@ async def gift_start(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if user and user["verified"]:
         await _show_menu(bot, tg_id)
         return
-    await state.set_state(Reg.waiting_uid.state)
-    await bot.send_message(
-        tg_id,
-        "💰 <b>Deposit and verify</b>\n\n"
-        f"Add <b>${config.MIN_DEPOSIT}</b> or more to your trading account. "
-        "After depositing, send your account ID here again.",
-        parse_mode="HTML",
-        reply_markup=build_kb([[('Deposit Now', 'url:' + await _ref_url(tg_id),
-                                  'success')]]))
+    await state.clear()
+    await _resume_setup(bot, tg_id)
 
 # --- Admin: development reset -----------------------------------------------
 # Walks the funnel from the top as if the sender had never used the bot, on the
@@ -918,19 +1043,12 @@ async def check_sub(cb: CallbackQuery, bot: Bot):
 async def results(cb: CallbackQuery, bot: Bot):
     await cb.answer()
     tg_id = cb.from_user.id
-    await wipe(bot, tg_id)
-    msgs = await send_review_album(bot, tg_id)
-    for k, msg in zip(config.REVIEWS, msgs):
-        await remember(k, msg)
-    s = config.SCREENS["results"]
-    m = await bot.send_message(tg_id, s["text"], parse_mode="HTML",
-                               reply_markup=build_kb(s["kb"]))
-    await db.set_ui_msg(tg_id, m.message_id)
+    await _journey(bot, tg_id, journey.screen('reviews', await db.get_user(tg_id)))
 
 async def _open_registration(bot, tg_id, state):
     await _clear_nudge(bot, tg_id)
-    await show(bot, tg_id, 'register')
-    await state.set_state(Reg.waiting_uid.state)
+    await state.clear()
+    await _resume_setup(bot, tg_id)
 
 
 @dp.callback_query(F.data.startswith("go:"))
@@ -1231,6 +1349,10 @@ async def menu_level(cb: CallbackQuery, bot: Bot):
     # None media key as deliberate rather than as a missing asset.
     await cb.answer()
     tg_id = cb.from_user.id
+    user = await db.get_user(tg_id)
+    if not user or not user.get('verified'):
+        await _resume_setup(bot, tg_id)
+        return
     # One lookup feeds both the tier shown and the limit shown, and it is the
     # same helper _start_signal and _run_signal enforce with - the screen cannot
     # promise an allowance the server would refuse.
@@ -1240,7 +1362,7 @@ async def menu_level(cb: CallbackQuery, bot: Bot):
                  config.MSG_LEVEL.format(icon=config.level_icon_tg(premium),
                                          name=config.level_name(premium),
                                          limit=limit, used=used, left=left),
-                 config.LEVEL_KB)
+                 [[journey.cb('👑 View Premium Requirements', 'compare')], *journey.back('dashboard')])
 
 # Must stay above menu_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "menu:premium")
@@ -1254,11 +1376,10 @@ async def menu_premium(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if user['is_premium']:
         await state.clear()
         text = config.MSG_PREMIUM_ALREADY.format(limit=config.daily_limit(True))
+        await _journey(bot, tg_id, (text, journey.back('dashboard')))
     else:
-        text = config.MSG_PREMIUM_SHORT.format(
-            cost=config.PREMIUM_MIN_DEPOSIT, limit=config.daily_limit(True))
-        await state.set_state(Premium.waiting_uid)
-    await render(bot, tg_id, None, text, config.UNLOCK_KB)
+        await state.clear()
+        await _journey(bot, tg_id, journey.premium(), key='premium_requirements')
 
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_action(cb: CallbackQuery):
@@ -1301,6 +1422,10 @@ async def _replace(bot, tg_id, old_msg_id, text, kb_rows=None):
     await db.set_ui_msg(tg_id, m.message_id)
 
 async def _show_menu(bot, tg_id, test_mode=False):
+    user = await db.get_user(tg_id)
+    if not user or not user.get('verified'):
+        await _resume_setup(bot, tg_id)
+        return
     # The verified landing screen. In test mode the caption carries a banner so
     # the bypass is obvious on-screen. The signal counters are read fresh on
     # every render (signal_state also does the new-day rollover), so the numbers
@@ -1317,7 +1442,7 @@ async def _show_menu(bot, tg_id, test_mode=False):
                             level=config.level_label_tg(premium))
     if test_mode:
         text = config.MSG_TEST_MODE + "\n\n" + text
-    await render(bot, tg_id, s["photo"], text, s["kb"])
+    await render(bot, tg_id, s["photo"], text, journey.dashboard_keyboard())
 
 def _with_ref(item, url):
     # Rewrite only the referral URL; ID-entry and Back callbacks pass through.
@@ -1327,13 +1452,18 @@ def _with_ref(item, url):
 
 
 async def _show_register(bot, tg_id):
-    # The registration screen, with this user's sub-ID in both places the link
-    # appears: the caption the user can copy, and the button they tap. One
-    # lookup feeds both, so the two can never disagree.
-    s = config.SCREENS["register"]
+    # Preserve the existing attribution sub-ID on the registration button.
+    user = await db.get_user(tg_id) or {}
+    if user.get('verified'):
+        await _show_menu(bot, tg_id)
+        return
+    if not user.get('eligibility_confirmed_at') or user.get('account_kind') != 'new' or user.get('uid'):
+        await _resume_setup(bot, tg_id)
+        return
     url = await _ref_url(tg_id)
-    kb = [[_with_ref(item, url) for item in row] for row in s["kb"]]
-    await render(bot, tg_id, s["photo"], s["text"].format(ref=url), kb)
+    await db.set_setup_stage(tg_id, 'register')
+    await activity_stats.record(tg_id, 'registration_opened')
+    await _journey(bot, tg_id, journey.registration(url), key='register')
 
 
 async def _clear_nudge(bot, tg_id):
@@ -1378,7 +1508,12 @@ async def _panel_verdict(tg_id, uid, *, minimum_deposit=None):
                         uid, tg_id, e)
         return config.VERIFY_TEMPORARY, str(e)
     if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
-        dep = info.get("sum_deposits") or Decimal(0)
+        try:
+            dep = Decimal(str(info.get('sum_deposits')))
+        except Exception:
+            return config.VERIFY_TEMPORARY, 'deposit_unavailable'
+        if not dep.is_finite() or dep < 0:
+            return config.VERIFY_TEMPORARY, 'deposit_unavailable'
         logging.info("VERIFY uid=%s tg_id=%s campaign MATCH dep=%s min=%s -> %s",
                      uid, tg_id, dep, minimum_deposit,
                      "ACCESS" if dep >= minimum_deposit else "NEED_DEPOSIT")
@@ -1429,6 +1564,8 @@ async def _run_verification(bot, tg_id, uid):
 
     if status == config.VERIFY_GRANTED:
         await db.set_verified(tg_id, detail)
+        await db.record_access_check(tg_id, status, detail)
+        await db.set_setup_stage(tg_id, 'active')
         await _clear_nudge(bot, tg_id)
         # Verified: drop the acknowledgement and open the trading menu.
         # The workbook is available only from the welcome-menu sheet button.
@@ -1439,27 +1576,29 @@ async def _run_verification(bot, tg_id, uid):
         await _show_menu(bot, tg_id)
         return status
     if status == config.VERIFY_NEED_DEPOSIT:
+        await db.record_access_check(tg_id, status, detail)
+        await db.set_setup_stage(tg_id, 'deposit')
         await activity_stats.record(tg_id, 'referral_confirmed')
         # Campaign matched, but the required access deposit is still missing.
         try:
             await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
         except Exception:
             pass
-        await bot.send_message(
-            tg_id, config.MSG_NEED_DEPOSIT, parse_mode="HTML",
-            reply_markup=build_kb(_register_btn(
-                label="Register & Get Access", icon=config.E_NEED_DEP_REG,
-                url=await _ref_url(tg_id))))
+        await _journey(bot, tg_id, journey.deposit(detail), key='deposit_requirements')
         return status
     if status == config.VERIFY_WRONG_LINK:
-        await _replace(bot, tg_id, ack.message_id, config.MSG_WRONG_LINK,
-                       _register_btn(url=await _ref_url(tg_id)))
+        await db.record_access_check(tg_id, status)
+        await db.set_setup_stage(tg_id, 'help')
+        text, rows = journey.unlinked()
+        await _replace(bot, tg_id, ack.message_id, text, rows)
         return status
     # Every retry was also temporary. Say so once, after the attempts, rather
     # than after each one.
     logging.warning("VERIFY EXHAUSTED tg_id=%s uid=%s reason=%s after %d retries",
                     tg_id, uid, detail, attempt)
-    await _replace(bot, tg_id, ack.message_id, config.MSG_DELAYED)
+    await db.record_access_check(tg_id, config.VERIFY_TEMPORARY)
+    text, rows = journey.pending()
+    await _replace(bot, tg_id, ack.message_id, text, rows)
     return config.VERIFY_TEMPORARY
 
 async def _verify_account_id(tg_id, account_id):
@@ -1498,6 +1637,10 @@ async def _check_premium_uid(m, bot, state):
         await bot.delete_message(chat_id=tg_id, message_id=m.message_id)
     except Exception:
         pass
+    await _check_premium(tg_id, uid, bot, state)
+
+
+async def _check_premium(tg_id, uid, bot, state):
     user = await db.get_user(tg_id)
     if not user or not user['verified'] or not user['uid']:
         await _open_registration(bot, tg_id, state)
@@ -1507,7 +1650,7 @@ async def _check_premium_uid(m, bot, state):
         await render(bot, tg_id, None, config.MSG_PREMIUM_ALREADY.format(
             limit=config.daily_limit(True)), config.UNLOCK_KB)
         return
-    if not await _verify_account_id(tg_id, uid):
+    if not UID_RE.fullmatch(uid):
         await render(bot, tg_id, None, config.MSG_ACCOUNT_ID_INVALID, config.UNLOCK_KB)
         return
     if uid != str(user['uid']):
@@ -1538,14 +1681,15 @@ async def _check_premium_uid(m, bot, state):
         else:
             text = config.MSG_PREMIUM_RETRY
     elif status == config.VERIFY_NEED_DEPOSIT:
-        text = config.MSG_PREMIUM_STILL_SHORT.format(
-            cost=config.PREMIUM_MIN_DEPOSIT, balance=f'{deposit:.2f}',
-            needed=f'{max(config.PREMIUM_MIN_DEPOSIT - deposit, Decimal(0)):.2f}')
+        await _journey(bot, tg_id, journey.premium(deposit), key='premium_deposit_required')
+        return
     elif status == config.VERIFY_WRONG_LINK:
-        text = config.MSG_WRONG_LINK
+        await _journey(bot, tg_id, journey.unlinked(premium=True), key='account_unlinked')
+        return
     else:
-        text = config.MSG_PREMIUM_RETRY
-    await render(bot, tg_id, None, text, config.UNLOCK_KB)
+        await _journey(bot, tg_id, journey.pending(True), key='premium_pending')
+        return
+    await render(bot, tg_id, None, text, journey.back('dashboard'))
 
 def _clear_inflight(tg_id, task):
     """Drop the in-flight entry, but only if it is still THIS task.
@@ -1578,7 +1722,8 @@ async def _verify_once(bot, tg_id, uid):
         logging.warning("VERIFY TIMEOUT tg_id=%s uid=%s exceeded %ss ceiling",
                         tg_id, uid, config.UID_VERIFY_TIMEOUT)
         try:
-            await bot.send_message(tg_id, config.MSG_DELAYED, parse_mode="HTML")
+            await db.record_access_check(tg_id, config.VERIFY_TEMPORARY)
+            await _journey(bot, tg_id, journey.pending(), key='verification_pending')
         except Exception:
             logging.exception("could not deliver the delay notice to %s", tg_id)
         return config.VERIFY_TEMPORARY
@@ -1588,7 +1733,8 @@ async def _verify_once(bot, tg_id, uid):
         # Log the real exception rather than letting it vanish into the task.
         logging.exception("verification failed for tg_id=%s uid=%s", tg_id, uid)
         try:
-            await bot.send_message(tg_id, config.MSG_UID_ERROR, parse_mode="HTML")
+            await db.record_access_check(tg_id, config.VERIFY_TEMPORARY)
+            await _journey(bot, tg_id, journey.pending(), key='verification_pending')
         except Exception:
             logging.exception("could not deliver the error notice to %s", tg_id)
         return config.VERIFY_TEMPORARY
@@ -1629,6 +1775,11 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         await bot.delete_message(chat_id=tg_id, message_id=m.message_id)
     except Exception:
         pass
+    await _submit_uid(tg_id, uid, bot, state)
+
+
+async def _submit_uid(tg_id, uid, bot, state):
+    """Shared, single-flight account check for typed IDs and the saved-ID button."""
     user = await db.get_user(tg_id)
     if user and user["verified"]:
         # Already verified: never re-run the panel, just put them back on the
@@ -1636,6 +1787,10 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         # avoidable lookup risks a FloodWait that hits everyone.
         await state.clear()
         await _show_menu(bot, tg_id)
+        return
+    if not user or not user.get('eligibility_confirmed_at'):
+        await state.clear()
+        await _resume_setup(bot, tg_id)
         return
     if not UID_RE.fullmatch(uid):
         # Numeric but the wrong length. Answered from the format rule alone -
@@ -1696,7 +1851,7 @@ async def _capture_uid(m: Message, bot: Bot, state: FSMContext):
         logging.exception("uid_owners lookup failed for uid=%s", uid)
     await state.clear()
     await wipe(bot, tg_id)
-    if config.TEST_MODE:
+    if config.TEST_MODE and _is_admin(tg_id):
         # TODO: testing bypass - no panel lookup, no campaign or deposit check.
         # Set VERIFY_MODE back to "live" before real users reach the bot.
         # Deposit is recorded as 0 because nothing was actually checked.
@@ -1735,19 +1890,18 @@ async def retry_worker(bot):
             await asyncio.sleep(1800)
             rows = await db.unverified_with_uid()
             for r in rows:
-                try:
-                    info = await panelbot.lookup_trader(r["uid"])
-                except panelbot.PanelUnavailable:
+                status, dep = await _panel_verdict(r['tg_id'], r['uid'])
+                if status == config.VERIFY_TEMPORARY:
                     break
-                if info and str(info.get("campaign_id")) == str(config.CAMPAIGN_ID):
-                    dep = info.get("sum_deposits") or Decimal(0)
-                    if dep >= config.MIN_DEPOSIT:
-                        await db.set_verified(r["tg_id"], dep)
-                        await _clear_nudge(bot, r["tg_id"])
-                        try:
-                            await _show_menu(bot, r["tg_id"])
-                        except Exception:
-                            logging.exception("retry_worker: notify failed for %s", r["tg_id"])
+                if status == config.VERIFY_GRANTED:
+                    await db.set_verified(r["tg_id"], dep)
+                    await db.record_access_check(r['tg_id'], status, dep)
+                    await db.set_setup_stage(r['tg_id'], 'active')
+                    await _clear_nudge(bot, r["tg_id"])
+                    try:
+                        await _show_menu(bot, r["tg_id"])
+                    except Exception:
+                        logging.exception("retry_worker: notify failed for %s", r["tg_id"])
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1791,8 +1945,8 @@ async def main():
     bot.session.middleware(localization.OutboundMiddleware())
     logging.info('Localization ready: 12 languages; saved per user')
     if config.TEST_MODE:
-        logging.warning("VERIFY_MODE=test - panel verification is BYPASSED. "
-                        "Set VERIFY_MODE=live before real users.")
+        logging.warning("VERIFY_MODE=test - admin-only verification bypass is enabled; "
+                        "all other users still require live verification.")
     await bot.delete_webhook(drop_pending_updates=True)
     # Connect the panel-bot verification session (degrades gracefully if unset).
     await panelbot.start()

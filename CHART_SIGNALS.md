@@ -9,12 +9,10 @@ an upload-retry error, not a signal. Reason and invalidation remain in the valid
 provider response but are not displayed as extra paragraphs. Timer displays the
 observed chart candle interval (for example, `1m` becomes `1 minute`), not an expiry
 recommendation; the upload screen explains this. An unreadable interval stays
-`Not visible`. The trial screen normally says `Accuracy: Not yet verified`.
-For a temporary UI preview on your testing deployment, set `CHART_UI_TEST_COPY=1`
-to show `Accuracy: 95% + Guaranteed` without a visible placeholder suffix.
-This is sample copy; no measured accuracy supports a percentage or guarantee.
-Unset the variable or set it to `0` before launch to restore `Not yet verified`.
-This setting affects only the intro copy, not verification or signal limits.
+`Not visible`. The trial screen shows the remaining lifetime allowance and
+explains that predictions may be wrong. The obsolete `CHART_UI_TEST_COPY`
+environment variable is ignored; it cannot enable a fabricated accuracy claim.
+See `GO_PLUS_FLOW.md` for the current menus and account setup journey.
 The strategy requires readable price history, not a specific broker layout.
 It accepts candlestick/OHLC, Heikin Ashi, line, area and Renko chart inputs from
 any market, including OTC. Missing asset/timeframe labels do not by themselves

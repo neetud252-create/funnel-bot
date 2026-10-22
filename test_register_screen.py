@@ -268,7 +268,7 @@ def main():
         check("%s still holds its id" % name, getattr(config, name) == want,
               getattr(config, name))
     check("the env-backed links are untouched",
-          config.SUPPORT_URL == "https://t.me/" + config.SUPPORT.lstrip("@"),
+          config.SUPPORT_URL == (config.SUPPORT if config.SUPPORT.startswith("https://") else "https://t.me/" + config.SUPPORT.lstrip("@")),
           config.SUPPORT_URL)
 
     # Screens either side of "register" in the funnel are intact.

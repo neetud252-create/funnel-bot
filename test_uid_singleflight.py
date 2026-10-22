@@ -61,7 +61,8 @@ OTHER_UID = "987654321"
 
 def _mkuser(fake_db, tg_id, verified=False):
     row = fake_db._fresh_row()
-    row.update({"verified": verified, "ui_msg_id": 700})
+    row.update({"verified": verified, "ui_msg_id": 700,
+                "eligibility_confirmed_at": "now", "account_kind": "existing"})
     fake_db._users[tg_id] = row
     return row
 
@@ -240,7 +241,7 @@ async def main():
     check("exception: in-flight entry cleaned up",
           tg not in bot_mod._verify_inflight, str(bot_mod._verify_inflight))
     check("exception: the user is told something went wrong",
-          any("went wrong" in b.lower() for b in _bodies(fb)),
+          any("cannot confirm" in b.lower() for b in _bodies(fb)),
           str(_bodies(fb))[:160])
     check("exception: the user is not verified",
           not fake_db._users[tg]["verified"])
@@ -262,7 +263,7 @@ async def main():
     check("timeout: in-flight entry cleaned up",
           tg not in bot_mod._verify_inflight, str(bot_mod._verify_inflight))
     check("timeout: the user gets the delay notice, not silence",
-          any("taking a moment" in b.lower() for b in _bodies(fb)),
+          any("cannot confirm" in b.lower() for b in _bodies(fb)),
           str(_bodies(fb))[:160])
     check("timeout: the user is not verified",
           not fake_db._users[tg]["verified"])
@@ -349,7 +350,7 @@ async def main():
         check("temporary then success: only ONE submission was needed",
               True)
         check("temporary then success: no delay notice was shown",
-              not any("taking a moment" in b.lower() for b in _bodies(fb)),
+              not any("cannot confirm" in b.lower() for b in _bodies(fb)),
               str(_bodies(fb))[:170])
         check("temporary then success: in-flight entry cleaned up",
               tg not in bot_mod._verify_inflight, str(bot_mod._verify_inflight))
@@ -370,7 +371,7 @@ async def main():
               len(calls) == config.UID_VERIFY_RETRIES + 1,
               "%d calls, retries=%d" % (len(calls), config.UID_VERIFY_RETRIES))
         check("exhausted: the user is told it is a delay, not a rejection",
-              any("taking a moment" in b.lower() for b in _bodies(fb)),
+              any("cannot confirm" in b.lower() for b in _bodies(fb)),
               str(_bodies(fb))[:170])
         check("exhausted: the user is NOT told their account is wrong",
               not any("wrong" in b.lower() for b in _bodies(fb)),
@@ -402,7 +403,7 @@ async def main():
             check("%s: in-flight entry cleaned up" % label,
                   tg not in bot_mod._verify_inflight)
             check("%s: not reported as a temporary delay" % label,
-                  not any("taking a moment" in b.lower() for b in _bodies(fb)),
+                  not any("cannot confirm" in b.lower() for b in _bodies(fb)),
                   str(_bodies(fb))[:170])
 
         # 5. concurrency still holds with retries in the mix.

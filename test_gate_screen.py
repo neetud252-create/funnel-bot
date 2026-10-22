@@ -176,7 +176,8 @@ def main():
     print("\n[gate] no other screen or button changed")
     gate_ids = {i for _, i, _ in CAPTION_EMOJI} | {"5397916757333654639",
                                                   "5260463209562776385"}
-    ALLOWED_SHARING = {("results", "5296369303661067030")}
+    ALLOWED_SHARING = {("results", "5296369303661067030"),
+                       ("register", config.E_BACK)}  # Existing shared Back icon.
     for key, screen in config.SCREENS.items():
         if key == "gate":
             continue

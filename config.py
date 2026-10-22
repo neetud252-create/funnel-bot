@@ -32,7 +32,15 @@ CHANNEL_MENTION = _channel_mention(CHANNEL_URL)
 REF_LINK    = os.getenv("REF_LINK", "https://example.com/PLACEHOLDER_REF")
 
 SUPPORT     = os.getenv("SUPPORT", "https://t.me/flashhher")   # TODO: real support handle (was @go_plus_supportbot)
-SUPPORT_URL = "https://t.me/" + SUPPORT.lstrip("@")
+SUPPORT_URL = (SUPPORT.strip() if SUPPORT.strip().startswith(('https://', 'http://'))
+               else "https://t.me/" + SUPPORT.strip().lstrip("@"))
+REVIEWS_URL = os.getenv('REVIEWS_URL', 'https://t.me/goplustrade_reviews').strip()
+COMMUNITY_URL = os.getenv('COMMUNITY_URL', 'https://t.me/goplusaitrader').strip()
+SETUP_GUIDE_URL = os.getenv('SETUP_GUIDE_URL', 'https://youtu.be/uJHBwXZVnNI').strip()
+# Existing accounts go to the broker, never back through a registration link.
+BROKER_ACCOUNT_URL = os.getenv('BROKER_ACCOUNT_URL', 'https://pocketoption.com/en/login/').strip()
+BROKER_TERMS_URL = 'https://pocketoption.com/en/public-offer/'
+BROKER_PAYMENT_URL = 'https://pocketoption.com/en/payment-policy/'
 VIP_LINK    = os.getenv("VIP_LINK", "https://t.me/PLACEHOLDER_VIP")          # TODO: real VIP team invite
 YOUTUBE_URL = os.getenv("YOUTUBE_URL", "https://youtube.com/@apextraderrz?si=Meme1VIiOkjaV-Ql")  # TODO: real YouTube channel
 # Forex Tips button on the access screen. The project had NO existing forex-tips
@@ -131,16 +139,14 @@ MIN_DEPOSIT = Decimal(os.getenv("MIN_DEPOSIT", "50"))
 CAMPAIGN_ID = os.getenv("CAMPAIGN_ID", "969716")
 
 # Verification mode. "live" (default) runs the real @AffiliatePocketBot lookup.
-# "test" skips the panel entirely and verifies any numeric UID on the spot.
-# TODO: VERIFY_MODE MUST be set back to "live" (or unset) before real users
-# reach the bot - in test mode ANY account ID gets full access with no check
-# against the campaign or the deposit minimum.
+# "test" permits an explicitly labelled bypass only for configured ADMIN_IDS.
+# Public users always use live verification; production should use "live".
 VERIFY_MODE = os.getenv("VERIFY_MODE", "live").strip().lower()
 TEST_MODE = VERIFY_MODE == "test"
 
 # Background re-check of pending UIDs (bot.py retry_worker). OFF by default:
-# after depositing, the user re-sends their account ID to trigger a fresh
-# lookup, which is what MSG_NEED_DEPOSIT now instructs. Set ENABLE_AUTO_RETRY=1
+# after depositing, Check Again reuses the saved account ID for a fresh
+# lookup. Set ENABLE_AUTO_RETRY=1
 # to restore the 30-minute sweep that used to complete verification on its own.
 ENABLE_AUTO_RETRY = os.getenv("ENABLE_AUTO_RETRY", "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -1101,7 +1107,7 @@ MSG_WRONG_LINK = pe("5447644880824181073", "\U000026A0\U0000FE0F") + " <b>Accoun
 # Prepended to the menu screen when TEST_MODE is on. Blanked so the banner no
 # longer shows; kept defined because bot.py still references it. NOTE: this only
 # hides the notice - VERIFY_MODE=test still bypasses verification entirely.
-MSG_TEST_MODE = ""
+MSG_TEST_MODE = "🧪 <b>Admin test access — deposit verification was bypassed.</b>"
 
 # Panel bot didn't answer in time; the retry worker will keep checking.
 MSG_DELAYED = T_CLOCK + " <b>Verification is taking a moment.</b>\n\nWe're still checking your account. You'll be notified here automatically as soon as it's confirmed \U00002014 or you can send your account ID again shortly."

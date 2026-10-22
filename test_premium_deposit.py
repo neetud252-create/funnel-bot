@@ -39,7 +39,7 @@ class PremiumDepositTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_100_unlocks_preserves_usage_tokens_and_linked_id(self):
         text = await self.send()
         self.assertTrue(self.row['is_premium'])
-        self.assertIn('70 AI signals per day', text)
+        self.assertTrue('70 AI signals per day' in text or '70 analyses/day' in text)
         self.assertEqual(self.row['deposit'], Decimal('100'))
         self.assertEqual(self.row['uid'], '123456789')
         self.assertEqual(self.row['game_tokens'], 1000)
@@ -78,7 +78,10 @@ class PremiumDepositTests(unittest.IsolatedAsyncioTestCase):
             self.lookup.return_value = result
             text = await self.send()
             self.assertFalse(self.row['is_premium'])
-            self.assertIn('Account not linked to us', text)
+            self.assertIn('could not confirm access', text)
+            actions = [b.callback_data for row in self.bot.calls[-1]['markup'].inline_keyboard for b in row]
+            self.assertIn('flow:premium_check', actions)
+            self.assertNotIn('flow:enter_id', actions)
 
     async def test_invalid_or_different_id_cannot_use_another_deposit(self):
         for uid in ('not-an-id', '987654321'):
@@ -99,14 +102,14 @@ class PremiumDepositTests(unittest.IsolatedAsyncioTestCase):
         for exc in (self.botmod.panelbot.PanelUnavailable('timeout'), TimeoutError(), ValueError()):
             self.lookup.side_effect = exc
             text = await self.send()
-            self.assertIn('could not confirm', text)
+            self.assertIn('cannot confirm', text)
             self.assertFalse(self.row['is_premium'])
             self.assertIsNotNone(self.state.state)
             self.assertFalse(self.botmod._premium_checks)
         self.lookup.side_effect = None
         self.lookup.return_value['sum_deposits'] = Decimal('NaN')
         text = await self.send()
-        self.assertIn('could not confirm', text)
+        self.assertIn('cannot confirm', text)
         self.assertFalse(self.row['is_premium'])
 
     async def test_test_mode_still_requires_a_real_100_deposit(self):
@@ -143,7 +146,7 @@ class PremiumDepositTests(unittest.IsolatedAsyncioTestCase):
         await self.botmod.menu_premium(H.FakeCB(11, 'menu:premium', 1), self.bot, self.state)
         text = self.bot.calls[-1]['body']
         self.assertIn('$100', text)
-        self.assertIn('70 AI signals per day', text)
+        self.assertTrue('70 AI signals per day' in text or '70 analyses/day' in text)
         self.assertNotIn('tokens', text)
         self.assertFalse(self.row['is_premium'])
 
