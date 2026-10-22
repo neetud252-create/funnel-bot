@@ -44,6 +44,19 @@ Later starts do not create extra pins or undo the user's decision to unpin/hide
 it. A failed pin never blocks the menu; an unfinished pin is retried on the next
 start, and a deleted pending message can be replaced with the fresh welcome.
 
+The persistent card's caption is the owner's **POCKET IQ — START HERE** copy.
+Its three button rows are Try Free Analysis / Account Setup, How It Works /
+Support, and Reviews / Community. Verified accounts see Analyse My Chart /
+My Dashboard in the first row. The approved GIF stays on the card; the full
+home menu still contains Tools & FAQ and Language.
+
+Startup edits saved cards in place, with pagination and rate-limit backoff;
+it does not send replacement messages or re-pin dismissed cards. Every menu
+render checks for changes, including immediately after successful verification.
+A persisted content hash avoids redundant Telegram edits across restarts.
+Text-only fallback welcomes are updated with the text-edit API. Deleted or
+blocked chats are left alone; failed edits never block access to normal menus.
+
 ## State and validation
 
 `db.SCHEMA` adds setup progress, account path, eligibility timestamp, and the last access-check outcome.

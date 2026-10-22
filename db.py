@@ -22,6 +22,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS album_ids TEXT;
 -- The pinned welcome is permanent chat content, separate from disposable UI.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_message_id BIGINT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_pinned_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_content_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
 -- Only setup progress and self-attested eligibility; never broker identity verification.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_stage TEXT NOT NULL DEFAULT 'new';
@@ -302,10 +303,27 @@ async def mark_welcome_pinned(tg_id: int, msg_id: int):
              WHERE tg_id = $1 AND welcome_message_id = $2
         """, tg_id, msg_id)
 
+async def mark_welcome_content(tg_id: int, msg_id: int, content_hash: str):
+    async with pool.acquire() as c:
+        await c.execute("""
+            UPDATE users SET welcome_content_hash = $3
+             WHERE tg_id = $1 AND welcome_message_id = $2
+        """, tg_id, msg_id, content_hash)
+
+async def welcome_users_after(tg_id: int, limit: int = 100):
+    """Keyset pagination for editing only our already-saved private-chat cards."""
+    async with pool.acquire() as c:
+        return await c.fetch("""
+            SELECT tg_id FROM users
+             WHERE tg_id > $1 AND welcome_message_id IS NOT NULL
+             ORDER BY tg_id LIMIT $2
+        """, tg_id, limit)
+
 async def clear_missing_welcome(tg_id: int, msg_id: int):
     async with pool.acquire() as c:
         await c.execute("""
-            UPDATE users SET welcome_message_id = NULL, welcome_pinned_at = NULL
+            UPDATE users SET welcome_message_id = NULL, welcome_pinned_at = NULL,
+                             welcome_content_hash = NULL
              WHERE tg_id = $1 AND welcome_message_id = $2
                AND welcome_pinned_at IS NULL
         """, tg_id, msg_id)
