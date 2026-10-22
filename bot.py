@@ -1,4 +1,5 @@
 import asyncio, hashlib, os, logging, random, re, time
+import weakref
 from decimal import Decimal
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject, CommandStart
@@ -88,6 +89,7 @@ _uid_lookup_at = {}
 # callback, so completion, failure, timeout and cancellation all clean up.
 _verify_inflight = {}
 _premium_checks = set()
+_welcome_locks = weakref.WeakValueDictionary()
 
 # Cache entries are (file_id, content_hash). The hash is of the file's BYTES at
 # the moment Telegram issued that file_id, so replacing artwork on disk changes
@@ -438,7 +440,7 @@ async def wipe(bot, tg_id):
     user = await db.get_user(tg_id)
     if not user:
         return
-    if user["ui_msg_id"]:
+    if user["ui_msg_id"] and user["ui_msg_id"] != user.get('welcome_message_id'):
         try:
             await bot.delete_message(chat_id=tg_id, message_id=user["ui_msg_id"])
         except Exception:
@@ -446,6 +448,8 @@ async def wipe(bot, tg_id):
     ids = user["album_ids"]
     if ids:
         for mid in str(ids).split(","):
+            if int(mid) == user.get('welcome_message_id'):
+                continue
             try:
                 await bot.delete_message(chat_id=tg_id, message_id=int(mid))
             except Exception:
@@ -470,16 +474,17 @@ async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
     msg_id = user["ui_msg_id"] if user else None
-    # Delete the current screen FIRST, then send its replacement. This is the
+    # Keep the pinned welcome; delete the current disposable screen FIRST,
+    # then send its replacement. This is the
     # original transition and it is deliberate: Telegram plays its normal
     # message-removal animation on the old screen before the new one arrives,
     # so the two never overlap on screen.
     #
-    # The trade-off is real and accepted: between the delete and the send the
-    # chat is empty, so a send that fails leaves it that way. The try/except
+    # Between the delete and the send there may be no active menu besides the
+    # pinned welcome, so a send that fails needs an error notice. The try/except
     # below is what keeps that from being silent - it does not change the
     # ordering, it only makes a failed send say so instead of vanishing.
-    if msg_id:
+    if msg_id and msg_id != user.get('welcome_message_id'):
         try:
             await bot.delete_message(chat_id=tg_id, message_id=msg_id)
         except Exception as e:
@@ -609,13 +614,45 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     # command defaults to None so /devstart's start(m, bot, state) still works.
     await _capture_ref(tg_id, command)
     await _clear_nudge(bot, tg_id)
-    # Send the existing MP4 as one video card with its caption and menu attached.
-    await _show_home(bot, tg_id)
+    # Serialize repeated /start requests so only the first welcome is pinned.
+    lock = _welcome_locks.setdefault(tg_id, asyncio.Lock())
+    async with lock:
+        message = await _show_home(bot, tg_id)
+        if getattr(getattr(m, 'chat', None), 'type', None) == 'private':
+            await _pin_welcome(bot, tg_id, message)
 
 
 async def _show_home(bot, tg_id):
     user = await db.get_user(tg_id)
-    await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(user), is_video=True)
+    return await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(user), is_video=True)
+
+
+async def _pin_welcome(bot, tg_id, message):
+    """Pin once, persist the anchor, and never let pin failures block the menu."""
+    if message is None:
+        return
+    try:
+        saved = await db.claim_welcome_message(tg_id, message.message_id)
+        if not saved or saved['welcome_pinned_at']:
+            # Respect a user's later unpin/hide; don't force the pin back.
+            return
+        message_id = saved['welcome_message_id']
+        try:
+            await bot.pin_chat_message(chat_id=tg_id, message_id=message_id,
+                                       disable_notification=True)
+        except TelegramBadRequest as error:
+            if 'message to pin not found' in str(error).lower() or 'message_id_invalid' in str(error).lower():
+                # The pending welcome was deleted. Use this start's fresh
+                # welcome; never discard a reference to a successful pin.
+                await db.clear_missing_welcome(tg_id, message_id)
+                if message_id != message.message_id:
+                    return await _pin_welcome(bot, tg_id, message)
+            raise
+        await db.mark_welcome_pinned(tg_id, message_id)
+        logging.info('Welcome message pinned for tg_id=%s', tg_id)
+    except Exception:
+        logging.warning('Welcome pin unavailable for tg_id=%s; menu remains usable',
+                        tg_id, exc_info=True)
 
 
 async def _journey(bot, tg_id, content, media=None, key=None):
@@ -1183,7 +1220,15 @@ async def _drop_msgs(bot, tg_id, ids):
     # Best-effort delete. Deliberately touches no DB state: the cancellation
     # path below runs this detached, and a set_album(None) landing late would
     # wipe the bookkeeping of whichever run superseded it.
+    try:
+        user = await db.get_user(tg_id)
+    except Exception:
+        logging.warning('Skipping message cleanup: cannot check welcome anchor', exc_info=True)
+        return
+    pinned = user.get('welcome_message_id') if user else None
     for mid in ids:
+        if mid == pinned:
+            continue
         try:
             await bot.delete_message(chat_id=tg_id, message_id=mid)
         except Exception:
@@ -1415,10 +1460,7 @@ def _register_btn(label="\U0001F511 Register & Get Access",
 
 async def _replace(bot, tg_id, old_msg_id, text, kb_rows=None):
     # Swap the transient "checking" message for the verdict; track as ui_msg.
-    try:
-        await bot.delete_message(chat_id=tg_id, message_id=old_msg_id)
-    except Exception:
-        pass
+    await _drop_msgs(bot, tg_id, [old_msg_id])
     markup = build_kb(kb_rows) if kb_rows else None
     m = await bot.send_message(tg_id, text, parse_mode="HTML", reply_markup=markup)
     await db.set_ui_msg(tg_id, m.message_id)

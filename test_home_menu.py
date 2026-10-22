@@ -101,7 +101,10 @@ async def main():
     for action in ('home:language', 'home:access'):
         bot.calls.clear()
         await reloaded.home_action(H.FakeCB(72040, action, 1), bot, H.FakeState())
-        assert home_ids.issubset({c['id'] for c in bot.calls if c['kind'] == 'delete'})
+        pinned = fake_db._users[72040]['welcome_message_id']
+        deleted = {c['id'] for c in bot.calls if c['kind'] == 'delete'}
+        assert (home_ids - {pinned}).issubset(deleted)
+        assert pinned not in deleted
         assert fake_db._users[72040]['album_ids'] is None
         bot.calls.clear()
         await reloaded.home_action(H.FakeCB(72040, 'home:back', 1), bot, H.FakeState())

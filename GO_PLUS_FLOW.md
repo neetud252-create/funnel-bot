@@ -37,6 +37,13 @@ for GIF-style playback. `assets/home_banner.png` is its matching still fallback.
 Both keep the caption and buttons on one message. Content hashes invalidate older
 Telegram media IDs automatically; animation IDs remain separate from video IDs.
 
+On a private-chat `/start`, the first welcome message is pinned silently. Its ID
+and pin timestamp are saved separately from disposable menu messages, so menu
+navigation, signal cleanup, redeploys, and `/devstart` preserve the anchor.
+Later starts do not create extra pins or undo the user's decision to unpin/hide
+it. A failed pin never blocks the menu; an unfinished pin is retried on the next
+start, and a deleted pending message can be replaced with the fresh welcome.
+
 ## State and validation
 
 `db.SCHEMA` adds setup progress, account path, eligibility timestamp, and the last access-check outcome.
