@@ -206,10 +206,11 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_access_details_available_before_registration_without_losing_progress(self):
         await self.tap('new')
-        with patch.object(config, 'MIN_DEPOSIT', Decimal('20')):
-            card = await self.tap('requirements')
-        self.assertIn('$20.00', card['body'])
-        self.assertIn('You do not need to deposit before your Trader ID is checked.', card['body'])
+        card = await self.tap('requirements')
+        self.assertIn('new Pocket Option account', card['body'])
+        self.assertIn('Pocket Option UID', card['body'])
+        self.assertNotIn('deposit', card['body'].lower())
+        self.assertNotIn('$', card['body'])
         self.assertEqual(self.row['setup_stage'], 'requirements')
         self.assertIn('Let’s set up your account first.', (await self.resume())['body'])
         with patch.object(self.mod, '_ref_url', AsyncMock(return_value='https://pocketoption.com/?a=test')):

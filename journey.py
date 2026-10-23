@@ -63,15 +63,13 @@ REGISTRATION_INTRO = ('🆕 <b>Let’s set up your account first.</b>\n\n'
     'Full access also requires qualifying deposits. You can read Access Requirements '
     'below before registering. We’ll show the deposit step after your Trader ID is confirmed.\n\n'
     + DISCLOSURE + '\n\nReady to continue?')
-REQUIREMENTS = ('ℹ️ <b>Pocket IQ access requirements</b>\n\n'
-    'Your account must be registered through our referral link and its Trader ID verified.\n\n'
-    'Standard access: <b>{limit} analyses per day</b>.\n'
-    'Required qualifying deposits: <b>${required}</b>.\n\n'
-    'This is the Pocket IQ access requirement, not the broker’s minimum deposit. '
-    'Payments remain in your broker account; Pocket IQ does not collect them.\n\n'
-    'Already have an account? Confirm with Pocket Option that a replacement is allowed '
-    'before registering. Its terms permit only one trading account per client.\n\n'
-    + DISCLOSURE + '\n\nYou do not need to deposit before your Trader ID is checked.')
+REQUIREMENTS = ('ℹ️ <b>Pocket IQ account requirement</b>\n\n'
+    'To continue Pocket IQ setup, you must create a <b>new Pocket Option account '
+    'through our bot link</b>.\n\n'
+    'After registering, return here and send your <b>Pocket Option UID</b> '
+    'to verify your account.\n\n'
+    'Already have an account? Contact <b>Support</b> before creating another.\n\n'
+    '<i>' + DISCLOSURE + '</i>')
 REGISTER = ('🔗 <b>Get Pocket IQ Access</b>\n\n'
     'Ready to explore your charts with Pocket IQ? Get clear, easy-to-follow '
     'market analysis directly in Telegram.\n\n'
@@ -251,7 +249,7 @@ def new_account():
 
 
 def requirements():
-    return REQUIREMENTS.format(limit=config.daily_limit(False), required=money(config.MIN_DEPOSIT)), [
+    return REQUIREMENTS, [
         [button('🚀 Continue Setup', 'cb:home:access', 'success')],
         [cb('💬 Support', 'support')]]
 
