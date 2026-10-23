@@ -1,4 +1,4 @@
-"""Read-only OTCharts adapter. No broker credentials, order API, or price fallback.
+"""Read-only market feeds. No order API or automatic paid-provider fallback.
 
 Contract: https://otcharts.com/api (checked 2026-10-24).
 The otc book timestamps are broker-clock seconds, UTC + 2 hours.
@@ -24,8 +24,14 @@ class FeedError(Exception):
     """A fixed local error code; never expose the provider's response or key."""
 
 
+def provider():
+    return os.getenv('MARKET_DATA_PROVIDER', 'otcharts').strip().lower()
+
+
 def configured():
-    return bool(os.getenv('OTCHARTS_API_KEY', '').strip())
+    if provider() == 'pocketoption':
+        return True  # Public guest demo connection; no subscription or credentials.
+    return provider() == 'otcharts' and bool(os.getenv('OTCHARTS_API_KEY', '').strip())
 
 
 def public_enabled():
@@ -43,6 +49,11 @@ class Asset:
     name: str
     open: bool | None
     payout: float | None
+    category: str = 'other'
+
+    @property
+    def market(self):
+        return 'otc' if self.symbol.endswith('_otc') else 'fin'
 
     @property
     def key(self):
@@ -64,6 +75,7 @@ class Snapshot:
     asset: Asset
     period: int
     candles: tuple[Candle, ...]
+    source: str = 'OTCharts / Pocket Option OTC'
 
     @property
     def closed_at(self):
@@ -123,14 +135,24 @@ def parse_candles(payload, asset, period, now=None):
         raise FeedError('invalid')
     if payload.get('open') is False or asset.open is False:
         raise FeedError('closed')
+    return validated_candles(payload['candles'], asset, period, now,
+                             offset=CLOCK_OFFSET, source='OTCharts / Pocket Option OTC')
+
+
+def validated_candles(rows, asset, period, now, *, offset, source):
+    """Shared OHLC checks; provider clock conversion must be explicit."""
+    if period not in PERIODS or not isinstance(rows, list) or len(rows) > 10000:
+        raise FeedError('invalid')
+    if asset.open is False:
+        raise FeedError('closed')
     found = {}
-    for row in payload['candles']:
+    for row in rows:
         if not isinstance(row, dict):
             raise FeedError('invalid')
         stamp = _number(row.get('time'))
         if stamp != int(stamp):
             raise FeedError('invalid')
-        stamp = int(stamp) - CLOCK_OFFSET
+        stamp = int(stamp) - offset
         if stamp % period or stamp > now + period:
             raise FeedError('invalid')
         o, h, l, c = (_number(row.get(key)) for key in ('open', 'high', 'low', 'close'))
@@ -148,7 +170,7 @@ def parse_candles(payload, asset, period, now=None):
     # optional gaps summary. Do not forward-fill invented candles.
     if any(b.time - a.time != period for a, b in zip(bars, bars[1:])):
         raise FeedError('gaps')
-    snapshot = Snapshot(asset, period, bars)
+    snapshot = Snapshot(asset, period, bars, source)
     snapshot.require_fresh(now)
     return snapshot
 
@@ -249,7 +271,13 @@ _feeds = {}
 def feed():
     loop = asyncio.get_running_loop()
     if loop not in _feeds:
-        _feeds[loop] = OTCharts()
+        if provider() == 'pocketoption':
+            from pocket_feed import PocketFeed
+            _feeds[loop] = PocketFeed()
+        elif provider() == 'otcharts':
+            _feeds[loop] = OTCharts()
+        else:
+            raise FeedError('configuration')
     return _feeds[loop]
 
 
@@ -257,3 +285,25 @@ async def close():
     instance = _feeds.pop(asyncio.get_running_loop(), None)
     if instance:
         await instance.close()
+
+
+async def startup_check():
+    """One bounded read-only deployment check; no Telegram, AI or trade calls."""
+    if provider() != 'pocketoption':
+        return
+    import logging
+    async def check():
+        assets = await feed().assets()
+        asset = next((a for a in assets if a.symbol == 'EURUSD_otc' and a.open),
+                     next((a for a in assets if a.open), None))
+        if asset is None:
+            raise FeedError('closed')
+        snapshot = await feed().candles(asset.key, 60)
+        logging.info('Direct market feed verified; assets=%d; open=%d; sample=%s; bars=%d; candle_age=%.1fs',
+                     len(assets), sum(bool(a.open) for a in assets), asset.symbol,
+                     len(snapshot.candles), time.time()-snapshot.closed_at)
+    try:
+        await asyncio.wait_for(check(), timeout=40)
+    except Exception as exc:
+        logging.warning('Direct market feed check failed; code=%s',
+                        str(exc) if isinstance(exc, FeedError) else 'service')

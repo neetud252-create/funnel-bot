@@ -45,7 +45,7 @@ def render(snapshot, *, preview=False):
         fig.text(.08, .92, 'POCKET IQ', color='#53baff', fontsize=14, weight='bold')
         fig.text(.08, .86, f'{symbol}  |  {snapshot.period//60}-minute candles', color='white', fontsize=20, weight='bold')
         fig.text(.08, .09, f'Last candle closed: {closed}', color='#b8c8dc', fontsize=11)
-        fig.text(.08, .05, 'Source: OTCharts / Pocket Option OTC  •  Completed candles only', color='#7d97b3', fontsize=10)
+        fig.text(.08, .05, f'Source: {snapshot.source}  •  Completed candles only', color='#7d97b3', fontsize=10)
         if preview:
             fig.text(.5, .47, 'SYNTHETIC PREVIEW', ha='center', color='white', alpha=.25, fontsize=32, rotation=18)
         buffer = io.BytesIO()

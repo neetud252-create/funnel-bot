@@ -46,15 +46,13 @@ SEED = tuple(sorted((Entry(**row) for row in _SOURCE['assets']),
 
 def entries(live=()):
     # Only normalize punctuation, never invert a pair or conflate OTC and FIN.
-    by_name = {normalized(a.name): a for a in live}
-    by_symbol = {normalized(a.symbol): a for a in live}
+    by_name = {(a.market, normalized(a.name)): a for a in live}
+    by_symbol = {(a.market, normalized(a.symbol)): a for a in live}
     result, matched = [], set()
     for item in SEED:
-        asset = None
-        if item.market == 'otc':
-            asset = by_name.get(normalized(item.name))
-            if asset is None and item.category == 'forex':
-                asset = by_symbol.get(normalized(item.name))
+        asset = by_name.get((item.market, normalized(item.name)))
+        if asset is None and item.category == 'forex':
+            asset = by_symbol.get((item.market, normalized(item.name)))
         if asset:
             matched.add(asset.key)
         result.append(Entry(item.name, item.category, item.market, asset))
@@ -62,7 +60,7 @@ def entries(live=()):
         if asset.key not in matched:
             # New provider listings remain reachable without guessing their
             # category or ever constructing a candle-request symbol ourselves.
-            result.append(Entry(asset.name, 'other', 'otc', asset))
+            result.append(Entry(asset.name, asset.category, asset.market, asset))
     return tuple(result)
 
 
