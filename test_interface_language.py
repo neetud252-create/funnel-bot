@@ -10,7 +10,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 os.environ.setdefault('DATABASE_URL', 'postgresql://unused')
 
-from aiogram.methods import SendMessage, SendPhoto
+from aiogram import Bot
+from aiogram.methods import SendMessage, SendPhoto, SetMyName, SetMyDescription, SetMyShortDescription
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import bot_profile
 import chart_analysis
@@ -170,12 +171,21 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(H.last_screen(bot)['body'],journey.TEXTS['tools'])
 
     async def test_public_profile_names_and_descriptions(self):
-        bot=type('ProfileBot',(),{method:AsyncMock() for method in (
-            'set_my_name','set_my_description','set_my_short_description')})()
-        await bot_profile.sync(bot)
-        self.assertEqual(bot.set_my_name.await_count,13)
-        self.assertTrue(all(c.kwargs['name']=='Pocket IQ' for c in bot.set_my_name.await_args_list))
-        self.assertEqual({c.kwargs['language_code'] for c in bot.set_my_description.await_args_list},{'',*L.CODES})
+        # Exercise the real SDK methods and models; mock only network transport.
+        bot=Bot('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi')
+        try:
+            with patch.object(bot.session,'make_request',AsyncMock(return_value=True)) as send:
+                await bot_profile.sync(bot)
+            methods=[call.args[1] for call in send.await_args_list]
+            self.assertEqual(len(methods),39)
+            for kind in (SetMyName,SetMyDescription,SetMyShortDescription):
+                selected=[m for m in methods if isinstance(m,kind)]
+                self.assertEqual({m.language_code for m in selected},{'',*L.CODES})
+                self.assertEqual(len(selected),13)
+            self.assertTrue(all(m.name=='Pocket IQ' for m in methods if isinstance(m,SetMyName)))
+            self.assertTrue(all(m.short_description for m in methods if isinstance(m,SetMyShortDescription)))
+        finally:
+            await bot.session.close()
 
 
 if __name__=='__main__': unittest.main()
