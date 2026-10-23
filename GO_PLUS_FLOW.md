@@ -62,6 +62,10 @@ and unlock icons use the supplied custom IDs in captions and native buttons.
 Account, Premium crown, trophy, key, lock, referral link, account-ID location,
 new-account, and payment icons use the owner's second batch. The account-ID
 location pin is separate from the welcome pin; no new search-icon ID was supplied.
+Success, error, question, information, warning, blocked, waiting, retry, pause,
+and settings icons use the owner's third batch. The supplied warning triangle
+covers both exclamation and warning glyphs; text/emoji presentation variants
+of information, pause, and settings share the same custom artwork.
 Text-only fallback welcomes are updated with the text-edit API. Deleted or
 blocked chats are left alone; failed edits never block access to normal menus.
 
