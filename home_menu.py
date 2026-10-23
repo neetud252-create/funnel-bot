@@ -9,11 +9,12 @@ ANIMATION = 'home_banner_loop'
 VIDEO = 'home_banner_video'
 
 TEXT = (
-    "👋 <b>Welcome to Pocket IQ</b>\n\n"
-    "Upload a chart screenshot and explore <b>two free analyses</b> before deciding "
-    "whether to set up access.\n\n"
-    "See how it works, read community feedback, or speak to support.\n\n"
-    "<i>Predictions can be wrong. Returns are not guaranteed.</i>"
+    "👋 <b>Welcome to Pocket IQ</b>\n"
+    "Your AI-powered chart analysis assistant.\n"
+    "📸 Turn a clear chart screenshot into easy-to-follow market analysis.\n"
+    "🎁 <b>Explore two free analyses</b> before deciding whether to set up access.\n"
+    "📖 Start with <b>Guide</b>, read community <b>Reviews</b>, or speak to <b>Support</b> whenever you need help.\n"
+    "👇 Tap <b>Test Signals</b> to try your first analysis."
 )
 
 
