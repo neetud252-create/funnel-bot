@@ -823,7 +823,7 @@ SCREENS = {
     # All emoji here are plain unicode by request, no pe().
     # TODO: S35 and S40 are intentionally absent - the rows jump 30 -> 45.
     # There is no assets/test_menu.jpg and there never was: "test_menu" is the
-    # screen key, and the image it renders is assets/expiration_time.jpg. This is
+    # screen key, and the image it renders is assets/expiration_time.png. This is
     # the only screen that shows it - tapping an M button here leads straight to
     # the waiting screen, which is text-only.
     "test_menu": {
