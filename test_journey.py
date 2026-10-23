@@ -35,6 +35,49 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         await self.tap('enter_id')
         self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
 
+    async def test_continue_setup_registration_and_id_verification(self):
+        self.row.update(setup_stage='requirements')
+        await self.mod.home_action(H.FakeCB(91, 'home:access', 1), self.bot, self.state)
+        card = H.last_screen(self.bot)
+        self.assertIn('Create & verify your account', card['body'])
+        self.assertIn('register using our link', card['body'])
+        self.assertEqual([r[0].callback_data for r in card['markup'].inline_keyboard[:2]],
+                         ['flow:new', 'flow:enter_id'])
+        await self.tap('new')
+        ref = 'https://pocketoption.com/?a=campaign&sub_id=source_91'
+        with patch.object(self.mod, '_ref_url', AsyncMock(return_value=ref)) as referral:
+            card = await self.tap('eligible')
+        referral.assert_awaited_once_with(91)
+        self.assertEqual(card['markup'].inline_keyboard[0][0].url, ref)
+        self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:enter_id')
+        await self.tap('enter_id')
+        self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
+        with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(
+                config.VERIFY_NEED_DEPOSIT, Decimal('12.34')))) as lookup:
+            await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
+        lookup.assert_awaited_once_with(91, '123456789')
+        self.assertEqual(self.row['uid'], '123456789')
+        self.assertEqual(self.row['setup_stage'], 'deposit')
+        self.assertFalse(self.row['verified'])
+        await self.mod.home_action(H.FakeCB(91, 'home:access', 1), self.bot, self.state)
+        self.assertIn('$37.66', H.last_screen(self.bot)['body'])
+
+    async def test_verify_id_from_setup_keeps_intent_through_eligibility_and_restart(self):
+        await self.tap('setup')
+        await self.tap('enter_id')
+        self.assertIsNone(self.row['eligibility_confirmed_at'])
+        self.assertEqual(self.row['setup_stage'], 'id')
+        self.assertEqual(self.row['account_kind'], 'existing')
+        self.mod = H._load_bot()
+        await self.tap('eligible')
+        self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
+        self.assertIn('Send your Pocket Option Trader ID', H.last_screen(self.bot)['body'])
+        self.assertFalse(any(b.url for r in H.last_screen(self.bot)['markup'].inline_keyboard for b in r))
+        self.state.state = None
+        await self.mod.home_action(H.FakeCB(91, 'home:access', 1), self.bot, self.state)
+        self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
+        self.assertIn('Send your Pocket Option Trader ID', H.last_screen(self.bot)['body'])
+
     async def test_no_registration_or_verification_before_eligibility(self):
         with patch.object(self.mod, '_verify_once', AsyncMock()) as verify:
             await self.mod._submit_uid(91, '123456789', self.bot, self.state)

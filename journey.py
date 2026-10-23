@@ -49,20 +49,30 @@ def dashboard_keyboard():
 RISK = ('AI predictions can be wrong. You can lose your entire stake. '
         'Past results and testimonials do not guarantee future returns.')
 DISCLOSURE = 'We may earn a commission if you use our referral link.'
-REQUIREMENTS = ('🚀 <b>Set up your Go Plus access</b>\n\n'
+REQUIREMENTS = ('🚀 <b>Pocket IQ — Create & verify your account</b>\n\n'
+    '<b>1. Create your trading account</b>\n'
+    'New to Pocket Option? Tap Create New Account to register using our link.\n\n'
+    '<b>2. Verify your Trader ID</b>\n'
+    'After registering, return here and tap Verify My Trader ID. '
+    'Send the numeric Trader ID from your Pocket Option profile so we can check access.\n\n'
+    'Already have an account? Use the existing-account option below.\n\n'
     'Standard access: <b>{limit} analyses per day</b>.\n'
     'Required qualifying deposits: <b>${required}</b>.\n\n'
-    'This is the Go Plus access requirement, not the broker’s minimum deposit. '
-    'Payments remain in your broker account; Go Plus does not collect them.\n\n'
-    + DISCLOSURE + '\n\nChoose the account path that applies to you.')
+    'This is the Pocket IQ access requirement, not the broker’s minimum deposit. '
+    'Payments remain in your broker account; Pocket IQ does not collect them.\n\n'
+    + DISCLOSURE)
 ELIGIBILITY = ('🌍 <b>Before you continue</b>\n\n'
     'Read the broker’s eligibility and restricted-location rules below. Only continue '
     'if you are 18 or older, meet the legal age requirement where you live, and '
     'the service is available to you under those rules.\n\n'
     + RISK + '\n\nYour confirmation is a self-declaration, not broker identity verification.')
-REGISTER = ('🔗 <b>Step 1 of 3 — Create your account</b>\n\n'
-    'Register on Pocket Option using the button below, then return to check your account ID.\n\n'
-    'Go Plus access requires <b>${required}</b> in qualifying deposits after your account '
+REGISTER = ('🔗 <b>Pocket IQ — Register & verify your ID</b>\n\n'
+    '<b>1. Create your account</b>\n'
+    'Tap Create New Account below and register on Pocket Option using our link.\n\n'
+    '<b>2. Verify your Trader ID</b>\n'
+    'Return to this chat, tap Verify My Trader ID, and send the numeric Trader ID '
+    'from your Pocket Option profile. We will check your account and show the next step.\n\n'
+    'Pocket IQ access requires <b>${required}</b> in qualifying deposits after your account '
     'is linked. ' + DISCLOSURE + '\n\n'
     'Already have an account? Use the existing-account path. Do not create a duplicate.')
 EXISTING = ('👤 <b>Use your existing account</b>\n\n'
@@ -204,7 +214,8 @@ def screen(name, user=None):
 
 def setup():
     return REQUIREMENTS.format(limit=config.daily_limit(False), required=money(config.MIN_DEPOSIT)), [
-        [cb('🆕 I’m New to Pocket Option', 'new', True)],
+        [cb('🔗 Create New Account', 'new', True)],
+        [button('✅ Verify My Trader ID', 'cb:flow:enter_id', 'primary')],
         [cb('👤 I Already Have an Account', 'existing')],
         [cb('❓ Questions About Access', 'support')], *back()]
 
@@ -217,8 +228,8 @@ def eligibility():
 
 def registration(ref):
     return REGISTER.format(required=money(config.MIN_DEPOSIT)), [
-        [url('🔗 Register on Pocket Option', ref, True)],
-        [cb('✅ I Registered — Check My ID', 'enter_id')],
+        [url('🔗 Create New Account', ref, True)],
+        [button('✅ Verify My Trader ID', 'cb:flow:enter_id', 'primary')],
         [url('▶️ Watch Registration Guide', config.SETUP_GUIDE_URL)],
         [cb('👤 I Already Have an Account', 'existing')], [cb('💬 Support', 'support'), cb('⬅️ Back', 'setup')]]
 
