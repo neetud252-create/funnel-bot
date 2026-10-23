@@ -799,7 +799,8 @@ async def _resume_setup(bot, tg_id, state=None):
     elif stage == 'account_help':
         await _journey(bot, tg_id, journey.account_help(), key='account_question_help')
     elif stage == 'requirements' and user.get('account_kind') == 'new' and not user.get('uid'):
-        await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
+        # Visitors saved on the former introduction now resume registration.
+        await _show_register(bot, tg_id)
     elif stage in ('existing_account', 'existing_register'):
         await _show_existing_registration(bot, tg_id, user)
     elif stage == 'referral_help':
@@ -860,8 +861,8 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             await db.set_setup_stage(tg_id, 'existing_account', account_kind='existing')
             await _show_existing_registration(bot, tg_id, user)
         else:
-            await db.set_setup_stage(tg_id, 'requirements', account_kind='new')
-            await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
+            await db.set_setup_stage(tg_id, 'register', account_kind='new')
+            await _show_register(bot, tg_id)
     elif action == 'register_existing':
         if user.get('verified'):
             await _show_menu(bot, tg_id)
