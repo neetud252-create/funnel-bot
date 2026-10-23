@@ -3,6 +3,8 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 import config
 
+REGISTER_PHOTO = 'register_account'
+
 
 def button(label, action, style=None):
     return (label, action, style) if style else (label, action)
@@ -80,10 +82,16 @@ REGISTER = ('🔗 <b>Let’s create your account.</b>\n\n'
     'Full access has a qualifying-deposit requirement. See Access Requirements below; '
     'we’ll guide you through that step after checking your Trader ID. ' + DISCLOSURE + '\n\n'
     'Already have an account? Use the existing-account path. Do not create a duplicate.')
-EXISTING = ('👤 <b>Did you create your account through our link?</b>\n\n'
-    'Pocket IQ access requires an account registered through our referral link.\n\n'
-    'If you used our link, verify your Trader ID below. If you didn’t, or you’re not sure, '
-    'choose No / I’m Not Sure for help checking the available options.')
+EXISTING = ('🔗 <b>Create an account through the Pocket IQ bot link</b>\n\n'
+    'Pocket IQ access requires an account registered through our referral link. '
+    'If your current account wasn’t registered through this link, you need an eligible '
+    'new registration to use this offer.\n\n'
+    '<b>1.</b> Tap Create New Account below and register using the bot link.\n'
+    '<b>2.</b> Return here, tap Verify My Trader ID, and send your new numeric UID.\n\n'
+    'Already have an account? Confirm with Pocket Option that a replacement is allowed '
+    'before registering. Its terms permit only one trading account per client.\n\n'
+    'Full access also has a deposit requirement; see Access Requirements. '
+    'The deposit step follows UID verification. ' + DISCLOSURE)
 REFERRAL_HELP = ('🔗 <b>Let’s check your referral options.</b>\n\n'
     'Pocket IQ access requires registration through our referral link. '
     'Our bot cannot change the referral attached to an existing trading account.\n\n'
@@ -272,12 +280,13 @@ def registration(ref):
         [cb('👤 I Already Have an Account', 'existing')], [cb('💬 Support', 'support'), cb('⬅️ Back', 'setup')]]
 
 
-def existing():
-    return EXISTING, [[cb('✅ Yes — Verify My Trader ID', 'enter_id', True)],
-        [cb('❓ No / I’m Not Sure', 'referral_help')],
+def existing(ref=None):
+    register = url('🔗 Create New Account', ref, True) if ref else cb('🔗 Create New Account', 'register_existing', True)
+    return EXISTING, [[register],
+        [button('✅ Verify My Trader ID', 'cb:flow:enter_id', 'primary')],
         [cb('📍 Where Is My Trader ID?', 'id_guide')],
         [cb('ℹ️ Access Requirements', 'requirements')],
-        [cb('💬 Support', 'support')], *back('setup')]
+        [cb('💬 Support', 'support'), cb('⬅️ Back', 'setup')]]
 
 
 def referral_help():
