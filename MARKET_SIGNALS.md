@@ -70,7 +70,8 @@ intervals are never forward-filled. Gaps, stale data and conflicting bars fail.
 
 Connection failures use a short backoff. Timed-out/cancelled requests close their
 socket so late responses cannot satisfy a later request. A deployment performs
-one bounded read-only feed check and logs only counts, a symbol and candle age.
+a bounded read-only check across five categories and logs only counts, symbols,
+candle ages and public market timestamps when diagnosing a gap.
 
 `MARKET_DATA_PUBLIC_ENABLED=false` retains the optional admin preview gate.
 The former OTCharts adapter remains available only with an explicit
