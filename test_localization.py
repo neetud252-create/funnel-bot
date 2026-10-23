@@ -167,6 +167,28 @@ async def check_delivery_and_selector():
             for emoji, key in (('📌', 'pin'), ('🔓', 'unlocked'), ('💬', 'chat')):
                 assert f'<tg-emoji emoji-id="{emoji_theme.ICONS[key]}">{emoji}</tg-emoji>' in result.caption
 
+    # Native navigation icons keep their direction/actions, and a tutorial's
+    # Play icon must not overwrite the branded YouTube button icon.
+    navigation = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text='◀️', callback_data='gallery:0'),
+        InlineKeyboardButton(text='▶️', callback_data='gallery:2'),
+        InlineKeyboardButton(text='🔙 Back', callback_data='home:back', style='success')], [
+        InlineKeyboardButton(text='▶️ Watch Tutorial', callback_data='go:guide'),
+        InlineKeyboardButton(text='▶️ YouTube Channel', url='https://youtube.com/@example')]])
+    for language in ('en', 'ru'):
+        rendered = L.localize_method(SendMessage(chat_id=2, text='Navigation',
+                                    reply_markup=navigation), language).reply_markup
+        expected = ('navigation_back', 'play', 'navigation_back', 'play', 'youtube')
+        originals = [button for row in navigation.inline_keyboard for button in row]
+        buttons = [button for row in rendered.inline_keyboard for button in row]
+        for original_button, button, key in zip(originals, buttons, expected):
+            assert button.icon_custom_emoji_id == emoji_theme.ICONS[key]
+            assert button.text and not emoji_theme._glyph.match(button.text)
+            assert button.callback_data == original_button.callback_data
+            assert button.url == original_button.url
+            assert button.style == original_button.style
+    assert navigation.inline_keyboard[0][0].text == '◀️'
+
     async def callback_handler(event, data):
         # Allow other callbacks to overlap. A different recipient still wins over context.
         await asyncio.sleep(0)
