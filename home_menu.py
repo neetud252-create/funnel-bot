@@ -29,8 +29,10 @@ def keyboard(user=None):
     return [
         [(trial, 'cb:home:test', 'success')],
         [(access, 'cb:home:access', 'primary')],
-        [('📖 How It Works', 'cb:flow:how', 'primary'), ('📢 Community', 'cb:flow:community', 'primary')],
-        [('⭐ Reviews', 'cb:flow:reviews', 'danger'), ('💬 Support', 'cb:flow:support', 'danger')],
+        [('📖 How It Works', 'cb:flow:how', 'primary')],
+        [('📢 Community', 'cb:flow:community', 'primary')],
+        [('⭐ Reviews', 'cb:flow:reviews', 'danger')],
+        [('💬 Support', 'cb:flow:support', 'danger')],
         [('🧰 Tools & FAQ', 'cb:flow:tools', 'primary')],
         [('🌐 Language', 'cb:home:language', 'danger')],
     ]

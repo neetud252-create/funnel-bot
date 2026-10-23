@@ -43,7 +43,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(len(start_here.TEXT), 1024)
         self.assertEqual(self.labels(), [
             ['🎯 Try Free Analysis'], ['🚀 Account Setup'],
-            ['📖 How It Works', '📢 Community'], ['⭐ Reviews', '💬 Support']])
+            ['📖 How It Works'], ['📢 Community'], ['⭐ Reviews'], ['💬 Support']])
         self.assertEqual(self.bot.pins, [(self.uid, anchor, True)])
         self.assertEqual(self.bot.calls[-1]['asset'], 'assets/home_banner_loop.mp4')
         callbacks = [b.callback_data for r in edit['reply_markup'].inline_keyboard for b in r]
