@@ -1,6 +1,7 @@
 """Persistent Start Here card, separate from the full home menu."""
 import hashlib
 import json
+import emoji_theme
 
 
 TEXT = (
@@ -29,5 +30,7 @@ def keyboard(user=None):
 
 def signature(user):
     # Include language because the outbound middleware localizes button labels.
-    content = [TEXT, keyboard(user), user.get('language', 'en')]
-    return hashlib.sha256(json.dumps(content, ensure_ascii=False).encode()).hexdigest()
+    # Custom-emoji-only updates must refresh already-saved pins as well.
+    content = [TEXT, keyboard(user), user.get('language', 'en'),
+               emoji_theme.ICONS, emoji_theme.GLYPHS, emoji_theme.LABELS]
+    return hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode()).hexdigest()

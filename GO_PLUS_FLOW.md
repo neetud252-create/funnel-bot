@@ -56,6 +56,9 @@ Startup edits saved cards in place, with pagination and rate-limit backoff;
 it does not send replacement messages or re-pin dismissed cards. Every menu
 render checks for changes, including immediately after successful verification.
 A persisted content hash avoids redundant Telegram edits across restarts.
+The hash includes the custom emoji theme so new owner-supplied IDs refresh
+existing pins. Pin, camera, rocket, home, support bubble, community, tools,
+and unlock icons use the supplied custom IDs in captions and native buttons.
 Text-only fallback welcomes are updated with the text-edit API. Deleted or
 blocked chats are left alone; failed edits never block access to normal menus.
 

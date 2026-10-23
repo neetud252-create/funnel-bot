@@ -158,6 +158,17 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.calls, [])
         self.assertEqual(self.bot.pins, [])
 
+    async def test_emoji_only_change_refreshes_existing_pin_once(self):
+        row = await self.start()
+        anchor, old_hash = row['welcome_message_id'], row['welcome_content_hash']
+        with patch.dict(start_here.emoji_theme.ICONS, {'pin': '1234567890123456789'}):
+            await self.mod._sync_welcome(self.bot, self.uid)
+            self.assertNotEqual(row['welcome_content_hash'], old_hash)
+            await self.mod._sync_welcome(self.bot, self.uid)
+        self.assertEqual(len(self.bot.edits), 2)
+        self.assertEqual(self.bot.edits[-1]['message_id'], anchor)
+        self.assertEqual(len(self.bot.pins), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

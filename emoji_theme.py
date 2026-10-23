@@ -15,6 +15,14 @@ ICONS = {
     'hello': '4942823933909926751',
     'bolt': '5456140674028019486',
     'chart': '5244837092042750681',
+    'pin': '5397782960512444700',
+    'camera': '5260623291583831521',
+    'rocket': '5188481279963715781',
+    'home': '5312486108309757006',
+    'chat': '5443038326535759644',
+    'community': '5197304993920616826',
+    'tools': '5449428597922079323',
+    'unlocked': '5429405838345265327',
 }
 GLYPHS = {
     '👋': 'hello', '🤖': 'assistant',
@@ -23,6 +31,8 @@ GLYPHS = {
     '☎️': 'support', '☎': 'support', '▶️': 'youtube',
     '💡': 'tips', '🌐': 'language', '🌍': 'language',
     '👇': 'back', '⬅️': 'back',
+    '📌': 'pin', '📸': 'camera', '🚀': 'rocket', '🏠': 'home',
+    '💬': 'chat', '📢': 'community', '🧰': 'tools', '🔓': 'unlocked',
 }
 LABELS = {
     'Get Bot Access': 'access', 'Get access to Go +': 'access',
@@ -60,9 +70,9 @@ def button(button):
     text = button.text
     leading = _glyph.match(text)
     label = text[leading.end():].strip() if leading else text.removeprefix('« ').strip()
-    name = LABELS.get(label)
-    if not name and leading:
-        name = GLYPHS[leading.group()]
+    # An explicit glyph chooses its supplied artwork. In particular, the new
+    # speech-bubble Support icon must not fall back to the old phone artwork.
+    name = GLYPHS[leading.group()] if leading else LABELS.get(label)
     # Keep labels consisting only of an arrow/emoji, since Telegram requires text.
     if not name or not label:
         return button
