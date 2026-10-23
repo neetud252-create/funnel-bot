@@ -12,7 +12,7 @@ from aiogram.types import BufferedInputFile
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 import chart_analysis as api
-import chart_progress
+import market_progress
 import chart_signals
 import chart_strategy
 import chart_trial as trial
@@ -22,6 +22,8 @@ import market_data as data
 import market_catalog as catalog
 
 PAGE_SIZE = 6
+EXPIRIES = tuple(range(1, 11))
+LOCKED_SECONDS = (5, 10, 15, 20, 25, 30, 45, 50, 55)
 BACK = [[('⬅️ Home', 'cb:home:back', 'danger')]]
 RETRY = [[('📊 Choose Asset', 'cb:market:open', 'primary')],
          *BACK]
@@ -152,7 +154,7 @@ async def show_picker(bot, tg_id, state, render, page=0):
 async def select_asset(bot, tg_id, state, render, key):
     session = await navigate(state)
     try:
-        entry = catalog.find(await available_catalog(tg_id, strict=True), key)
+        entry = catalog.find(await available_catalog(tg_id), key)
     except data.FeedError as exc:
         if await active(state, session):
             await render(bot, tg_id, None, MESSAGES.get(str(exc), MESSAGES['service']), RETRY)
@@ -165,24 +167,25 @@ async def select_asset(bot, tg_id, state, render, key):
     page = saved.get('market_page', 0) if (saved.get('market_book'), saved.get('market_category')) == (entry.market, entry.category) else 0
     await state.update_data(market_book=entry.market, market_category=entry.category, market_asset=entry.key)
     back = [[('« Back', f'cb:market:list:{entry.market}:{entry.category}:{page}', 'danger')]]
-    text = f'📊 <b>{html.escape(entry.name)}</b>\n\n'
+    text = f'⏱ <b>Choose the expiration time</b>\n{html.escape(entry.name)}'
     if entry.market == 'fin':
-        text += 'Live FIN market data is not connected yet. You can browse these assets now.'
-        rows = back
+        text += '\n\nLive FIN market data is not connected yet.'
     elif not data.enabled(tg_id):
-        text += MESSAGES['configuration']
-        rows = back
+        text += '\n\n' + MESSAGES['configuration']
     elif not entry.live:
-        text += MESSAGES['plan']
-        rows = back
+        text += '\n\n' + MESSAGES['plan']
     elif entry.live.open is False:
-        text += MESSAGES['closed']
-        rows = back
-    else:
-        text += '<b>Select a candle timeframe</b>\nGet a candlestick chart and market analysis.'
-        rows = [[('1 Minute', f'cb:market:run:{entry.key}:60', 'primary'),
-                 ('5 Minutes', f'cb:market:run:{entry.key}:300', 'primary')], *back]
-    await render(bot, tg_id, None, text, rows, screen_key='market_timeframe')
+        text += '\n\n' + MESSAGES['closed']
+    await render(bot, tg_id, 'expiration_time', text, [*expiration_rows(entry.key), *back],
+                 screen_key='market_expiration')
+
+
+def expiration_rows(key):
+    seconds = lambda n: (f'🔒 S{n}', f'cb:market:locked:{n}', 'primary')
+    minute = lambda n: ((('🔥 ' if n == 1 else '✅ ' if n == 10 else '') + f'M{n}'),
+                        f'cb:market:expire:{key}:{n}', 'primary')
+    return [[seconds(n) for n in group] for group in ((5,), (10, 15), (20, 25, 30), (45, 50, 55))] + [
+        [minute(n) for n in group] for group in ((1,), (2, 3), (4, 5, 6), (7, 8, 9), (10,))]
 
 
 async def open_screen(cb, bot, state, render):
@@ -202,26 +205,30 @@ async def open_picker(bot, tg_id, state, render):
                   [('« Back', 'cb:home:back', 'danger')]], screen_key='market_type')
 
 
-def result_text(snapshot, result):
-    # A weaker directional bias isn't a confirmed entry. Never force a signal
-    # just because the upstream image-analysis contract returns BUY or SELL.
+def result_text(snapshot, result, expiry=1):
+    # The strategy's validated direction is retained even for a tentative bias.
+    # Invalid/unreadable input still fails; never manufacture a direction.
     confirmed = chart_strategy.confirmed_setup(result)
     direction = result.get('direction')
-    if direction not in ('BUY', 'SELL'):
+    if not chart_strategy.supports_signal(result) or expiry not in EXPIRIES:
         raise api.AnalysisError('response')
-    status = ('🟢 BUY bias' if direction == 'BUY' else '🔴 SELL bias') if confirmed else '⏸ WAIT — no confirmed setup'
+    status = '🟢 BUY' if direction == 'BUY' else '🔴 SELL'
+    qualification = 'Confirmed setup' if confirmed else chart_strategy.TENTATIVE_NOTE
     safe = lambda value: html.escape(str(value)[:180])
     closed = datetime.fromtimestamp(snapshot.closed_at, timezone.utc).strftime('%d %b %H:%M UTC')
-    return (f'📊 <b>{html.escape(snapshot.asset.name)} · M{snapshot.period//60}</b>\n\n'
+    return (f'📊 <b>{html.escape(snapshot.asset.name)}</b>\n\n'
             f'<b>{status}</b>\n'
+            f'<b>Expiration:</b> M{expiry} · {expiry} min\n'
+            f'<i>{qualification}</i>\n\n'
             f'<b>Trend:</b> {safe(result.get("trend", ""))}\n'
             f'<b>Momentum:</b> {safe(result.get("momentum", ""))}\n\n'
             f'<b>Last close:</b> {snapshot.candles[-1].close:.8g}\n'
             f'<b>Candle closed:</b> {closed}\n'
+            f'<b>Chart candles:</b> M{snapshot.period//60}\n'
             '<i>OTCharts data · AI analysis of completed candles. Predictions can be wrong.</i>')
 
 
-async def analyse(cb, bot, state, render, asset_key, *, period=None):
+async def analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
     tg_id = cb.from_user.id
     # One in-flight analysis per user, including callbacks on older messages.
     if tg_id in chart_signals._inflight or len(chart_signals._inflight) >= api.MAX_CONCURRENT:
@@ -232,22 +239,26 @@ async def analyse(cb, bot, state, render, asset_key, *, period=None):
     # session while reserving two allowances.
     chart_signals._inflight.add(tg_id)
     try:
-        await _analyse(cb, bot, state, render, asset_key, period=period)
+        await _analyse(cb, bot, state, render, asset_key, period=period, expiry=expiry)
     finally:
         chart_signals._inflight.discard(tg_id)
 
 
-async def _analyse(cb, bot, state, render, asset_key, *, period=None):
+async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
     import db
     tg_id = cb.from_user.id
+    if type(expiry) is not int or expiry not in EXPIRIES:
+        await cb.answer('Choose an expiration from M1 to M10.', show_alert=True)
+        return
     await cb.answer()
     if not await allowed(tg_id, bot, render):
         return
-    saved = await state.get_data()
-    period = period if period in data.PERIODS else saved.get('market_period', 60)
+    # Expiry is user-selected, not a candle API period. All new choices use
+    # completed M1 bars; only old 1/5-minute chart callbacks retain their period.
+    period = period if period in data.PERIODS else 60
     session = secrets.token_hex(12)
     await state.set_state(Market.browsing.state)
-    await state.update_data(market_session=session, market_period=period)
+    await state.update_data(market_session=session, market_period=period, market_expiry=expiry)
     token = progress = None
     consumed = delivery_attempted = False
 
@@ -263,7 +274,7 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None):
         if blocked:
             raise api.AnalysisError(blocked)
         if progress:
-            progress.retrying = True
+            await progress.reconnecting()
 
     try:
         entry = catalog.find(catalog.entries(await data.feed().assets()), asset_key)
@@ -284,7 +295,11 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None):
             return
         if not api.configured():
             raise api.AnalysisError('configuration')
-        await render(bot, tg_id, None, '⏳ Loading completed candles…', BACK, screen_key='market_loading')
+        language = await localization.language_for(tg_id)
+        progress = market_progress.Loading(bot, tg_id, language, active)
+        await progress.start(render)
+        if not await active():
+            return
         snapshot = await data.feed().candles(entry.live.key, period)
         if not await active():
             return
@@ -294,12 +309,10 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None):
         blocked = await api.reserve(db.pool, tg_id)
         if blocked:
             raise api.AnalysisError(blocked)
-        language = await localization.language_for(tg_id)
-        loading = await render(bot, tg_id, None, chart_progress.frame(language), BACK, screen_key='market_processing')
-        progress = chart_progress.Progress(bot, tg_id, loading, language, active)
-        progress.start()
         try:
             context = (f'Asset: {snapshot.asset.symbol}. Candle timeframe: {period} seconds. '
+                       f'User-selected expiration: {expiry} minutes. This is a requested horizon, '
+                       f'not proof that an entry is confirmed or an optimal expiry. '
                        f'All candles shown are completed OHLC bars, sourced from OTCharts. '
                        f'Latest close: {snapshot.candles[-1].close:.8g}; UTC close time: {snapshot.closed_at}.')
             result = await api.analyse(png, language, context, before_retry=retry)
@@ -308,14 +321,15 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None):
         if not await active():
             return
         snapshot.require_fresh()
-        caption = result_text(snapshot, result)
+        caption = result_text(snapshot, result, expiry)
         if not await trial.consume(db.pool, token):
             raise api.AnalysisError('limit')
         consumed = True
         if not await active():
             return
-        rows = [[('🔄 New Analysis', f'cb:market:run:{entry.key}:{period}', 'success')],
-                [('📊 Change Asset / Timeframe', 'cb:market:open', 'primary')],
+        rows = [[('🔄 New Analysis', f'cb:market:expire:{entry.key}:{expiry}', 'success')],
+                [('⏱ Change Expiration', f'cb:market:a:{entry.key}', 'primary')],
+                [('📊 Change Asset', 'cb:market:open', 'primary')],
                 *BACK]
         try:
             delivery_attempted = True
@@ -351,11 +365,20 @@ def install(dp, render):
             await cb.answer('Open the bot in a private chat.', show_alert=True)
             return
         action = cb.data.split(':')
+        if len(action) == 4 and action[1] == 'expire':
+            if action[3] not in tuple(map(str, EXPIRIES)):
+                await cb.answer('Choose an expiration from M1 to M10.', show_alert=True)
+                return
+            return await analyse(cb, bot, state, render, action[2], expiry=int(action[3]))
+        if len(action) == 3 and action[1] == 'locked':
+            await cb.answer('Second-based expirations are not available. Choose M1–M10.', show_alert=True)
+            return
         if len(action) == 4 and action[1] == 'run' and action[3] in ('60', '300'):
             # Period travels with the callback, so an old button cannot silently
             # analyse a newly selected timeframe. analyse claims concurrency
             # before its first await.
-            return await analyse(cb, bot, state, render, action[2], period=int(action[3]))
+            return await analyse(cb, bot, state, render, action[2], period=int(action[3]),
+                                 expiry=int(action[3])//60)
         if action == ['market', 'open']:
             return await open_screen(cb, bot, state, render)
         await cb.answer()

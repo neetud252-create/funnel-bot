@@ -9,7 +9,7 @@ TEXT = (
     "📌 <b>POCKET IQ — START HERE</b>\n\n"
     "Your AI-powered chart analysis assistant.\n\n"
     "🎯 <b>Explore first</b>\n"
-    "Choose a market, asset, and timeframe. Try two free analyses on assets with connected live data.\n\n"
+    "Choose a market, asset, and expiration time. Try two free analyses on assets with connected live data.\n\n"
     "📖 <b>Understand the results</b>\n"
     "Open the guide to learn how the bot works.\n\n"
     "🔓 <b>Continue when you’re ready</b>\n"

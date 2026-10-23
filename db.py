@@ -338,6 +338,14 @@ async def set_album(tg_id, ids):
     async with pool.acquire() as c:
         await c.execute("UPDATE users SET album_ids=$1 WHERE tg_id=$2", ids, tg_id)
 
+async def set_album_for_ui(tg_id, ui_msg_id, ids):
+    """Attach/clear companions only while this loading screen still owns the UI."""
+    async with pool.acquire() as c:
+        result = await c.execute(
+            "UPDATE users SET album_ids=$1 WHERE tg_id=$2 AND ui_msg_id=$3",
+            ids, tg_id, ui_msg_id)
+    return result == 'UPDATE 1'
+
 # Interim UID capture. TODO(Group C): move to a dedicated traders table with
 # verification state + postback linkage; users.uid is a stopgap store for now.
 # Unused since the uniqueness gate was removed from _capture_uid - kept because

@@ -12,7 +12,7 @@ TEXT = (
     "👋 <b>Welcome to Pocket IQ</b>\n"
     "Your AI-powered chart analysis assistant.\n\n"
     "📊 <b>Choose an asset. Explore the setup.</b>\n"
-    "Select your market, asset, and timeframe to view a candlestick chart and market analysis when live data is available.\n\n"
+    "Select your market, asset, and expiration time to get a candlestick chart and BUY or SELL analysis when live data is available.\n\n"
     "🎁 <b>Your first two analyses are free.</b>\n"
     "Try Pocket IQ before deciding whether to set up access.\n\n"
     "📖 New here? Open <b>How It Works</b>, or reach out to <b>Support</b> whenever you need help.\n\n"

@@ -34,7 +34,7 @@ Community contains the existing Telegram channel, YouTube, and reviews destinati
 Tools contains the money-management workbook, asset guide, FAQs, and risk/referral information.
 Settings contains language, shared notification preferences, and privacy information.
 The dashboard links to the asset catalogue and persisted daily allowance.
-Signals now use Market → Category → Asset → Candle timeframe → Chart and analysis.
+Signals now use Market → Category → Asset → Expiration (M1–M10) → Chart and BUY/SELL analysis.
 See [MARKET_SIGNALS.md](MARKET_SIGNALS.md) for catalogue coverage and live-data eligibility.
 Premium compares allowances, explains the qualifying deposit requirement, and checks the saved linked ID.
 
