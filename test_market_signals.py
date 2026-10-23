@@ -104,6 +104,40 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         flow.trial.reserve.assert_not_awaited()
         self.feed.candles.assert_not_awaited()
 
+    async def test_exhausted_allowance_can_browse_but_cannot_run_analysis(self):
+        for verified in (False, True):
+            flow.trial.status.return_value = (verified, 0)
+            await flow.open_picker(self.bot, 11, self.state, self.render)
+            self.assertIn('Choose your asset', self.render.await_args.args[3])
+            self.assertIn('connected data plan', self.render.await_args.args[3])
+            self.assertEqual(await self.state.get_state(), flow.Market.browsing.state)
+            await self.analyse()
+            self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_limit')
+        flow.trial.reserve.assert_not_awaited()
+        self.feed.candles.assert_not_awaited()
+        flow.api.analyse.assert_not_awaited()
+
+    async def test_exhausted_allowance_can_change_timeframe_page_and_search(self):
+        flow.trial.status.return_value = (False, 0)
+        callbacks, messages = [], []
+        dp = types.SimpleNamespace(
+            callback_query=types.SimpleNamespace(register=lambda handler, *filters: callbacks.append(handler)),
+            message=types.SimpleNamespace(register=lambda handler, *filters: messages.append(handler)))
+        flow.install(dp, self.render)
+        await flow.open_picker(self.bot, 11, self.state, self.render)
+        for action in ('market:tf:300', 'market:p:0', 'market:all'):
+            cb = H.FakeCB(11, action, 123)
+            await callbacks[0](cb, self.bot, self.state)
+            self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_assets')
+        self.assertEqual((await self.state.get_data())['market_period'], 300)
+        message = types.SimpleNamespace(chat=types.SimpleNamespace(type='private'),
+                                        from_user=types.SimpleNamespace(id=11), text='EUR/USD')
+        await messages[1](message, self.bot, self.state)
+        self.assertIn('EUR/USD OTC', str(self.render.await_args.args[4]))
+        flow.trial.status.assert_not_awaited()
+        flow.trial.reserve.assert_not_awaited()
+        self.feed.candles.assert_not_awaited()
+
     async def test_feed_failure_or_provider_failure_does_not_spend_analysis(self):
         for failure in ('stale', 'gaps', 'closed', 'plan', 'quota'):
             self.feed.candles.side_effect = data.FeedError(failure)
