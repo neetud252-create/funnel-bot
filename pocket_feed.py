@@ -229,9 +229,12 @@ class PocketFeed:
         async with self._lock:
             await self._disconnect()
 
+    def _catalog_ready(self):
+        return (self._ws and not self._ws.closed and self._authenticated
+                and self._catalog and self._clock() - self._catalog_at < 60)
+
     async def _ensure(self):
-        if (self._ws and not self._ws.closed and self._authenticated
-                and self._clock() - self._catalog_at < 60):
+        if self._catalog_ready():
             return
         if self._clock() < self._blocked_until:
             raise FeedError(self._failure)
@@ -257,6 +260,10 @@ class PocketFeed:
             raise FeedError(self._failure) from None
 
     async def assets(self):
+        # The reader replaces this immutable tuple atomically. Browsing a fresh
+        # catalogue must not queue behind another user's slow candle request.
+        if self._catalog_ready():
+            return self._catalog
         async with self._lock:
             await self._ensure()
             return self._catalog

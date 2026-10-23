@@ -192,6 +192,37 @@ class Transport(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.feed.close()
 
+    async def test_catalogue_browsing_does_not_wait_for_another_candle_request(self):
+        catalogue = await self.feed.assets()
+        self.sessions[0].hold = True
+        task = asyncio.create_task(self.feed.candles(ASSET.key))
+        try:
+            while self.feed._pending is None:
+                await asyncio.sleep(0)
+            self.assertTrue(self.feed._lock.locked())
+            self.assertIs(await asyncio.wait_for(self.feed.assets(), timeout=0.5), catalogue)
+            self.assertFalse(task.done())
+            self.assertEqual(len(self.sessions), 1)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+    async def test_expired_catalogue_still_reconnects(self):
+        await self.feed.assets()
+        first = self.sessions[0]
+        self.now += 61
+        await self.feed.assets()
+        self.assertTrue(first.closed)
+        self.assertEqual(len(self.sessions), 2)
+
+    async def test_cached_catalogue_never_bypasses_authentication(self):
+        await self.feed.assets()
+        self.feed._authenticated = False
+        self.reject = True
+        with self.assertRaisesRegex(data.FeedError, '^configuration$'):
+            await self.feed.assets()
+
     async def test_concurrent_taps_share_socket_and_cache_with_no_paid_requests(self):
         with patch('httpx.AsyncClient', side_effect=AssertionError('Paid feed used')):
             first, second = await asyncio.gather(self.feed.candles(ASSET.key), self.feed.candles(ASSET.key))

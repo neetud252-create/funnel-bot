@@ -23,6 +23,7 @@ import bot_profile
 import chart_signals
 import market_signals
 import market_data
+import navigation
 from server import app
 
 logging.basicConfig(level=logging.INFO)
@@ -95,6 +96,7 @@ _verify_inflight = {}
 _premium_checks = set()
 _welcome_locks = weakref.WeakValueDictionary()
 _welcome_sync_locks = weakref.WeakValueDictionary()
+_render_locks = weakref.WeakValueDictionary()
 
 # Cache entries are (file_id, content_hash). The hash is of the file's BYTES at
 # the moment Telegram issued that file_id, so replacing artwork on disk changes
@@ -473,9 +475,11 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
                  reply_to_message_id=None, raise_on_error=False, screen_key=None, companion_key=None):
     token = analytics._screen.set(screen_key or analytics.screen_name(text))
     try:
-        return await _render(bot, tg_id, media_key, text, kb_rows, is_video,
-                             reply_to_message_id=reply_to_message_id, raise_on_error=raise_on_error,
-                             companion_key=companion_key)
+        lock = _render_locks.setdefault(tg_id, asyncio.Lock())
+        async with lock:
+            return await _render(bot, tg_id, media_key, text, kb_rows, is_video,
+                                 reply_to_message_id=reply_to_message_id, raise_on_error=raise_on_error,
+                                 companion_key=companion_key)
     finally:
         analytics._screen.reset(token)
 
@@ -487,26 +491,27 @@ async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
         media_key, is_video = home_menu.PHOTO, False
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
-    if user and user.get('welcome_message_id'):
+    if (user and user.get('welcome_message_id') and
+            user.get('welcome_content_hash') != start_here.signature(user)):
         await _sync_welcome(bot, tg_id)
     msg_id = user["ui_msg_id"] if user else None
-    # Keep the pinned welcome; delete the current disposable screen FIRST,
-    # then send its replacement. This is the
-    # original transition and it is deliberate: Telegram plays its normal
-    # message-removal animation on the old screen before the new one arrives,
-    # so the two never overlap on screen.
-    #
-    # Between the delete and the send there may be no active menu besides the
-    # pinned welcome, so a send that fails needs an error notice. The try/except
-    # below is what keeps that from being silent - it does not change the
-    # ordering, it only makes a failed send say so instead of vanishing.
-    if msg_id and msg_id != user.get('welcome_message_id'):
+    current = navigation.message_for(tg_id, msg_id)
+    if (current and msg_id != user.get('welcome_message_id') and
+            not user.get('album_ids') and not reply_to_message_id and not companion_key):
+        edited = await _edit_menu(bot, tg_id, current, media_key, text, kb, is_video)
+        if edited is not None:
+            return edited
+    replace_after_send = current is not None
+    # Commands keep the existing replace lifecycle; button-driven type changes
+    # send first so an upload failure leaves the previous menu usable.
+    # The pinned welcome is never a disposable screen.
+    if not replace_after_send and msg_id and msg_id != user.get('welcome_message_id'):
         try:
             await bot.delete_message(chat_id=tg_id, message_id=msg_id)
         except Exception as e:
             logging.warning("delete screen failed: %s", e)
     # Clean up companion messages, including GIFs from the old split home layout.
-    if user and user['album_ids']:
+    if not replace_after_send and user and user['album_ids']:
         await _drop_msgs(bot, tg_id, [int(mid) for mid in str(user['album_ids']).split(',')])
         await db.set_album(tg_id, None)
     try:
@@ -551,17 +556,44 @@ async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
     except Exception:
         if raise_on_error:
             raise
-        # The old screen is already gone by now, so there is nothing left on
-        # screen to fall back to. Say something rather than leave the user with
-        # an empty chat and a tap that looks dead.
-        logging.exception("render failed for tg_id=%s screen=%r after the "
-                          "previous screen was removed", tg_id, media_key)
+        logging.exception("render failed for tg_id=%s screen=%r", tg_id, media_key)
         await _screen_error(bot, tg_id)
         return
     await db.set_ui_msg(tg_id, m.message_id)
+    if replace_after_send:
+        old_ids = [msg_id] if msg_id else []
+        old_ids += [int(mid) for mid in str(user.get('album_ids') or '').split(',') if mid]
+        await _drop_msgs(bot, tg_id, old_ids)
+        if user.get('album_ids'):
+            await db.set_album(tg_id, None)
     if companion_key:
         await _send_result_banner(bot, tg_id, m.message_id, companion_key, kb)
     return m
+
+
+async def _edit_menu(bot, tg_id, current, key, text, kb, is_video):
+    """One Telegram request instead of deleting and resending a menu card."""
+    kwargs = dict(chat_id=tg_id, message_id=current.message_id, reply_markup=kb)
+    try:
+        if key is None and getattr(current, 'text', None):
+            result = await bot.edit_message_text(text=text, parse_mode='HTML', **kwargs)
+        elif (isinstance(key, str) and not is_video and
+              getattr(current, 'photo', None) and not media_missing(key, 'jpg')):
+            # Always specify the target photo: another rapid tap may have edited
+            # this message since Telegram captured the callback's old content.
+            result = await bot.edit_message_media(
+                media=InputMediaPhoto(media=photo_for(key), caption=text, parse_mode='HTML'), **kwargs)
+            await remember(key, result)
+        else:
+            return None  # Uploads, replies, albums and animated home keep their lifecycle.
+        return result if getattr(result, 'message_id', None) else current
+    except TelegramBadRequest as exc:
+        if 'message is not modified' in str(exc).lower():
+            return current  # A repeated tap is already showing the requested menu.
+        logging.info('Menu edit unavailable; replacing card: %s', type(exc).__name__)
+    except Exception as exc:
+        logging.warning('Menu edit failed; replacing card: %s', type(exc).__name__)
+    return None
 
 
 async def _send_result_banner(bot, tg_id, chart_id, key, kb):
@@ -2190,6 +2222,8 @@ async def main():
     await activity_stats.report()
     for report_name in analytics_reports.QUERIES:
         await analytics_reports.fetch(report_name, 30, limit=0)
+    # Acknowledge normal menu taps before database-backed analytics runs.
+    dp.callback_query.outer_middleware(navigation.CallbackMiddleware())
     detailed_activity = analytics.InboundMiddleware()
     dp.message.outer_middleware(detailed_activity)
     dp.callback_query.outer_middleware(detailed_activity)
@@ -2199,6 +2233,7 @@ async def main():
     logging.info('Admin activity statistics ready; /stats enabled')
     logging.info('Broadcast schema ready; admin drafting and delivery queue enabled')
     bot = Bot(os.environ["BOT_TOKEN"])
+    bot.session.middleware(navigation.AnswerMiddleware())
     bot.session.middleware(analytics.OutboundMiddleware())
     logging.info('Detailed analytics ready; /analytics and /userstats enabled; link tracking=%s',
                  bool(config.ANALYTICS_LINK_BASE))
