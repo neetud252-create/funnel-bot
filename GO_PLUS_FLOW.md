@@ -45,13 +45,16 @@ it. A failed pin never blocks the menu; an unfinished pin is retried on the next
 start, and a deleted pending message can be replaced with the fresh welcome.
 
 The persistent card's caption is the owner's **POCKET IQ — START HERE** copy.
-Every welcome and Start Here button has its own full-width row.
-Verified accounts see Analyse My Chart and My Dashboard in the first two rows.
-How It Works and Community use separate blue rows; Reviews and Support use
-separate red rows. These four buttons now use the full card width instead of half.
-The approved GIF, caption and buttons stay on one card. The full home menu
-adds full-width Tools & FAQ and Language rows. Telegram controls the actual
-font size and button height; the bot chooses the row layout and native colors.
+Welcome and Start Here share the reference's six-row layout: one green Get Bot
+Access button; blue Guide / Test Signals; red Review / Support; blue YouTube /
+Channel; a full-width blue Money Management Sheet; and full-width red Change
+Language. Review, Support, YouTube, and Channel open the configured official
+links directly, with the existing help fallback if a URL is unavailable.
+Verified accounts see My Dashboard in the top row and Analyse My Chart beside
+Guide. Setup still resumes saved progress through Get Bot Access. The Start Here
+caption refers to this button by its displayed name.
+The approved GIF, caption and buttons stay on one card. Telegram controls the
+actual font size and button height; the bot chooses row layout and native colors.
 
 Startup edits saved cards in place, with pagination and rate-limit backoff;
 it does not send replacement messages or re-pin dismissed cards. Every menu

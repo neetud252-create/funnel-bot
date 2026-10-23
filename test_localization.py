@@ -178,10 +178,11 @@ async def check_delivery_and_selector():
             for original_row, rendered_row in zip(markup.inline_keyboard, result.reply_markup.inline_keyboard):
                 for original_button, rendered in zip(original_row, rendered_row):
                     assert rendered.callback_data == original_button.callback_data
+                    assert rendered.url == original_button.url
                     assert rendered.style == original_button.style
                     assert rendered.icon_custom_emoji_id
                     assert not emoji_theme._glyph.match(rendered.text)
-                    if original_button.callback_data == 'flow:support':
+                    if original_button.text == '💬 Support':
                         assert rendered.icon_custom_emoji_id == '5443038326535759644'
             for emoji, key in (('📌', 'pin'), ('🔓', 'unlocked'), ('💬', 'chat')):
                 assert f'<tg-emoji emoji-id="{emoji_theme.ICONS[key]}">{emoji}</tg-emoji>' in result.caption
