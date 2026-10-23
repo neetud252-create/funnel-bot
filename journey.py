@@ -115,7 +115,7 @@ PREMIUM_SHORT = ('👑 <b>Premium requirement not met yet</b>\n\n'
     'You can keep your current plan. Depositing does not guarantee trading returns.')
 TEXTS = {
     'how': ('📖 <b>How Pocket IQ works</b>\n\n'
-        '1. Choose OTC or FIN, then an asset category.\n2. Select an asset and expiration time (M1–M10).\n'
+        '1. Choose OTC or FIN, then an asset category.\n2. Select an asset and expiration time (S5–S55 / M1–M10).\n'
         '3. View its chart, trend, and momentum when live data is available.\n4. Decide whether to act or wait.\n\n'
         'Assets without connected data remain browsable. The bot does not execute trades. '
         'Analysis uses completed M1 candles; your chosen expiration is shown separately.\n\n' + RISK),
@@ -139,7 +139,7 @@ TEXTS = {
         'Review the current terms in your broker account. Pocket IQ checks access; it cannot move your funds.\n\n'
         'For a payment problem, contact the broker through its official account interface.'),
     'analysis_help': ('📊 <b>Analysis help</b>\n\n'
-        'Choose a market, category, and asset, then select an expiration from M1 to M10. '
+        'Choose a market, category, and asset, then select an expiration from S5 to M10. '
         'The bot loads completed candles and generates a chart for analysis.\n\n'
         'If live data is unavailable, choose another asset or try later. '
         'Unavailable data and failed analyses do not use your allowance.'),
@@ -147,13 +147,13 @@ TEXTS = {
         '1. Open Choose Asset or send /assets.\n'
         '2. Select OTC or FIN and a category.\n'
         '3. Browse with ‹ and ›, or type an asset name to search.\n'
-        '4. Select an asset with connected data and choose an expiration from M1 to M10.\n\n'
+        '4. Select an asset with connected data and choose an expiration from S5 to M10.\n\n'
         'You will receive a chart and BUY or SELL analysis with your chosen expiration. '
-        'Incomplete confirmation is marked tentative. Second-based expirations are locked.'),
+        'Incomplete confirmation is marked tentative.'),
     'explain': ('📖 <b>Understand your result</b>\n\n'
         '<b>Trend:</b> the visible price direction.\n<b>Momentum:</b> the strength seen in the completed candles.\n'
         '<b>Prediction:</b> an uncertain interpretation, not a guarantee.\n'
-        '<b>Expiration:</b> your selected duration in minutes. Chart candles are shown separately.\n'
+        '<b>Expiration:</b> your selected duration in seconds or minutes. Chart candles are shown separately.\n'
         '<b>Tentative:</b> confirmation is incomplete or evidence is mixed.\n\n'
         'A tentative result means the setup was not confirmed. Waiting is an option.\n\n' + RISK),
     'faq': ('❓ <b>Frequently asked questions</b>\n\n'

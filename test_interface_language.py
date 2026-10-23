@@ -114,11 +114,37 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('<b>Expiration:</b>',result)
                 self.assertNotIn('<b>Last close:</b>',result)
                 self.assertEqual(L.translate_message(result,code),result)
+                seconds = market_signals.result_text(snapshot,VALID,5,code,expiry_unit='s')
+                self.assertIn('S5',seconds)
+                self.assertNotIn('M5',seconds)
+                self.assertIn(L.translate_parts('{count} seconds',code).format(count=5),seconds)
+                self.assertNotIn('<b>Expiration:</b>',seconds)
                 self.assertIn(chart_analysis.LANGUAGES[code],chart_analysis.request_body(b'\x89PNG\r\n\x1a\n',code)['systemInstruction']['parts'][0]['text'])
                 loading = market_progress.Loading(None,1,code,AsyncMock(return_value=True))
                 self.assertNotIn(market_progress.ANALYSING,loading.text())
                 for message in market_signals.MESSAGES.values():
                     self.assertNotEqual(L.translate_message(message,code),message)
+
+    def test_category_custom_icons_survive_translation(self):
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=market_catalog.category_info(category)[0],
+                callback_data=f'market:cat:otc:{category}',style='primary')]
+            for category in ('indices','commodities')]+[[
+                InlineKeyboardButton(text='🔥 M1',callback_data='market:expire:asset:1',style='primary')]])
+        original = SendMessage(chat_id=1,text=market_signals.MARKET_TITLE,reply_markup=markup,parse_mode='HTML')
+        for code in L.CODES:
+            rendered = L.localize_method(original,code)
+            buttons = [row[0] for row in rendered.reply_markup.inline_keyboard]
+            self.assertEqual([b.icon_custom_emoji_id for b in buttons],
+                             ['5206598117738177151','5436341901290658109','5424972470023104089'])
+            self.assertEqual([b.callback_data for b in buttons],
+                             [row[0].callback_data for row in markup.inline_keyboard])
+            for b in buttons:
+                self.assertNotRegex(b.text, r'🛢|🔥|<tg-emoji')
+                self.assertEqual(b.style,'primary')
+            if code!='en':
+                self.assertNotEqual(buttons[0].text,'Indices')
+                self.assertNotEqual(buttons[1].text,'Commodities')
 
     def test_registration_identifiers_and_profile(self):
         ref='https://example.org/signup?click_id=Start_BUY&token='+'x'*130

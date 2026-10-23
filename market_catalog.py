@@ -16,7 +16,7 @@ CATEGORIES = {
     'forex': ('💱 Currency pairs', 'Select a currency pair', 'currency_pair'),
     'crypto': ('🪙 Cryptocurrencies', 'Select a cryptocurrency', 'asset_category'),
     'stocks': ('📈 Stocks', 'Select a stock', 'asset_category'),
-    'indices': ('📊 Indices', 'Select an index', 'asset_category'),
+    'indices': ('🔥 Indices', 'Select an index', 'asset_category'),
     'commodities': ('🛢 Commodities', 'Select a commodity', 'asset_category'),
 }
 
