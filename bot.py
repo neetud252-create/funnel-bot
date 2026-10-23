@@ -772,7 +772,14 @@ async def _journey(bot, tg_id, content, media=None, key=None):
     await render(bot, tg_id, media, text, rows, screen_key=key)
 
 
-async def _resume_setup(bot, tg_id):
+async def _open_uid_entry(bot, tg_id, state=None):
+    await db.set_setup_stage(tg_id, 'id')
+    if state is not None:
+        await state.set_state(Reg.waiting_uid.state)
+    await _journey(bot, tg_id, journey.uid(), key='account_id_prompt')
+
+
+async def _resume_setup(bot, tg_id, state=None):
     user = await db.get_user(tg_id)
     if user and user.get('verified'):
         await _show_menu(bot, tg_id)
@@ -788,6 +795,8 @@ async def _resume_setup(bot, tg_id):
         await _journey(bot, tg_id, journey.unlinked(), key='account_unlinked')
     elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
         await _journey(bot, tg_id, journey.pending(), key='verification_pending')
+    elif user.get('setup_stage') == 'id':
+        await _open_uid_entry(bot, tg_id, state)
     elif user.get('account_kind') == 'existing' or user.get('uid'):
         await _journey(bot, tg_id, journey.existing(), key='existing_account')
     elif user.get('account_kind') == 'new':
@@ -834,7 +843,7 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             await _journey(bot, tg_id, journey.setup(), key='access_requirements')
             return
         await db.confirm_eligibility(tg_id)
-        await _resume_setup(bot, tg_id)
+        await _resume_setup(bot, tg_id, state)
     elif action == 'ineligible':
         await db.clear_eligibility(tg_id)
         await db.set_setup_stage(tg_id, 'help')
@@ -844,11 +853,12 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             await _show_menu(bot, tg_id)
             return
         if not user.get('eligibility_confirmed_at'):
-            await _resume_setup(bot, tg_id)
+            # The visitor already registered (or has an existing account).
+            # Preserve the ID-entry intent through the eligibility screen.
+            await db.set_setup_stage(tg_id, 'id', account_kind=user.get('account_kind') or 'existing')
+            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
             return
-        await db.set_setup_stage(tg_id, 'id')
-        await state.set_state(Reg.waiting_uid.state)
-        await _journey(bot, tg_id, journey.uid(), key='account_id_prompt')
+        await _open_uid_entry(bot, tg_id, state)
     elif action == 'id_guide':
         await _journey(bot, tg_id, (config.MSG_ENTER_UID,
             [[journey.cb('✅ Ready — Enter My ID', 'enter_id')], *journey.back('setup')]),
@@ -948,7 +958,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         # Trust the saved verification just as /start did before the welcome menu.
         await _show_menu(bot, tg_id)
     else:
-        await _resume_setup(bot, tg_id)
+        await _resume_setup(bot, tg_id, state)
 
 
 @dp.callback_query(F.data == 'reg:enter_uid')
