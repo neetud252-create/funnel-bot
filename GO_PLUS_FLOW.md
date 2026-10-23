@@ -66,6 +66,9 @@ Success, error, question, information, warning, blocked, waiting, retry, pause,
 and settings icons use the owner's third batch. The supplied warning triangle
 covers both exclamation and warning glyphs; text/emoji presentation variants
 of information, pause, and settings share the same custom artwork.
+Chart-analysis headings, market analysis, momentum, screenshot examples,
+pending results, currency pairs, and timers use the owner's fourth batch.
+Image, pending, and timer glyphs include both presentation variants.
 Text-only fallback welcomes are updated with the text-edit API. Deleted or
 blocked chats are left alone; failed edits never block access to normal menus.
 
