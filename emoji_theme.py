@@ -23,6 +23,15 @@ ICONS = {
     'community': '5197304993920616826',
     'tools': '5449428597922079323',
     'unlocked': '5429405838345265327',
+    'account': '5249053508681883137',
+    'premium': '5433758796289685818',
+    'trophy': '5188344996356448758',
+    'key': '5307843983102204243',
+    'locked': '5296369303661067030',
+    'link': '5271604874419647061',
+    'location': '5292291996717690768',
+    'new': '6300677037086476915',
+    'payment': '5472250091332993630',
 }
 GLYPHS = {
     '👋': 'hello', '🤖': 'assistant',
@@ -33,6 +42,8 @@ GLYPHS = {
     '👇': 'back', '⬅️': 'back',
     '📌': 'pin', '📸': 'camera', '🚀': 'rocket', '🏠': 'home',
     '💬': 'chat', '📢': 'community', '🧰': 'tools', '🔓': 'unlocked',
+    '👤': 'account', '👑': 'premium', '🏆': 'trophy', '🔑': 'key',
+    '🔒': 'locked', '🔗': 'link', '📍': 'location', '🆕': 'new', '💳': 'payment',
 }
 LABELS = {
     'Get Bot Access': 'access', 'Get access to Go +': 'access',
