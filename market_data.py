@@ -288,20 +288,27 @@ async def close():
 
 
 async def startup_check():
-    """One bounded read-only deployment check; no Telegram, AI or trade calls."""
+    """Bounded category checks at deployment; no Telegram, AI or trade calls."""
     if provider() != 'pocketoption':
         return
     import logging
     async def check():
         assets = await feed().assets()
-        asset = next((a for a in assets if a.symbol == 'EURUSD_otc' and a.open),
-                     next((a for a in assets if a.open), None))
-        if asset is None:
-            raise FeedError('closed')
-        snapshot = await feed().candles(asset.key, 60)
-        logging.info('Direct market feed verified; assets=%d; open=%d; sample=%s; bars=%d; candle_age=%.1fs',
-                     len(assets), sum(bool(a.open) for a in assets), asset.symbol,
-                     len(snapshot.candles), time.time()-snapshot.closed_at)
+        samples = [next((a for a in assets if a.category == category and a.open), None)
+                   for category in ('forex', 'crypto', 'stocks', 'indices', 'commodities')]
+        passed = failed = 0
+        for asset in filter(None, samples):
+            try:
+                snapshot = await feed().candles(asset.key, 60)
+                logging.info('Direct market feed verified; assets=%d; open=%d; sample=%s; bars=%d; candle_age=%.1fs',
+                             len(assets), sum(bool(a.open) for a in assets), asset.symbol,
+                             len(snapshot.candles), time.time()-snapshot.closed_at)
+                passed += 1
+            except FeedError as exc:
+                failed += 1
+                logging.warning('Direct market sample unavailable; symbol=%s; code=%s', asset.symbol, str(exc))
+                await asyncio.sleep(5)  # respect the adapter's reconnect backoff
+        logging.info('Direct market check complete; passed=%d; unavailable=%d', passed, failed)
     try:
         await asyncio.wait_for(check(), timeout=40)
     except Exception as exc:

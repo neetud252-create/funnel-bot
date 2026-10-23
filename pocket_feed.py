@@ -9,6 +9,7 @@ import asyncio
 from collections import defaultdict
 import contextlib
 import json
+import logging
 import re
 import secrets
 import string
@@ -295,7 +296,20 @@ class PocketFeed:
                     # reconstruct it. Completed M1 OHLC supplies the exact tail.
                     minute_payload = await self._history(asset, 60)
                     minutes = parse_history(minute_payload, asset, 60, self._clock())
-                snapshot = parse_history(payload, asset, period, self._clock(), minutes=minutes)
+                try:
+                    snapshot = parse_history(payload, asset, period, self._clock(), minutes=minutes)
+                except FeedError as exc:
+                    # Public market timestamps only: never auth frames, account
+                    # details, upstream error bodies or raw payloads in logs.
+                    if str(exc) == 'gaps':
+                        bars, ticks = payload['candles'], payload['history']
+                        logging.warning('Direct candle gap; symbol=%s; period=%d; bars=%d; '
+                                        'last_ohlc_utc=%.1f; first_tick_utc=%.1f; last_tick_utc=%.1f',
+                                        asset.symbol, period, len(bars),
+                                        max((b[0] for b in bars), default=BROKER_OFFSET)-BROKER_OFFSET,
+                                        min(t[0] for t in ticks)-BROKER_OFFSET,
+                                        max(t[0] for t in ticks)-BROKER_OFFSET)
+                    raise
                 if len(self._cache) >= 512:
                     self._cache.pop(next(iter(self._cache)))
                 self._cache[key] = (min(self._clock() + 15, snapshot.closed_at + period), snapshot)
