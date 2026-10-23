@@ -74,7 +74,7 @@ SECOND_BUTTON = {
     "url": config.CHANNEL_URL,
 }
 
-EXPECT_PLAIN = ("Real feedback from active Go+ traders.\n\n"
+EXPECT_PLAIN = ("Real feedback from active Pocket IQ traders.\n\n"
                 "☝️ The screenshots above are just a tiny fraction of the results.\n\n"
                 "\U0001F91D More feedback is published on our trading channel:\n\n"
                 "\U0001F449 \U0001F50A" + config.CHANNEL_MENTION)
@@ -94,7 +94,7 @@ def main():
     check("rendered caption matches the specified copy exactly",
           plain == EXPECT_PLAIN, repr(plain))
     check("title is bold",
-          text.startswith("<b>Real feedback from active Go+ traders.</b>"),
+          text.startswith("<b>Real feedback from active Pocket IQ traders.</b>"),
           repr(text[:70]))
     check("the bold tag wraps only the title",
           text.count("<b>") == 1 and text.count("</b>") == 1,
@@ -237,7 +237,7 @@ def main():
           [b[1] for row in config.SCREENS["ai"]["kb"] for b in row]
           == ["cb:results"], str(config.SCREENS["ai"]["kb"]))
     check("the ai caption is unchanged",
-          "THE TECHNOLOGY BEHIND GO+" in config.SCREENS["ai"]["text"])
+          "THE TECHNOLOGY BEHIND Pocket IQ" in config.SCREENS["ai"]["text"])
     # The access screen carries a menu now; what matters to THIS test is only
     # that it still routes onward into the register flow, once.
     check("the access screen still routes into the register flow",
@@ -247,7 +247,7 @@ def main():
     check("the tech caption is unchanged",
           "IT IS SIMPLE" in config.SCREENS["tech"]["text"])
     check("the welcome caption is unchanged",
-          "Welcome to Go+" in config.SCREENS["welcome"]["text"])
+          "Welcome to Pocket IQ" in config.SCREENS["welcome"]["text"])
     check("the gate still has its two buttons, in order",
           [b[1] for row in config.SCREENS["gate"]["kb"] for b in row]
           == ["url:" + config.CHANNEL_URL, "cb:check_sub"],

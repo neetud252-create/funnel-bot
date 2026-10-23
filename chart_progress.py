@@ -5,7 +5,7 @@ from contextlib import suppress
 from aiogram.exceptions import TelegramRetryAfter
 import localization
 
-TITLE = 'Go+ Chart Analysis'
+TITLE = 'Pocket IQ Chart Analysis'
 RECEIVED = 'Chart received'
 ANALYSING = 'Analysing your chart…'
 RETRYING = 'Reconnecting to AI…'

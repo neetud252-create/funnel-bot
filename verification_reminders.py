@@ -13,11 +13,11 @@ import config
 import db
 
 TEXT = (
-    "Hi! Your Go+ verification is still incomplete.\n\n"
+    "Hi! Your Pocket IQ verification is still incomplete.\n\n"
     "If you would like to continue, tap Open verification below. "
     "If you already submitted a Pocket Option Trader ID, double-check it in "
     "your Pocket Option profile and submit the correct ID inside this bot.\n\n"
-    "Need help? Use the Support option inside Go+. "
+    "Need help? Use the Support option inside Pocket IQ. "
     "Never share your password or OTP.\n\n"
     "This is a one-time reminder. Tap Stop reminders or send /unsubscribe "
     "to stop reminder and broadcast messages."
@@ -109,7 +109,7 @@ def install(dp, is_admin, open_funnel):
 
     async def callback(cb, bot, state):
         if not cb.message or cb.message.chat.type != 'private':
-            await cb.answer('Open Go+ in a private chat.', show_alert=True)
+            await cb.answer('Open Pocket IQ in a private chat.', show_alert=True)
             return
         if cb.data == 'vr:stop':
             async with db.pool.acquire() as conn:

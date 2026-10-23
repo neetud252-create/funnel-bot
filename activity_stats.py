@@ -52,7 +52,7 @@ def format_report(users, metrics, campaigns, started):
     get = lambda kind: metrics.get(kind, {}).get('people', 0)
     total = lambda kind: metrics.get(kind, {}).get('events', 0)
     text = (
-        'Go+ ADMIN STATISTICS\nTimezone: India (Asia/Kolkata)\n\n'
+        'Pocket IQ ADMIN STATISTICS\nTimezone: India (Asia/Kolkata)\n\n'
         f'Total stored users: {users["total"]}\n'
         f'New today / 7 days / 30 days: {users["new_today"]} / {users["new_7"]} / {users["new_30"]}\n'
         f'Active today / 7 days / 30 days: {users["active_today"]} / {users["active_7"]} / {users["active_30"]}\n\n'

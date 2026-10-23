@@ -8,6 +8,8 @@ from pathlib import Path
 from string import Formatter
 import logging
 import re
+import json
+import hashlib
 import emoji_theme
 
 LANGUAGES = (
@@ -24,18 +26,22 @@ EXTRA_MESSAGES = (
     SELECTOR_TEXT, 'Language saved.', 'Please choose a language from the list.',
     '🎁 <b>Account confirmed — your free gift is ready.</b>\n\n'
     'Download the Apex Trader Money Management Excel sheet, then tap the button below.',
-    '✅ <b>Your account and deposit are verified.</b>\n\nTap Start Trading to open Go+.',
+    '✅ <b>Your account and deposit are verified.</b>\n\nTap Start Trading to open Pocket IQ.',
     '🚀 <b>Your gift is unlocked.</b>\n\nTap Start Trading. Deposit at least '
-    '<b>${cost}</b>, then send your account ID again so the bot can confirm your balance and unlock Go+.',
+    '<b>${cost}</b>, then send your account ID again so the bot can confirm your balance and unlock Pocket IQ.',
     '💰 <b>Deposit and verify</b>\n\nAdd <b>${cost}</b> or more to your trading account. '
     'After depositing, send your account ID here again.',
     'Gift confirmed', 'Verified', 'You have not joined the channel yet. Subscribe first.',
     '🔒 Locked. Coming soon', 'Coming soon 🚀', '<b>Real results</b>',
     '⏳ <b>Checking account</b> <code>{uid}</code>…',
     '❗ Your account ID must be <b>numbers only</b> (5–15 digits). Example: <b>123456789</b>',
-    'Go+ update', 'Broadcast messages enabled.',
+    'Pocket IQ update', 'Broadcast messages enabled.',
     'Broadcast messages stopped. Bot access is unchanged. /subscribe to resume.',
     'Broadcast messages stopped',
+    'Open Pocket IQ in a private chat.',
+    'Reminders and broadcasts stopped. Bot access is unchanged.',
+    'Open Pocket Option registration',
+    'Link unavailable — tap Create New Account below for support.',
 )
 
 _catalog = {}
@@ -52,9 +58,6 @@ for file in sorted((Path(__file__).parent / 'locales').glob('*.tsv')):
 if not _catalog:
     raise ValueError('Translation catalog is missing')
 
-# Longest first prevents a short button label from replacing part of a sentence.
-_phrases = re.compile(r'(?<![^\W\d_])(?:' + '|'.join(
-    re.escape(key) for key in sorted(_catalog, key=len, reverse=True)) + r')(?!\w)')
 _protected = re.compile(r'(<code>.*?</code>|<pre>.*?</pre>|<[^>]+>|'
                         r'https?://[^\s<>]+|@[A-Za-z0-9_]+|(?<!\w)/[a-z_]+\b)', re.S)
 
@@ -63,6 +66,8 @@ def translate_parts(text, language, *, button=False):
     """Translate known prose without touching markup or opaque identifiers."""
     if not text or language == 'en' or language not in CODES:
         return text
+    if text in TEMPLATES:
+        return TEMPLATES[text][language]
     def replacement(match):
         key = match.group()
         # Start/Premium are tier names; Start is a verb only on a button.
@@ -81,10 +86,15 @@ def message_sources():
     import home_menu
     import chart_signals
     import journey
+    import start_here
+    import market_signals
+    import verification_reminders
     result = list(EXTRA_MESSAGES) + [home_menu.TEXT, home_menu.SHEET_CAPTION,
                                        home_menu.SHEET_UNAVAILABLE] + list(home_menu.PENDING.values())
     result.extend(chart_signals.SOURCES)
     result.extend(journey.SOURCES)
+    result.extend((start_here.TEXT, verification_reminders.TEXT, *market_signals.SOURCES))
+    result.extend(journey.notifications({'broadcast_opt_out': value})[0] for value in (False, True))
     result.extend(screen['text'] for screen in config.SCREENS.values())
     result.extend(value for name, value in vars(config).items()
                   if isinstance(value, str) and value and (
@@ -100,43 +110,58 @@ def _compile_source(source):
 
 
 _sources = None
-_english_sources = None
 
-# Preserve the established translations. New setup copy stays wholly in English
-# until reviewed translations are supplied, rather than mixing fragments or
-# accidentally changing the meaning of deposit/eligibility conditions.
-ENGLISH_NOTICE = {
-    'ru': 'Новые экраны настройки пока доступны на английском языке.',
-    'uk': 'Нові екрани налаштування поки доступні англійською мовою.',
-    'hi': 'नए सेटअप पृष्ठ अभी अंग्रेज़ी में उपलब्ध हैं।',
-    'bn': 'নতুন সেটআপ পৃষ্ঠাগুলি আপাতত ইংরেজিতে উপলব্ধ।',
-    'ur': 'نئے سیٹ اپ صفحات فی الحال انگریزی میں دستیاب ہیں۔',
-    'vi': 'Các màn hình thiết lập mới hiện có bằng tiếng Anh.',
-    'id': 'Layar pengaturan baru saat ini tersedia dalam bahasa Inggris.',
-    'tr': 'Yeni kurulum ekranları şu anda İngilizce olarak sunulmaktadır.',
-    'es': 'Las nuevas pantallas de configuración están disponibles por ahora en inglés.',
-    'ar': 'شاشات الإعداد الجديدة متاحة حاليًا باللغة الإنجليزية.',
-    'pt': 'As novas telas de configuração estão disponíveis por enquanto em inglês.',
-}
+# Whole templates preserve grammar across HTML emphasis and protect interpolated
+# values (asset names, user searches, URLs, IDs, amounts and AI-generated prose).
+_template_file = Path(__file__).parent / 'locales' / 'interface.json'
+TEMPLATES = json.loads(_template_file.read_text(encoding='utf-8'))
+_template_patterns = []
+for source, translations in TEMPLATES.items():
+    if set(translations) != set(CODES[1:]) or not all(translations.values()):
+        raise ValueError('Incomplete interface translation')
+    fields = {field for _, field, _, _ in Formatter().parse(source) if field is not None}
+    for translated in translations.values():
+        if {field for _, field, _, _ in Formatter().parse(translated) if field is not None} != fields:
+            raise ValueError('Translation changed template fields')
+    seen, pattern = set(), ''
+    for literal, field, _, _ in Formatter().parse(source):
+        pattern += re.escape(literal)
+        if field is not None:
+            pattern += f'(?P={field})' if field in seen else f'(?P<{field}>.*?)'
+            seen.add(field)
+    _template_patterns.append((re.compile(pattern, re.S), translations))
 
-
-def english_flow_sources():
-    import journey
-    import home_menu
-    import chart_signals
-    import config
-    return (*journey.SOURCES, home_menu.TEXT, chart_signals.INTRO, chart_signals.VERIFIED,
-            chart_signals.EXHAUSTED, chart_signals.PROMPT, config.MSG_TEST_MODE)
+# Native button icons are removed before their labels are translated. Include
+# standalone interface labels in phrase lookup as well as exact-template lookup.
+for source, translations in TEMPLATES.items():
+    if '\n' not in source and '<' not in source and '{' not in source:
+        _catalog.setdefault(source, {'en': source, **translations})
+# Longest first prevents a short button label from replacing part of a sentence.
+_phrases = re.compile(r'(?<![^\W\d_])(?:' + '|'.join(
+    re.escape(key) for key in sorted(_catalog, key=len, reverse=True)) + r')(?!\w)')
+CATALOG_VERSION = hashlib.sha256(json.dumps([_catalog, TEMPLATES],
+    ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
 
 
 def translate_message(text, language):
-    global _sources, _english_sources
+    global _sources
     if not text or language == 'en' or language not in CODES:
         return text
-    if _english_sources is None:
-        _english_sources = tuple(_compile_source(source) for source in english_flow_sources())
-    if any(pattern.fullmatch(text) for pattern in _english_sources):
-        return '<i>' + ENGLISH_NOTICE[language] + '</i>\n\n' + text
+    if text in TEMPLATES:
+        return TEMPLATES[text][language]
+    for pattern, translations in _template_patterns:
+        if match := pattern.fullmatch(text):
+            values = match.groupdict()
+            if 'ref' in values:
+                # Long tracking URLs use this built-in anchor label. Translate
+                # the visible label only; keep href and other dynamic values.
+                label = 'Open Pocket Option registration'
+                values['ref'] = values['ref'].replace('>' + label + '</a>',
+                    '>' + translate_parts(label, language) + '</a>')
+                fallback = 'Link unavailable — tap Create New Account below for support.'
+                if values['ref'] == fallback:
+                    values['ref'] = translate_parts(fallback, language)
+            return translations[language].format(**values)
     if _sources is None:
         _sources = tuple(_compile_source(source) for source in message_sources())
     if any(pattern.fullmatch(text) for pattern in _sources):
@@ -203,7 +228,7 @@ def localize_method(method, language):
                 callback = button.callback_data or ''
                 # Language names stay recognizable from any selected language.
                 # Admin campaign controls keep their original wording.
-                skip = callback.startswith(('lang:', 'an:')) or (
+                skip = callback.startswith(('lang:', 'an:', 'market:a:', 'pair:')) or (
                     callback.startswith('bc:') and not callback.startswith(('bc:open:', 'bc:stop')))
                 text = button.text if skip else translate_parts(button.text, language, button=True)
                 buttons.append(button.model_copy(update={'text': text}))

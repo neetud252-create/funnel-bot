@@ -1,4 +1,4 @@
-"""Verification test for the "Why traders choose Go+" screen.
+"""Verification test for the "Why traders choose Pocket IQ" screen.
 
 This is the screen reached from Welcome's Start button: a headline, five
 feature lines, and a single "How Does It Work" button.
@@ -58,7 +58,7 @@ def check(label, condition, detail=""):
 
 # (name, id, glyph, the text that must follow the entity on its line)
 CAPTION_EMOJI = [
-    ("sparkles",  "5325547803936572038", "\U00002728", " WHY TRADERS CHOOSE GO+"),
+    ("sparkles",  "5325547803936572038", "\U00002728", " WHY TRADERS CHOOSE Pocket IQ"),
     ("chart",     "5231200819986047254", "\U0001F4CA", " 100+ trading assets"),
     ("globe",     "5447410659077661506", "\U0001F310", "OTC and exchange pairs"),
     ("target",    "5461009483314517035", "\U0001F3AF", "2 trading modes"),
@@ -69,7 +69,7 @@ CAPTION_EMOJI = [
 
 BUTTON_ICON = "5436113877181941026"
 
-EXPECT_PLAIN = ("\U00002728 WHY TRADERS CHOOSE GO+\n\n"
+EXPECT_PLAIN = ("\U00002728 WHY TRADERS CHOOSE Pocket IQ\n\n"
                 "\U0001F4CA 100+ trading assets\n"
                 "\U0001F310OTC and exchange pairs\n"
                 "\U0001F3AF2 trading modes\n"
@@ -91,8 +91,8 @@ def main():
     print("[how] caption content")
     check("rendered caption matches the specified copy exactly",
           plain == EXPECT_PLAIN, repr(plain))
-    check("headline reads WHY TRADERS CHOOSE GO+",
-          "WHY TRADERS CHOOSE GO+" in plain, repr(plain))
+    check("headline reads WHY TRADERS CHOOSE Pocket IQ",
+          "WHY TRADERS CHOOSE Pocket IQ" in plain, repr(plain))
     check("no bold markup was introduced", "<b>" not in text, repr(text))
     check("no em dash in this caption", "\U00002014" not in plain, repr(plain))
     check("no unfilled placeholder",
@@ -205,7 +205,7 @@ def main():
           [b[1] for row in config.SCREENS["welcome"]["kb"] for b in row]
           == ["cb:go:how"], str(config.SCREENS["welcome"]["kb"]))
     check("the welcome caption is unchanged",
-          "Welcome to Go+" in config.SCREENS["welcome"]["text"])
+          "Welcome to Pocket IQ" in config.SCREENS["welcome"]["text"])
     check("the tech screen this leads to is unchanged",
           [b[1] for row in config.SCREENS["tech"]["kb"] for b in row]
           == ["cb:go:ai"], str(config.SCREENS["tech"]["kb"]))

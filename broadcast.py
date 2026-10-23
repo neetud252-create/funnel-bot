@@ -38,7 +38,7 @@ AUDIENCES = {
     'waiting': ('UID submitted, not activated', 'uid IS NOT NULL AND uid<>\'\' AND NOT verified'),
     'active': ('Activated users', 'verified=TRUE'),
 }
-BUTTONS = {'none': 'No button', 'register': 'Register & Get Gift', 'open': 'Open Go+'}
+BUTTONS = {'none': 'No button', 'register': 'Register & Get Gift', 'open': 'Open Pocket IQ'}
 
 
 async def query(sql, *args):
@@ -84,7 +84,7 @@ async def deliver(bot, post, recipient):
         await asyncio.sleep(1.05)
         markup = recipient_keyboard(post, recipient)
         if markup:
-            await bot.send_message(recipient, 'Go+ update', reply_markup=markup)
+            await bot.send_message(recipient, 'Pocket IQ update', reply_markup=markup)
     else:
         await bot.copy_message(recipient, post['source_chat'], post['source_message'],
                                reply_markup=recipient_keyboard(post, recipient))

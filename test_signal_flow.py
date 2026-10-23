@@ -1077,14 +1077,14 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     menu_text = config.SCREENS["menu"]["text"]
     menu_ids = [i for i, _g in _entities(menu_text)]
     for label, want, near in (
-            ("Go+ main menu robot", "5188678912883827293", "Go+ main menu"),
+            ("Pocket IQ main menu robot", "5188678912883827293", "Pocket IQ main menu"),
             ("Signals bolt",        "5429633836684157942", "Signals"),
             ("Your level battery",  "5370688996844249600", "Your level"),
     ):
         # The id must sit immediately before the text it belongs to, not merely
         # somewhere in the caption - that is what "attached to the right entity"
         # means here.
-        # near is literal text ("Go+ main menu" contains a regex quantifier).
+        # near is literal text ("Pocket IQ main menu" contains a regex quantifier).
         pat = r'<tg-emoji emoji-id="%s">.*?</tg-emoji> <b>%s' % (want,
                                                                  _re.escape(near))
         check("menu: %s -> %s" % (label, want),
@@ -1100,7 +1100,7 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           all(p in menu_text for p in ("{limit}", "{used}", "{left}", "{level}")),
           repr(menu_text))
     check("the menu wording is unchanged",
-          all(s in menu_text for s in ("<b>Go+ main menu</b>", "<b>Signals</b>",
+          all(s in menu_text for s in ("<b>Pocket IQ main menu</b>", "<b>Signals</b>",
                                        "Available today: {limit} signals",
                                        "Used: {used}", "Left: {left}",
                                        "<b>Your level:</b>")), repr(menu_text))

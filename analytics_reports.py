@@ -234,7 +234,7 @@ async def fetch(view, days, *, limit=11, offset=0, user_id=None, snapshot=None):
 
 
 def format_rows(view, rows, days, offset=0):
-    title = f'Go+ ANALYTICS · {VIEWS[view]}\nLast {days} calendar day(s), including today · IST\n'
+    title = f'Pocket IQ ANALYTICS · {VIEWS[view]}\nLast {days} calendar day(s), including today · IST\n'
     if view == 'overview' and rows:
         r = rows[0]
         return title + (f'\nAll stored users: {r["total_users"]}\nNew in period: {r["new_users"]}\n'
@@ -312,7 +312,7 @@ async def dashboard(view, days, offset=0):
         rows = keyboard(view, days)
         rows += [[InlineKeyboardButton(text=f'Download {key}.csv', callback_data=f'an:csv:{key}:{days}')]
                  for key in QUERIES]
-        return ('Go+ ANALYTICS · CSV downloads\n'
+        return ('Pocket IQ ANALYTICS · CSV downloads\n'
                 f'Period: last {days} calendar day(s), IST. Users.csv includes every stored user; its click counts use this period.\n\n'
                 'Exports contain Telegram IDs and usernames and are available only to admins. '
                 'Large exports are split into parts of 50,000 rows with a Next CSV part button. '
@@ -332,7 +332,7 @@ async def user_report(uid, days, offset=0):
         return 'No matching non-admin user is stored.', InlineKeyboardMarkup(inline_keyboard=keyboard('users',days))
     p = people[0]
     events = await fetch('events',days,user_id=uid,limit=16,offset=offset)
-    text = (f'Go+ USER · {uid} · {clean(p["username"])}\n'
+    text = (f'Pocket IQ USER · {uid} · {clean(p["username"])}\n'
             f'Joined: {stamp(p["joined_at"])}\nLast active: {stamp(p["last_active"])}\n'
             f'Language: {p["language"]} · {p["activity"]}\n'
             f'UID submitted: {p["uid_submitted"]} · Verified: {p["verified"]} · Premium: {p["is_premium"]}\n'

@@ -10,9 +10,9 @@ go through pe(); none may be left as a bare unicode literal.
 
 Two things about this caption are easy to break and are pinned exactly:
 
-  * bold - only two spans, the headline figure and "Go Plus". Any third bold
+  * bold - only two spans, the headline figure and "Pocket IQ". Any third bold
     span, or either of these losing its tags, fails here.
-  * spacing - deliberately uneven. The robot butts straight against "Go Plus",
+  * spacing - deliberately uneven. The robot butts straight against "Pocket IQ",
     the two hands sit together before one space, and the index finger and bolt
     take no space at all, while the siren, watch, house and pointing fingers
     do. Each is asserted in both directions.
@@ -72,7 +72,7 @@ EXPECT_ID_ORDER = [i for _, i, _, _ in CAPTION_EMOJI] + ["5305522282695768654"]
 
 EXPECT_PLAIN = ("\U0001F6A8 +$18,400 \U00002014 In One Trade. \U0001F4B0\n"
                 "No charts. No courses. No stress.\n\n"
-                "\U0001F916Go Plus sends the signal \U00002192 you tap "
+                "\U0001F916Pocket IQ sends the signal \U00002192 you tap "
                 "\U00002192 you profit. ✔️\n\n"
                 "\U0001F596\U0001F44C Dream car.\n"
                 "⌚️ Dream watch.\n"
@@ -139,8 +139,8 @@ def main():
     check("first bold is the headline figure",
           bolds[0] == "+$18,400 \U00002014 In One Trade." if bolds else False,
           str(bolds[:1]))
-    check("second bold is 'Go Plus'",
-          bolds[1] == "Go Plus" if len(bolds) > 1 else False, str(bolds[1:2]))
+    check("second bold is 'Pocket IQ'",
+          bolds[1] == "Pocket IQ" if len(bolds) > 1 else False, str(bolds[1:2]))
     check("no unclosed bold tag",
           text.count("<b>") == text.count("</b>") == 2,
           "%d open / %d close" % (text.count("<b>"), text.count("</b>")))
@@ -176,8 +176,8 @@ def main():
         else:
             check("%s: has NO space after it" % name,
                   (glyph + " ") not in plain, repr(plain))
-    check("robot butts straight against Go Plus",
-          "\U0001F916Go Plus" in plain, repr(plain))
+    check("robot butts straight against Pocket IQ",
+          "\U0001F916Pocket IQ" in plain, repr(plain))
     check("one space between the bold sentence and the money bag",
           "In One Trade. \U0001F4B0" in plain, repr(plain))
     check("the two hands sit together",
@@ -257,12 +257,12 @@ def main():
           == ["cb:go:access", "url:" + config.CHANNEL_URL],
           str(config.SCREENS["results"]["kb"]))
     check("the results caption is unchanged",
-          "Real feedback from active Go+ traders." in
+          "Real feedback from active Pocket IQ traders." in
           config.SCREENS["results"]["text"])
     check("the register screen this leads to is unchanged",
           "register" in config.SCREENS, str(sorted(config.SCREENS)))
     check("the ai caption is unchanged",
-          "THE TECHNOLOGY BEHIND GO+" in config.SCREENS["ai"]["text"])
+          "THE TECHNOLOGY BEHIND Pocket IQ" in config.SCREENS["ai"]["text"])
     check("the tech caption is unchanged",
           "IT IS SIMPLE" in config.SCREENS["tech"]["text"])
     check("the gate still has its two buttons, in order",

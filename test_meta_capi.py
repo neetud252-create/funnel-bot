@@ -237,7 +237,7 @@ async def main_async(server, config, db, httpx, records):
     event = body["data"][0]
     check("it goes to the configured dataset",
           sent["url"].endswith("/%s/events" % config.META_DATASET_ID), sent["url"])
-    check("the dataset is the Go+ pixel",
+    check("the dataset is the Pocket IQ pixel",
           config.META_DATASET_ID == "2016650609225629", config.META_DATASET_ID)
     check("the Graph version is pinned, not left unversioned",
           "/v" in sent["url"] and config.META_API_VERSION in sent["url"],
