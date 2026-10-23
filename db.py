@@ -241,7 +241,7 @@ async def get_user(tg_id: int):
         return await c.fetchrow("SELECT * FROM users WHERE tg_id=$1", tg_id)
 
 async def set_setup_stage(tg_id, stage, *, account_kind=None):
-    if stage not in ('new', 'account_question', 'account_help', 'existing_account',
+    if stage not in ('new', 'account_question', 'account_help', 'existing_account', 'referral_help',
                      'requirements', 'eligibility', 'register', 'id', 'deposit', 'help', 'active'):
         raise ValueError('Unknown setup stage')
     if account_kind not in (None, 'new', 'existing'):

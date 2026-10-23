@@ -792,6 +792,8 @@ async def _resume_setup(bot, tg_id, state=None):
         await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
     elif stage == 'existing_account' and not user.get('uid'):
         await _journey(bot, tg_id, journey.existing(), key='existing_account')
+    elif stage == 'referral_help':
+        await _journey(bot, tg_id, journey.referral_help(), key='referral_help')
     elif not user.get('eligibility_confirmed_at'):
         if stage == 'help':
             await _journey(bot, tg_id, journey.screen('ineligible', user), key='eligibility_declined')
@@ -867,6 +869,14 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         if user.get('account_kind') == 'new' and not user.get('uid'):
             await db.set_setup_stage(tg_id, 'eligibility')
         await _resume_setup(bot, tg_id, state)
+    elif action == 'requirements':
+        await _journey(bot, tg_id, journey.requirements(), key='access_requirements_details')
+    elif action == 'referral_help':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        await db.set_setup_stage(tg_id, 'referral_help', account_kind='existing')
+        await _journey(bot, tg_id, journey.referral_help(), key='referral_help')
     elif action == 'eligible':
         if user.get('account_kind') not in ('new', 'existing'):
             await _journey(bot, tg_id, journey.setup(), key='account_question')
