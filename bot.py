@@ -6,7 +6,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
-                           InlineKeyboardButton, FSInputFile, InputMediaPhoto, InputMediaVideo, ReplyParameters)
+                           InlineKeyboardButton, FSInputFile, BufferedInputFile, InputMediaPhoto, InputMediaVideo, ReplyParameters)
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 import uvicorn
 import db, config, panelbot
@@ -20,6 +20,8 @@ import start_here
 import journey
 import localization
 import chart_signals
+import market_signals
+import market_data
 from server import app
 
 logging.basicConfig(level=logging.INFO)
@@ -503,7 +505,11 @@ async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
         await _drop_msgs(bot, tg_id, [int(mid) for mid in str(user['album_ids']).split(',')])
         await db.set_album(tg_id, None)
     try:
-        if media_key is None:
+        if isinstance(media_key, BufferedInputFile):
+            # Generated OHLC charts are per-request bytes, never shared file IDs.
+            m = await bot.send_photo(tg_id, media_key, caption=text,
+                                     parse_mode='HTML', reply_markup=kb)
+        elif media_key is None:
             # Deliberately text-only, not a missing asset - nothing to warn about.
             reply = {'reply_parameters': ReplyParameters(message_id=reply_to_message_id,
                      allow_sending_without_reply=True)} if reply_to_message_id else {}
@@ -971,11 +977,14 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await bot.send_message(cb.from_user.id, home_menu.SHEET_UNAVAILABLE)
         return
     if action == 'test':
-        await chart_signals.open_screen(cb, bot, state, render)
+        if market_data.enabled(cb.from_user.id):
+            await market_signals.open_screen(cb, bot, state, render)
+        else:
+            await chart_signals.open_screen(cb, bot, state, render)
         return
     if action == 'language':
         await cb.answer()
-        if await state.get_state() == chart_signals.Chart.waiting_image.state:
+        if await state.get_state() in (chart_signals.Chart.waiting_image.state, market_signals.Market.browsing.state):
             await state.clear()
         language = await localization.language_for(cb.from_user.id)
         await render(bot, cb.from_user.id, None, localization.SELECTOR_TEXT,
@@ -1288,7 +1297,10 @@ async def menu_signal(cb: CallbackQuery, bot: Bot, state: FSMContext):
     old = _signal_tasks.pop(cb.from_user.id, None)
     if old:
         old.cancel()
-    await chart_signals.open_screen(cb, bot, state, render, upload=True)
+    if market_data.enabled(cb.from_user.id):
+        await market_signals.open_screen(cb, bot, state, render)
+    else:
+        await chart_signals.open_screen(cb, bot, state, render, upload=True)
 
 # Must stay above mode_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "mode:manual")
@@ -1820,6 +1832,7 @@ async def _verify_account_id(tg_id, account_id):
 
 # Commands retain priority; chart uploads/text cannot fall into UID verification.
 chart_signals.install(dp, render)
+market_signals.install(dp, render)
 
 
 # MUST stay above the Reg.waiting_uid handler and uid_anytime below: aiogram
@@ -2132,6 +2145,8 @@ async def main():
                  config.PREMIUM_MIN_DEPOSIT, config.daily_limit(True))
     logging.info('Verified chart quota ready; Start=%s/day; Premium=%s/day; reset=00:00 UTC',
                  config.daily_limit(False), config.daily_limit(True))
+    logging.info('Asset analysis ready; OTCharts configured=%s; public enabled=%s',
+                 market_data.configured(), market_data.public_enabled())
     # Validate dashboard queries against the live schema before accepting commands.
     await activity_stats.report()
     for report_name in analytics_reports.QUERIES:
@@ -2180,6 +2195,7 @@ async def main():
         await asyncio.gather(*tasks)
     finally:
         await chart_signals.api.close_provider_client()
+        await market_data.close()
 
 asyncio.run(main())
 
