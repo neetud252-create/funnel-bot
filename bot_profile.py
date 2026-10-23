@@ -30,7 +30,7 @@ async def sync(bot):
             for code in ('', *localization.CODES):
                 await bot.set_my_name(name=NAME, language_code=code)
                 await bot.set_my_description(description=description(code or 'en'), language_code=code)
-                await bot.set_my_short_description(description=short_description(code or 'en'), language_code=code)
+                await bot.set_my_short_description(short_description=short_description(code or 'en'), language_code=code)
         logging.info('Bot profile ready: Pocket IQ; 12 translated descriptions')
     except Exception as error:
         # Profile settings must not prevent normal messages or long polling.
