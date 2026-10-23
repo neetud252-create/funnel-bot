@@ -31,9 +31,11 @@ The caption and first button use the same tracked referral URL; users can submit
 UID directly in chat or open the ID prompt. UID guidance and Support remain on that prompt.
 Already verified or referral-confirmed accounts continue from their saved access state.
 Community contains the existing Telegram channel, YouTube, and reviews destinations.
-Tools contains the money-management workbook, screenshot guide/example, FAQs, and risk/referral information.
+Tools contains the money-management workbook, asset guide, FAQs, and risk/referral information.
 Settings contains language, shared notification preferences, and privacy information.
-The dashboard links to the same screenshot analyser and persisted daily allowance.
+The dashboard links to the asset catalogue and persisted daily allowance.
+Signals now use Market → Category → Asset → Candle timeframe → Chart and analysis.
+See [MARKET_SIGNALS.md](MARKET_SIGNALS.md) for catalogue coverage and live-data eligibility.
 Premium compares allowances, explains the qualifying deposit requirement, and checks the saved linked ID.
 
 The welcome uses the approved Pocket IQ 3D artwork: `assets/home_banner_loop.mp4`

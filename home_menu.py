@@ -11,8 +11,8 @@ VIDEO = 'home_banner_video'
 TEXT = (
     "👋 <b>Welcome to Pocket IQ</b>\n"
     "Your AI-powered chart analysis assistant.\n\n"
-    "📸 <b>Send a chart. Understand the setup.</b>\n"
-    "Upload a clear screenshot to explore market trends, momentum, and potential price direction.\n\n"
+    "📊 <b>Choose an asset. Explore the setup.</b>\n"
+    "Select your market, asset, and timeframe to view a candlestick chart and market analysis when live data is available.\n\n"
     "🎁 <b>Your first two analyses are free.</b>\n"
     "Try Pocket IQ before deciding whether to set up access.\n\n"
     "📖 New here? Open <b>How It Works</b>, or reach out to <b>Support</b> whenever you need help.\n\n"
@@ -29,7 +29,7 @@ def keyboard(user=None):
     access = ('🏠 Open My Dashboard' if user.get('verified') else
               '🚀 Continue Setup' if user.get('uid') or user.get('setup_stage') not in (None, 'new')
               else '🚀 Set Up My Account')
-    trial = '📸 Analyse My Chart' if user.get('verified') else '🎯 Try 2 Free Analyses'
+    trial = '📊 Get Signals' if user.get('verified') else '🎯 Try 2 Free Analyses'
     return [
         [(trial, 'cb:home:test', 'success')],
         [(access, 'cb:home:access', 'primary')],

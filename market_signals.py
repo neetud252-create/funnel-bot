@@ -19,15 +19,19 @@ import chart_trial as trial
 import localization
 import market_chart
 import market_data as data
+import market_catalog as catalog
 
-PAGE_SIZE = 10
-BACK = [[('⬅️ Home', 'cb:home:back')]]
+PAGE_SIZE = 6
+BACK = [[('⬅️ Home', 'cb:home:back', 'danger')]]
 RETRY = [[('📊 Choose Asset', 'cb:market:open', 'primary')],
-         [('📸 Upload a Screenshot', 'cb:chart:upload')], *BACK]
+         *BACK]
+ACCESS = [[('🚀 View Access Requirements', 'cb:home:access', 'success')],
+          [('📊 Browse Assets', 'cb:market:open', 'primary')],
+          [('💬 Support', 'cb:flow:support')], *BACK]
 MESSAGES = {
-    'configuration': 'Asset analysis is being connected. You can still upload a chart screenshot.',
-    'plan': 'This asset feed is not available on the connected data plan. Please try screenshot analysis.',
-    'quota': 'The market-data allowance is currently exhausted. Please try again later or upload a screenshot.',
+    'configuration': 'Live asset analysis is being connected. You can browse all markets and assets now.',
+    'plan': 'Live candles for this asset are not available on the connected data plan yet. Please choose another asset.',
+    'quota': 'The market-data allowance is currently exhausted. Please try again later.',
     'asset': 'This asset is no longer available. Please choose another asset.',
     'empty': 'No assets are available from the connected feed right now.',
     'closed': 'This asset is currently closed for trading. Please choose another asset.',
@@ -44,66 +48,141 @@ class Market(StatesGroup):
 
 
 def filtered(assets, query):
-    query = query.casefold().replace('/', '').replace(' ', '')
-    return [a for a in assets if query in (a.symbol + a.name).casefold().replace('/', '').replace(' ', '')]
+    query = catalog.normalized(query)
+    return [a for a in assets if query in catalog.normalized(a.name)]
 
 
-def picker(assets, period, page=0, query=''):
+def picker(assets, market='otc', category='forex', page=0, query=''):
     matches = filtered(assets, query)
     pages = max(1, (len(matches) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(0, min(page, pages-1))
-    text = ('📊 <b>Choose your asset</b>\n\n'
-            f'Pocket Option OTC · <b>{period//60}-minute candles</b>\n'
-            f'{len(matches)} assets on the connected data plan · Page {page+1}/{pages}\n\n'
-            'Tap an asset for its candlestick chart and analysis.\n'
-            'Type a name or pair to search, e.g. EURUSD or Apple.')
+    title = catalog.category_info(category)[1]
+    text = f'💱 <b>{title}</b>\n{market.upper()} · {len(matches)} assets'
     if query:
         text += '\n\nSearch: <b>' + html.escape(query) + '</b>'
     if not matches:
         text += '\nNo matching assets. Try another name.'
-    rows = [[('✓ 1 Minute' if period == 60 else '1 Minute', 'cb:market:tf:60', 'primary'),
-             ('✓ 5 Minutes' if period == 300 else '5 Minutes', 'cb:market:tf:300', 'primary')]]
-    buttons = [(('⛔ ' if a.open is False else '') + a.name[:40], 'cb:market:a:' + a.key)
+    buttons = [(a.name[:50], 'cb:market:a:' + a.key, 'primary')
                for a in matches[page*PAGE_SIZE:(page+1)*PAGE_SIZE]]
-    rows += [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     nav = []
+    prefix = f'cb:market:list:{market}:{category}:'
     if page:
-        nav.append(('◀ Previous', f'cb:market:p:{page-1}'))
+        nav.append(('‹', prefix + str(page-1), 'primary'))
+    nav.append((f'{page+1}/{pages}', 'cb:market:noop', 'primary'))
     if page+1 < pages:
-        nav.append(('Next ▶', f'cb:market:p:{page+1}'))
-    if nav:
-        rows.append(nav)
+        nav.append(('›', prefix + str(page+1), 'primary'))
+    rows.append(nav)
     if query:
-        rows.append([('All Assets', 'cb:market:all')])
-    rows += [[('📸 Upload a Screenshot', 'cb:chart:upload')], *BACK]
+        rows.append([('Clear Search', 'cb:market:all', 'primary')])
+    rows += [[('« Back', 'cb:market:book:' + market, 'danger')]]
     return text, rows
 
 
 async def allowed(tg_id, bot, render, *, check_allowance=True):
     import db
+    # The public catalogue is independent of the feed plan and trial quota.
+    if not check_allowance:
+        return True
     if not data.enabled(tg_id):
         await render(bot, tg_id, None, MESSAGES['configuration'], RETRY, screen_key='market_unavailable')
         return False
-    # Browsing the catalogue does not spend an analysis. Enforce the shared
-    # allowance when an asset is selected, not when opening or searching it.
-    if not check_allowance:
-        return True
     verified, left = await trial.status(db.pool, tg_id)
     if not left:
         text = chart_signals.MESSAGES['limit'] if verified else chart_signals.EXHAUSTED
-        await render(bot, tg_id, None, text, chart_signals.ACCESS, screen_key='market_limit')
+        await render(bot, tg_id, None, text, ACCESS, screen_key='market_limit')
         return False
     return True
+
+
+async def available_catalog(tg_id, *, strict=False):
+    if data.enabled(tg_id):
+        try:
+            return catalog.entries(await data.feed().assets())
+        except data.FeedError:
+            if strict:
+                raise
+            pass  # The public catalogue remains usable during a feed outage.
+    return catalog.entries()
+
+
+async def active(state, session):
+    return (await state.get_state() == Market.browsing.state and
+            (await state.get_data()).get('market_session') == session)
+
+
+async def navigate(state, **values):
+    await state.set_state(Market.browsing.state)
+    session = secrets.token_hex(12)
+    await state.update_data(market_session=session, **values)
+    return session
+
+
+async def show_categories(bot, tg_id, state, render, market):
+    session = await navigate(state, market_book=market, market_category=None, market_query='')
+    items = await available_catalog(tg_id)
+    if not await active(state, session):
+        return
+    categories = list(catalog.CATEGORIES)
+    if any(e.market == market and e.category == 'other' for e in items):
+        categories.append('other')
+    rows = [[(catalog.category_info(c)[0], f'cb:market:cat:{market}:{c}', 'primary')]
+            for c in categories]
+    rows.append([('« Back', 'cb:market:open', 'danger')])
+    await render(bot, tg_id, 'asset_category', '📋 <b>Select an asset by category</b>\n' + market.upper(),
+                 rows, screen_key='market_categories')
 
 
 async def show_picker(bot, tg_id, state, render, page=0):
     saved = await state.get_data()
     session = saved.get('market_session')
-    assets = await data.feed().assets()
-    if (await state.get_data()).get('market_session') != session or await state.get_state() != Market.browsing.state:
+    market, category = saved.get('market_book', 'otc'), saved.get('market_category') or 'forex'
+    assets = [e for e in await available_catalog(tg_id) if e.market == market and e.category == category]
+    if not await active(state, session):
         return
-    text, rows = picker(assets, saved.get('market_period', 60), page, saved.get('market_query', ''))
-    await render(bot, tg_id, None, text, rows, screen_key='market_assets')
+    pages = max(1, (len(filtered(assets, saved.get('market_query', ''))) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(max(0, page), pages - 1)
+    await state.update_data(market_page=page)
+    text, rows = picker(assets, market, category, page, saved.get('market_query', ''))
+    if not assets:
+        text = f'📋 <b>{catalog.category_info(category)[0]}</b>\n\nNo assets are listed in this market category yet.'
+    await render(bot, tg_id, catalog.category_info(category)[2], text, rows, screen_key='market_assets')
+
+
+async def select_asset(bot, tg_id, state, render, key):
+    session = await navigate(state)
+    try:
+        entry = catalog.find(await available_catalog(tg_id, strict=True), key)
+    except data.FeedError as exc:
+        if await active(state, session):
+            await render(bot, tg_id, None, MESSAGES.get(str(exc), MESSAGES['service']), RETRY)
+        return
+    if not await active(state, session):
+        return
+    if entry is None:
+        return await render(bot, tg_id, None, MESSAGES['asset'], RETRY)
+    saved = await state.get_data()
+    page = saved.get('market_page', 0) if (saved.get('market_book'), saved.get('market_category')) == (entry.market, entry.category) else 0
+    await state.update_data(market_book=entry.market, market_category=entry.category, market_asset=entry.key)
+    back = [[('« Back', f'cb:market:list:{entry.market}:{entry.category}:{page}', 'danger')]]
+    text = f'📊 <b>{html.escape(entry.name)}</b>\n\n'
+    if entry.market == 'fin':
+        text += 'Live FIN market data is not connected yet. You can browse these assets now.'
+        rows = back
+    elif not data.enabled(tg_id):
+        text += MESSAGES['configuration']
+        rows = back
+    elif not entry.live:
+        text += MESSAGES['plan']
+        rows = back
+    elif entry.live.open is False:
+        text += MESSAGES['closed']
+        rows = back
+    else:
+        text += '<b>Select a candle timeframe</b>\nGet a candlestick chart and market analysis.'
+        rows = [[('1 Minute', f'cb:market:run:{entry.key}:60', 'primary'),
+                 ('5 Minutes', f'cb:market:run:{entry.key}:300', 'primary')], *back]
+    await render(bot, tg_id, None, text, rows, screen_key='market_timeframe')
 
 
 async def open_screen(cb, bot, state, render):
@@ -116,14 +195,11 @@ async def open_screen(cb, bot, state, render):
 
 async def open_picker(bot, tg_id, state, render):
     await state.clear()
-    if not await allowed(tg_id, bot, render, check_allowance=False):
-        return
-    await state.set_state(Market.browsing.state)
-    await state.update_data(market_session=secrets.token_hex(12), market_period=60, market_query='')
-    try:
-        await show_picker(bot, tg_id, state, render)
-    except data.FeedError as exc:
-        await render(bot, tg_id, None, MESSAGES.get(str(exc), MESSAGES['service']), RETRY, screen_key='market_error')
+    await navigate(state, market_period=60, market_query='')
+    await render(bot, tg_id, 'trading_type', '📊 <b>Select market type</b>',
+                 [[('OTC', 'cb:market:book:otc', 'primary')],
+                  [('FIN', 'cb:market:book:fin', 'primary')],
+                  [('« Back', 'cb:home:back', 'danger')]], screen_key='market_type')
 
 
 def result_text(snapshot, result):
@@ -145,9 +221,9 @@ def result_text(snapshot, result):
             '<i>OTCharts data · AI analysis of completed candles. Predictions can be wrong.</i>')
 
 
-async def analyse(cb, bot, state, render, asset_key):
+async def analyse(cb, bot, state, render, asset_key, *, period=None):
     tg_id = cb.from_user.id
-    # Shared with uploads: changing input method cannot bypass concurrency limits.
+    # One in-flight analysis per user, including callbacks on older messages.
     if tg_id in chart_signals._inflight or len(chart_signals._inflight) >= api.MAX_CONCURRENT:
         await cb.answer(chart_signals.MESSAGES['busy'], show_alert=True)
         return
@@ -156,19 +232,19 @@ async def analyse(cb, bot, state, render, asset_key):
     # session while reserving two allowances.
     chart_signals._inflight.add(tg_id)
     try:
-        await _analyse(cb, bot, state, render, asset_key)
+        await _analyse(cb, bot, state, render, asset_key, period=period)
     finally:
         chart_signals._inflight.discard(tg_id)
 
 
-async def _analyse(cb, bot, state, render, asset_key):
+async def _analyse(cb, bot, state, render, asset_key, *, period=None):
     import db
     tg_id = cb.from_user.id
     await cb.answer()
     if not await allowed(tg_id, bot, render):
         return
     saved = await state.get_data()
-    period = saved.get('market_period', 60)
+    period = period if period in data.PERIODS else saved.get('market_period', 60)
     session = secrets.token_hex(12)
     await state.set_state(Market.browsing.state)
     await state.update_data(market_session=session, market_period=period)
@@ -190,8 +266,15 @@ async def _analyse(cb, bot, state, render, asset_key):
             progress.retrying = True
 
     try:
-        # Negative IDs separate callback analyses from positive upload message
-        # IDs. The same Telegram message can only spend one analysis slot.
+        entry = catalog.find(catalog.entries(await data.feed().assets()), asset_key)
+        if not await active():
+            return
+        if not entry or entry.market != 'otc' or not entry.live:
+            raise data.FeedError('plan')
+        if entry.live.open is False:
+            raise data.FeedError('closed')
+        # The same Telegram menu message can only spend one analysis slot.
+        # Negative IDs also keep historic upload usage records distinct.
         blocked, token = await trial.reserve(db.pool, tg_id, -cb.message.message_id)
         if blocked:
             if blocked in ('trial', 'limit'):
@@ -202,7 +285,7 @@ async def _analyse(cb, bot, state, render, asset_key):
         if not api.configured():
             raise api.AnalysisError('configuration')
         await render(bot, tg_id, None, '⏳ Loading completed candles…', BACK, screen_key='market_loading')
-        snapshot = await data.feed().candles(asset_key, period)
+        snapshot = await data.feed().candles(entry.live.key, period)
         if not await active():
             return
         png = await asyncio.to_thread(market_chart.render, snapshot)
@@ -231,9 +314,9 @@ async def _analyse(cb, bot, state, render, asset_key):
         consumed = True
         if not await active():
             return
-        rows = [[('🔄 New Analysis', 'cb:market:a:' + asset_key, 'success')],
+        rows = [[('🔄 New Analysis', f'cb:market:run:{entry.key}:{period}', 'success')],
                 [('📊 Change Asset / Timeframe', 'cb:market:open', 'primary')],
-                [('📸 Upload a Screenshot', 'cb:chart:upload')], *BACK]
+                *BACK]
         try:
             delivery_attempted = True
             await render(bot, tg_id, BufferedInputFile(png, filename='pocket-iq-chart.png'),
@@ -244,7 +327,8 @@ async def _analyse(cb, bot, state, render, asset_key):
     except (data.FeedError, api.AnalysisError) as exc:
         logging.warning('Asset analysis failed: code=%s', str(exc))
         if await active():
-            messages = MESSAGES if isinstance(exc, data.FeedError) else chart_signals.MESSAGES
+            messages = MESSAGES if isinstance(exc, data.FeedError) else {
+                **chart_signals.MESSAGES, 'chart': MESSAGES['history'], 'image': MESSAGES['invalid']}
             await render(bot, tg_id, None, messages.get(str(exc), MESSAGES['service']), RETRY, screen_key='market_error')
     except Exception as exc:
         logging.warning('Asset request failed: type=%s', type(exc).__name__)
@@ -267,41 +351,61 @@ def install(dp, render):
             await cb.answer('Open the bot in a private chat.', show_alert=True)
             return
         action = cb.data.split(':')
-        if len(action) == 3 and action[1] == 'a':
-            return await analyse(cb, bot, state, render, action[2])
+        if len(action) == 4 and action[1] == 'run' and action[3] in ('60', '300'):
+            # Period travels with the callback, so an old button cannot silently
+            # analyse a newly selected timeframe. analyse claims concurrency
+            # before its first await.
+            return await analyse(cb, bot, state, render, action[2], period=int(action[3]))
         if action == ['market', 'open']:
             return await open_screen(cb, bot, state, render)
         await cb.answer()
-        if not await allowed(cb.from_user.id, bot, render, check_allowance=False):
+        if action == ['market', 'noop']:
             return
-        await state.set_state(Market.browsing.state)
-        await state.update_data(market_session=secrets.token_hex(12))
-        page = 0
-        if len(action) == 3 and action[1] == 'tf' and action[2] in ('60', '300'):
-            await state.update_data(market_period=int(action[2]))
-        elif len(action) == 3 and action[1] == 'p' and action[2].isdigit() and len(action[2]) < 5:
-            page = int(action[2])
+        tg_id = cb.from_user.id
+        if len(action) == 3 and action[1] == 'a':
+            return await select_asset(bot, tg_id, state, render, action[2])
+        if len(action) == 3 and action[1] == 'book' and action[2] in ('otc', 'fin'):
+            return await show_categories(bot, tg_id, state, render, action[2])
+        if (len(action) in (4, 5) and action[1] in ('cat', 'list') and action[2] in ('otc', 'fin')
+                and action[3] in (*catalog.CATEGORIES, 'other')):
+            if len(action) == 5 and (not action[4].isdigit() or len(action[4]) > 4):
+                return
+            saved = await state.get_data()
+            same = (saved.get('market_book'), saved.get('market_category')) == (action[2], action[3])
+            query = saved.get('market_query', '') if same and action[1] == 'list' else ''
+            await navigate(state, market_book=action[2], market_category=action[3], market_query=query)
+            return await show_picker(bot, tg_id, state, render, int(action[4]) if len(action) == 5 else 0)
         elif action == ['market', 'all']:
-            await state.update_data(market_query='')
+            await navigate(state, market_query='')
+            return await show_picker(bot, tg_id, state, render)
         else:
-            return
-        try:
-            await show_picker(bot, cb.from_user.id, state, render, page)
-        except data.FeedError as exc:
-            await render(bot, cb.from_user.id, None, MESSAGES.get(str(exc), MESSAGES['service']), RETRY)
+            # Old flat-picker / timeframe callbacks migrate to the new menu.
+            return await open_picker(bot, tg_id, state, render)
 
     async def search(m, bot, state):
-        if m.chat.type != 'private' or not await allowed(m.from_user.id, bot, render, check_allowance=False):
+        if m.chat.type != 'private':
             return
         if not m.text or m.text.startswith('/'):
             await m.answer('Type an asset name, or use the buttons below.')
             return
-        await state.update_data(market_query=m.text.strip()[:60], market_session=secrets.token_hex(12))
-        try:
-            await show_picker(bot, m.from_user.id, state, render)
-        except data.FeedError as exc:
-            await render(bot, m.from_user.id, None, MESSAGES.get(str(exc), MESSAGES['service']), RETRY)
+        saved = await state.get_data()
+        if not saved.get('market_category'):
+            return await m.answer('Choose a market and category using the buttons below.')
+        await navigate(state, market_query=m.text.strip()[:60])
+        await show_picker(bot, m.from_user.id, state, render)
 
-    dp.message.register(command, Command('markets'))
+    async def retired_upload(m, bot, state):
+        if m.chat.type == 'private':
+            await open_picker(bot, m.from_user.id, state, render)
+
+    async def legacy(cb, bot, state):
+        await open_screen(cb, bot, state, render)
+
+    dp.message.register(command, Command('markets', 'assets', 'signals'))
     dp.callback_query.register(callback, F.data.startswith('market:'))
-    dp.message.register(search, Market.browsing)
+    # Install before legacy trading callbacks: no stale expiry or upload button
+    # may enter the retired random-signal or screenshot implementations.
+    dp.callback_query.register(legacy, F.data.regexp(
+        r'^(chart:|mode:|type:|asset:|pair:|pairpage:|m:|s:|new_signal$|go:(mode|type|asset|pairs|test_menu|trading_mode)$)'))
+    dp.message.register(retired_upload, F.photo | F.document)
+    dp.message.register(search, Market.browsing, F.text, ~F.text.startswith('/'))

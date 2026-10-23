@@ -814,22 +814,23 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.render.assert_not_awaited()
         self.assertEqual(cb.answer.await_args.args[0], flow.MESSAGES['private'])
 
-    async def test_dispatch_routes_numeric_text_to_chart_not_verification(self):
+    async def test_dispatch_routes_numeric_text_to_asset_search_not_verification(self):
         import test_signal_flow as H
         fake_db = H._install_stub_modules()
         fake_db.pool = None
         mod = H._load_bot()
-        # Test the actual dispatcher registration against an active chart FSM.
+        # Numeric search text in the asset browser must not trigger UID verification.
+        import market_signals as market
         bot = Bot('123456:TEST')
         state = mod.dp.fsm.get_context(bot=bot, chat_id=11, user_id=11)
-        await state.set_state(flow.Chart.waiting_image.state)
-        with patch.object(flow, 'receive', AsyncMock()) as receive:
+        await market.navigate(state, market_book='otc', market_category='forex')
+        with patch.object(market, 'show_picker', AsyncMock()) as receive:
             from aiogram.types import Update
             await mod.dp.feed_update(bot, Update(update_id=1, message=message(photo=None, text='123456789')))
             receive.assert_awaited_once()
         await bot.session.close()
 
-    async def test_main_menu_dispatch_requires_screenshot_and_reuses_analysis(self):
+    async def test_main_menu_dispatch_opens_asset_browser_without_spending_analysis(self):
         import test_signal_flow as H
         from aiogram.types import CallbackQuery, Update
         fake_db = H._install_stub_modules()
@@ -855,29 +856,20 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
                  patch.object(mod, '_start_signal', AsyncMock()) as legacy:
                 await mod.dp.feed_update(bot, Update(update_id=2, callback_query=cb))
                 answer.assert_awaited_once()
-                self.assertTrue(self.render.await_args.args[3].startswith(flow.PROMPT))
-                self.assertIn('Used: 0', self.render.await_args.args[3])
-                self.assertIn('Left: 30', self.render.await_args.args[3])
-                self.assertEqual(await state.get_state(), flow.Chart.waiting_image.state)
-                self.assertTrue((await state.get_data())['chart_session'])
+                import market_signals as market
+                self.assertIn('Select market type', self.render.await_args.args[3])
+                self.assertEqual(await state.get_state(), market.Market.browsing.state)
+                self.assertTrue((await state.get_data())['market_session'])
                 old.cancel.assert_called_once()
                 other.cancel.assert_not_called()
                 self.assertNotIn(11, mod._signal_tasks)
                 legacy.assert_not_awaited()
                 api.analyse.assert_not_awaited()
                 trial.reserve.assert_not_awaited()
-                await flow.receive(message(), self.bot, state, self.render)
-                api.analyse.assert_awaited_once_with(IMAGE, 'en', '', before_retry=ANY)
-                api.reserve.assert_awaited_once_with(None, 11)
-                self.assertIn('AI Trading Signal Result', self.render.await_args.args[3])
-                self.assertEqual([b[1] for row in self.render.await_args.args[4] for b in row], ['cb:chart:upload', 'cb:flow:explain', 'cb:home:access'])
-                self.assertIn('Used: 1', self.render.await_args.args[3])
-                self.assertIn('Left: 29', self.render.await_args.args[3])
-                self.assertEqual(self.render.await_args.kwargs['reply_to_message_id'], 5)
-                # Returning from the chart shows those same persisted counters.
+                # Browsing preserves the same persisted dashboard allowance.
                 await mod._show_menu(bot, 11)
-                self.assertIn('Used: 1', self.render.await_args.args[3])
-                self.assertIn('Left: 29', self.render.await_args.args[3])
+                self.assertIn('Used: 0', self.render.await_args.args[3])
+                self.assertIn('Left: 30', self.render.await_args.args[3])
         finally:
             await bot.session.close()
 

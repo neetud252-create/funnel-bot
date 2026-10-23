@@ -955,9 +955,7 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             user = await db.get_user(tg_id) or {}
         await _journey(bot, tg_id, journey.notifications(user), key='notifications')
     elif action == 'example':
-        await _journey(bot, tg_id, (journey.TEXTS['screenshot'],
-            [[('📸 Upload Chart', 'cb:chart:upload', 'success')], *journey.back('screenshot')]),
-            media='chart_example', key='screenshot_example')
+        await _journey(bot, tg_id, journey.screen('screenshot', user), key='asset_guide')
     elif action in journey.TEXTS:
         await _journey(bot, tg_id, journey.screen(action, user), key='flow_' + action)
     else:
@@ -977,10 +975,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await bot.send_message(cb.from_user.id, home_menu.SHEET_UNAVAILABLE)
         return
     if action == 'test':
-        if market_data.enabled(cb.from_user.id):
-            await market_signals.open_screen(cb, bot, state, render)
-        else:
-            await chart_signals.open_screen(cb, bot, state, render)
+        await market_signals.open_screen(cb, bot, state, render)
         return
     if action == 'language':
         await cb.answer()
@@ -1264,6 +1259,11 @@ async def _open_registration(bot, tg_id, state):
     await _resume_setup(bot, tg_id)
 
 
+# Must precede the retired trading callbacks below. Existing messages migrate
+# into the catalogue and cannot invoke screenshot uploads or random signals.
+market_signals.install(dp, render)
+
+
 @dp.callback_query(F.data.startswith("go:"))
 async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
     await cb.answer()
@@ -1275,7 +1275,7 @@ async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await state.clear()
 
 async def _require_signal_verification(bot, tg_id, cb=None):
-    # Only the screenshot trial grants unverified signals (two lifetime slots).
+    # Only the shared analysis trial grants unverified signals (two lifetime slots).
     # Old/manual buttons must not unlock a separate, daily-resetting allowance.
     user = await db.get_user(tg_id)
     if user and user.get("verified"):
@@ -1293,14 +1293,11 @@ async def menu_signal(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if not await _require_signal_verification(bot, cb.from_user.id, cb):
         await state.clear()
         return
-    # Reuse Test Signals' upload/analysis flow, not the old pair/expiry generator.
+    # Reuse the asset catalogue and the shared candle-analysis allowance.
     old = _signal_tasks.pop(cb.from_user.id, None)
     if old:
         old.cancel()
-    if market_data.enabled(cb.from_user.id):
-        await market_signals.open_screen(cb, bot, state, render)
-    else:
-        await chart_signals.open_screen(cb, bot, state, render, upload=True)
+    await market_signals.open_screen(cb, bot, state, render)
 
 # Must stay above mode_action, same definition-order reason as menu_signal.
 @dp.callback_query(F.data == "mode:manual")
@@ -1830,9 +1827,8 @@ async def _verify_account_id(tg_id, account_id):
                  account_id[:16], "VALID" if ok else "INVALID")
     return ok
 
-# Commands retain priority; chart uploads/text cannot fall into UID verification.
-chart_signals.install(dp, render)
-market_signals.install(dp, render)
+# Screenshot handlers are retired. Market handlers are installed before the
+# legacy trading callbacks and UID capture, while commands keep priority.
 
 
 # MUST stay above the Reg.waiting_uid handler and uid_anytime below: aiogram
@@ -2138,7 +2134,7 @@ async def main():
         await conn.execute(analytics.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
         await conn.execute(chart_signals.trial.SCHEMA)
-    logging.info('Screenshot analysis ready; provider=%s; API configured=%s; model=%s; strategy=%s',
+    logging.info('Candle chart analysis ready; provider=%s; API configured=%s; model=%s; strategy=%s',
                  chart_signals.api.provider(), chart_signals.api.configured(), chart_signals.api.model(),
                  chart_signals.chart_strategy.VERSION)
     logging.info('Premium deposit verification ready; minimum=$%s; daily AI signals=%s',

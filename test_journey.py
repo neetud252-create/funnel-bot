@@ -347,8 +347,9 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
                     if button.callback_data:
                         self.assertLessEqual(len(button.callback_data.encode()), 64)
         card = await self.tap('example')
-        self.assertEqual(card['kind'], 'photo')
-        self.assertTrue(Path(card['asset']).is_file())
+        self.assertEqual(card['kind'], 'text')
+        self.assertIn('Asset guide', card['body'])
+        self.assertEqual(card['markup'].inline_keyboard[0][0].callback_data, 'market:open')
 
     async def test_notifications_and_verified_navigation_preserve_access(self):
         self.row.update(verified=True, uid='123456789', signals_used_today=7,

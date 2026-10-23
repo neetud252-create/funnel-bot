@@ -452,16 +452,25 @@ class FakeState:
     def __init__(self, state=None):
         self.state = state
         self.cleared = 0
+        self.data = {}
 
     async def clear(self):
         self.state = None
         self.cleared += 1
+        self.data = {}
 
     async def set_state(self, state):
         self.state = state
 
     async def get_state(self):
         return self.state
+
+    async def update_data(self, **values):
+        self.data.update(values)
+        return self.data.copy()
+
+    async def get_data(self):
+        return self.data.copy()
 
 
 # --- harness ----------------------------------------------------------------
@@ -1182,10 +1191,14 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         real_send = fb.send_message
         async def send(chat_id, text, **kwargs):
             check("chart callback acknowledged before sending", bool(cb.answers))
-            if fail_on_send and text.startswith(bot_mod.chart_signals.PROMPT):
+            if fail_on_send and 'Select market type' in text:
                 raise _Boom("Bad Request: ENTITY_TEXT_INVALID")
             return await real_send(chat_id, text, **kwargs)
         fb.send_message = send
+        if fail_on_send:
+            async def fail_photo(*args, **kwargs):
+                raise _Boom("photo rejected")
+            fb.send_photo = fail_photo
         from unittest.mock import AsyncMock, patch
         from aiogram.fsm.context import FSMContext
         from aiogram.fsm.storage.base import StorageKey
@@ -1211,8 +1224,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           < _src.index('F.data.startswith("menu:")'))
     # Callback acknowledgement now belongs to the shared upload handler.
     _body = _src.split("async def menu_signal", 1)[1].split("\n@dp.", 1)[0]
-    check("menu_signal delegates to the existing chart-upload handler",
-          'await chart_signals.open_screen(cb, bot, state, render, upload=True)' in _body
+    check("menu_signal delegates to the asset catalogue",
+          'await market_signals.open_screen(cb, bot, state, render)' in _body
           and 'await show(bot, cb.from_user.id, "mode")' not in _body, repr(_body))
 
     # 1. The happy path still works and still swaps the screen.
@@ -1226,8 +1239,8 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
           cb.answers[0] == (None, False), str(cb.answers))
     check("the handler does not raise on the happy path", raised is None,
           repr(raised))
-    check("Get a signal asks for a chart screenshot",
-          sends and sends[-1]["body"].startswith(bot_mod.chart_signals.PROMPT),
+    check("Get a signal opens market selection",
+          sends and 'Select market type' in sends[-1]['body'],
           str([c["kind"] for c in fb.calls]))
     check("the old menu is deleted as part of the transition",
           4500 in deletes, str(deletes))

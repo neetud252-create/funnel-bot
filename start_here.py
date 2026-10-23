@@ -9,7 +9,7 @@ TEXT = (
     "📌 <b>POCKET IQ — START HERE</b>\n\n"
     "Your AI-powered chart analysis assistant.\n\n"
     "🎯 <b>Explore first</b>\n"
-    "Try two free analyses by uploading a clear chart screenshot.\n\n"
+    "Choose a market, asset, and timeframe. Try two free analyses on assets with connected live data.\n\n"
     "📖 <b>Understand the results</b>\n"
     "Open the guide to learn how the bot works.\n\n"
     "🔓 <b>Continue when you’re ready</b>\n"
@@ -22,7 +22,7 @@ TEXT = (
 def keyboard(user=None):
     verified = bool((user or {}).get('verified'))
     return [
-        [('📸 Analyse My Chart' if verified else '🎯 Try Free Analysis', 'cb:home:test', 'success')],
+        [('📊 Get Signals' if verified else '🎯 Try Free Analysis', 'cb:home:test', 'success')],
         [('🏠 My Dashboard' if verified else '🚀 Account Setup', 'cb:home:access', 'primary')],
         [('📖 How It Works', 'cb:flow:how', 'primary'), ('📢 Community', 'cb:flow:community', 'primary')],
         [('⭐ Reviews', 'cb:flow:reviews', 'danger'), ('💬 Support', 'cb:flow:support', 'danger')],

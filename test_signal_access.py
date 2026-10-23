@@ -64,16 +64,16 @@ class SignalAccessTests(unittest.IsolatedAsyncioTestCase):
         await self.blocked_callbacks()
         self.assertFalse(self.row['verified'])
 
-    async def test_verified_menu_opens_chart_upload_and_old_callbacks_stay_protected(self):
+    async def test_verified_menu_opens_asset_browser_and_retired_functions_stay_protected(self):
         self.row['verified'] = True
         show = self.mock(self.mod, 'show')
-        chart = self.mock(self.mod.chart_signals, 'open_screen')
+        chart = self.mock(self.mod.market_signals, 'open_screen')
         pairs = self.mock(self.mod, 'show_pairs')
         run = self.mock(self.mod, '_run_signal')
         cb = H.FakeCB(self.tg_id, 'menu:signal', 700)
         state = H.FakeState()
         await self.mod.menu_signal(cb, self.bot, state)
-        chart.assert_awaited_once_with(cb, self.bot, state, self.mod.render, upload=True)
+        chart.assert_awaited_once_with(cb, self.bot, state, self.mod.render)
         show.assert_not_awaited()
         run.assert_not_awaited()
         await self.mod.new_signal(H.FakeCB(self.tg_id, 'new_signal', 700), self.bot)
