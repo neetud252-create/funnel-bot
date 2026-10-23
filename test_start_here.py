@@ -36,34 +36,30 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         await handler(cb, self.bot, self.state)
         return H.last_screen(self.bot)
 
-    async def test_reference_layout_and_all_destinations(self):
+    async def test_enhanced_layout_and_all_destinations(self):
         row = await self.start()
         anchor = row['welcome_message_id']
         edit = self.bot.edits[-1]
         self.assertEqual(edit['caption'], start_here.TEXT)
         self.assertLess(len(start_here.TEXT), 1024)
         self.assertEqual(self.labels(), [
-            ['💎 Get Bot Access'], ['📖 Guide', '🎯 Test Signals'],
-            ['⭐ Review', '💬 Support'], ['▶️ YouTube', '📢 Channel'],
-            ['📊 Money Management Sheet'], ['🌐 Change Language']])
+            ['🎯 Try Free Analysis'], ['🚀 Account Setup'],
+            ['📖 How It Works', '📢 Community'], ['⭐ Reviews', '💬 Support']])
         self.assertEqual(self.bot.pins, [(self.uid, anchor, True)])
         self.assertEqual(self.bot.calls[-1]['asset'], 'assets/home_banner_loop.mp4')
         callbacks = [b.callback_data for r in edit['reply_markup'].inline_keyboard for b in r]
-        self.assertEqual(callbacks, ['home:access', 'flow:how', 'home:test',
-                                     None, None, None, None, 'home:sheet', 'home:language'])
+        self.assertEqual(callbacks, ['home:test', 'home:access', 'flow:how',
+                                     'flow:community', 'flow:reviews', 'flow:support'])
         self.assertEqual([b.style for r in edit['reply_markup'].inline_keyboard for b in r],
-                         ['success', 'primary', 'primary', 'danger', 'danger',
-                          'primary', 'primary', 'primary', 'danger'])
-        links = [b.url for r in edit['reply_markup'].inline_keyboard[2:4] for b in r]
-        self.assertEqual(links, [self.mod.config.REVIEWS_URL, self.mod.journey.support_url(),
-                                self.mod.config.YOUTUBE_URL, self.mod.config.COMMUNITY_URL])
+                         ['success', 'primary', 'primary', 'primary', 'danger', 'danger'])
         # Exercise the actual handlers, including the trial gate and configured links.
         trial = await self.tap('home:test', anchor)
         self.assertIn('free', trial['body'].lower())
         setup = await self.tap('home:access', anchor)
         self.assertIn('qualifying deposits', setup['body'])
         self.assertFalse(row['verified'])
-        for callback in ('flow:how', 'home:language'):
+        for callback in ('flow:how', 'flow:community', 'flow:reviews', 'flow:support',
+                         'flow:tools', 'home:language'):
             screen = await self.tap(callback, anchor)
             self.assertTrue(screen['body'] and screen['markup'], callback)
         await self.db.set_setting(self.mod.GIFT_FILE_ID_KEY, 'welcome-workbook-id')
@@ -81,7 +77,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
                 self.mod.config.VERIFY_GRANTED, Decimal('50')))):
             await self.tap('flow:recheck', anchor)
         self.assertTrue(row['verified'])
-        self.assertEqual(self.labels()[:2], [['🏠 My Dashboard'], ['📖 Guide', '📸 Analyse My Chart']])
+        self.assertEqual(self.labels()[:2], [['📸 Analyse My Chart'], ['🏠 My Dashboard']])
         self.assertEqual(self.bot.edits[-1]['message_id'], anchor)
         self.assertEqual(len(self.bot.pins), 1)
         chart = await self.tap('home:test', anchor)
@@ -94,7 +90,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bot.pins), 1)
         await self.db.unverify(self.uid)
         await self.start()
-        self.assertEqual(self.labels()[:2], [['💎 Get Bot Access'], ['📖 Guide', '🎯 Test Signals']])
+        self.assertEqual(self.labels()[:2], [['🎯 Try Free Analysis'], ['🚀 Account Setup']])
 
     async def test_startup_upgrades_old_pins_in_place_with_pagination(self):
         for uid in (12, 13, 14):
@@ -110,7 +106,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([e['message_id'] for e in self.bot.edits], [212, 213, 214])
         self.assertTrue(all(e['kind'] == 'media' and isinstance(e['media'], InputMediaVideo)
                             and e['media'].supports_streaming for e in self.bot.edits))
-        self.assertEqual(self.bot.edits[1]['reply_markup'].inline_keyboard[0][0].text, '🏠 My Dashboard')
+        self.assertEqual(self.bot.edits[1]['reply_markup'].inline_keyboard[1][0].text, '🏠 My Dashboard')
         self.assertEqual(self.bot.calls, [])
         self.assertEqual(self.bot.pins, [])
         await self.mod._refresh_saved_welcomes(self.bot)
@@ -143,7 +139,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(screen['markup'])
         self.assertEqual(row['welcome_content_hash'], previous_hash)
         await self.tap('home:access', anchor)
-        self.assertEqual(self.labels()[:2], [['🏠 My Dashboard'], ['📖 Guide', '📸 Analyse My Chart']])
+        self.assertEqual(self.labels()[:2], [['📸 Analyse My Chart'], ['🏠 My Dashboard']])
         self.assertEqual(len(self.bot.pins), 1)
         # Deleted successful pins must not be re-created or forced back.
         row['welcome_content_hash'] = None

@@ -14,19 +14,21 @@ async def main():
     import config
 
     rows = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard
-    assert [len(row) for row in rows] == [1, 2, 2, 2, 1, 1]
+    assert [len(row) for row in rows] == [1, 1, 2, 2, 1, 1]
     assert [b.callback_data for row in rows for b in row] == [
-        'home:access', 'flow:how', 'home:test', None, None, None, None,
-        'home:sheet', 'home:language']
+        'home:test', 'home:access', 'flow:how', 'flow:community',
+        'flow:reviews', 'flow:support', 'flow:tools', 'home:language']
     assert [b.style for row in rows for b in row] == [
-        'success', 'primary', 'primary', 'danger', 'danger', 'primary', 'primary', 'primary', 'danger']
-    import journey
-    assert [b.url for row in rows[2:4] for b in row] == [
-        config.REVIEWS_URL, journey.support_url(), config.YOUTUBE_URL, config.COMMUNITY_URL]
-    # An unavailable social link keeps a usable help route in the same slot.
-    with patch.object(config, 'YOUTUBE_URL', ''):
-        fallback = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard[3][0]
-        assert fallback.callback_data == 'flow:link_unavailable' and fallback.style == 'primary'
+        'success', 'primary', 'primary', 'primary', 'danger', 'danger', 'primary', 'danger']
+    assert [[b.text for b in row] for row in rows] == [
+        ['🎯 Try 2 Free Analyses'], ['🚀 Set Up My Account'],
+        ['📖 How It Works', '📢 Community'], ['⭐ Reviews', '💬 Support'],
+        ['🧰 Tools & FAQ'], ['🌐 Language']]
+    for progress in ({'uid': '123456789'}, {'setup_stage': 'requirements'}):
+        assert home_menu.keyboard(progress)[1][0][0] == '🚀 Continue Setup'
+    assert home_menu.keyboard({'verified': True})[:2] == [
+        [('📸 Analyse My Chart', 'cb:home:test', 'success')],
+        [('🏠 Open My Dashboard', 'cb:home:access', 'primary')]]
     for verified in (False, True):
         uid = 72000 + int(verified)
         fake_db._users[uid] = dict(fake_db._fresh_row(), verified=verified,
