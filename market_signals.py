@@ -23,7 +23,7 @@ import market_catalog as catalog
 
 PAGE_SIZE = 6
 EXPIRIES = tuple(range(1, 11))
-LOCKED_SECONDS = (5, 10, 15, 20, 25, 30, 45, 50, 55)
+SECOND_EXPIRIES = (5, 10, 15, 20, 25, 30, 45, 50, 55)
 BACK = [[('⬅️ Home', 'cb:home:back', 'danger')]]
 RETRY = [[('📊 Choose Asset', 'cb:market:open', 'primary')],
          *BACK]
@@ -51,13 +51,12 @@ EXPIRATION_TITLE = '⏱ <b>Choose the expiration time</b>\n{asset}'
 SEARCH = '\n\nSearch: <b>{query}</b>'
 NO_MATCHES = '\nNo matching assets. Try another name.'
 RESULT = ('📊 <b>{asset}</b>\n\n<b>{direction}</b>\n'
-          '<b>Expiration:</b> M{expiry} · {minutes} min\n<i>{qualification}</i>\n\n'
+          '<b>Expiration:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n'
           '<b>Trend:</b> {trend}\n<b>Momentum:</b> {momentum}\n\n'
           '<b>Last close:</b> {close}\n<b>Candle closed:</b> {closed}\n'
           '<b>Chart candles:</b> M{period}\n'
           '<i>{source} · AI analysis of completed candles. Predictions can be wrong.</i>')
-ALERTS = ('Open the bot in a private chat.', 'Choose an expiration from M1 to M10.',
-          'Second-based expirations are not available. Choose M1–M10.',
+ALERTS = ('Open the bot in a private chat.', 'Choose an expiration using the buttons below.',
           'Type an asset name, or use the buttons below.',
           'Choose a market and category using the buttons below.')
 SOURCES = (*MESSAGES.values(), MARKET_TITLE, CATEGORY_TITLE, PICKER_TITLE,
@@ -203,11 +202,23 @@ async def select_asset(bot, tg_id, state, render, key):
 
 
 def expiration_rows(key):
-    seconds = lambda n: (f'🔒 S{n}', f'cb:market:locked:{n}', 'primary')
+    seconds = lambda n: (f'S{n}', expiry_callback(key, n, 's'), 'primary')
     minute = lambda n: ((('🔥 ' if n == 1 else '✅ ' if n == 10 else '') + f'M{n}'),
                         f'cb:market:expire:{key}:{n}', 'primary')
     return [[seconds(n) for n in group] for group in ((5,), (10, 15), (20, 25, 30), (45, 50, 55))] + [
         [minute(n) for n in group] for group in ((1,), (2, 3), (4, 5, 6), (7, 8, 9), (10,))]
+
+
+def valid_expiry(expiry, unit):
+    return type(expiry) is int and (
+        (unit == 's' and expiry in SECOND_EXPIRIES) or
+        (unit == 'm' and expiry in EXPIRIES))
+
+
+def expiry_callback(key, expiry, unit):
+    # Keep existing minute callbacks working; seconds carry their own unit.
+    action = 'expire_s' if unit == 's' else 'expire'
+    return f'cb:market:{action}:{key}:{expiry}'
 
 
 async def open_screen(cb, bot, state, render):
@@ -227,12 +238,12 @@ async def open_picker(bot, tg_id, state, render):
                   [('« Back', 'cb:home:back', 'danger')]], screen_key='market_type')
 
 
-def result_text(snapshot, result, expiry=1, language='en'):
+def result_text(snapshot, result, expiry=1, language='en', *, expiry_unit='m'):
     # The strategy's validated direction is retained even for a tentative bias.
     # Invalid/unreadable input still fails; never manufacture a direction.
     confirmed = chart_strategy.confirmed_setup(result)
     direction = result.get('direction')
-    if not chart_strategy.supports_signal(result) or expiry not in EXPIRIES:
+    if not chart_strategy.supports_signal(result) or not valid_expiry(expiry, expiry_unit):
         raise api.AnalysisError('response')
     status = '🟢 BUY' if direction == 'BUY' else '🔴 SELL'
     tr = lambda text: localization.translate_parts(text, language)
@@ -240,13 +251,14 @@ def result_text(snapshot, result, expiry=1, language='en'):
     safe = lambda value: html.escape(str(value)[:180])
     closed = datetime.fromtimestamp(snapshot.closed_at, timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     return tr(RESULT).format(asset=html.escape(snapshot.asset.name), direction=status,
-        expiry=expiry, minutes=expiry, qualification=qualification,
+        expiry=f'{expiry_unit.upper()}{expiry}',
+        duration=chart_signals.timer_text(f'{expiry_unit}{expiry}', language), qualification=qualification,
         trend=safe(result.get('trend', '')), momentum=safe(result.get('momentum', '')),
         close=f'{snapshot.candles[-1].close:.8g}', closed=closed,
         period=snapshot.period//60, source=html.escape(snapshot.source))
 
 
-async def analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
+async def analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, expiry_unit='m'):
     tg_id = cb.from_user.id
     # One in-flight analysis per user, including callbacks on older messages.
     if tg_id in chart_signals._inflight or len(chart_signals._inflight) >= api.MAX_CONCURRENT:
@@ -257,16 +269,16 @@ async def analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
     # session while reserving two allowances.
     chart_signals._inflight.add(tg_id)
     try:
-        await _analyse(cb, bot, state, render, asset_key, period=period, expiry=expiry)
+        await _analyse(cb, bot, state, render, asset_key, period=period, expiry=expiry, expiry_unit=expiry_unit)
     finally:
         chart_signals._inflight.discard(tg_id)
 
 
-async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
+async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, expiry_unit='m'):
     import db
     tg_id = cb.from_user.id
-    if type(expiry) is not int or expiry not in EXPIRIES:
-        await cb.answer('Choose an expiration from M1 to M10.', show_alert=True)
+    if not valid_expiry(expiry, expiry_unit):
+        await cb.answer('Choose an expiration using the buttons below.', show_alert=True)
         return
     await cb.answer()
     if not await allowed(tg_id, bot, render):
@@ -276,7 +288,8 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
     period = period if period in data.PERIODS else 60
     session = secrets.token_hex(12)
     await state.set_state(Market.browsing.state)
-    await state.update_data(market_session=session, market_period=period, market_expiry=expiry)
+    await state.update_data(market_session=session, market_period=period,
+                            market_expiry=expiry, market_expiry_unit=expiry_unit)
     token = progress = None
     consumed = delivery_attempted = False
 
@@ -329,7 +342,7 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
             raise api.AnalysisError(blocked)
         try:
             context = (f'Asset: {snapshot.asset.symbol}. Candle timeframe: {period} seconds. '
-                       f'User-selected expiration: {expiry} minutes. This is a requested horizon, '
+                       f'User-selected expiration: {expiry} {"seconds" if expiry_unit == "s" else "minutes"}. This is a requested horizon, '
                        f'not proof that an entry is confirmed or an optimal expiry. '
                        f'All candles shown are completed OHLC bars, sourced from {snapshot.source}. '
                        f'Latest close: {snapshot.candles[-1].close:.8g}; UTC close time: {snapshot.closed_at}.')
@@ -339,13 +352,13 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
         if not await active():
             return
         snapshot.require_fresh()
-        caption = result_text(snapshot, result, expiry, language)
+        caption = result_text(snapshot, result, expiry, language, expiry_unit=expiry_unit)
         if not await trial.consume(db.pool, token):
             raise api.AnalysisError('limit')
         consumed = True
         if not await active():
             return
-        rows = [[('🔄 New Analysis', f'cb:market:expire:{entry.key}:{expiry}', 'success')],
+        rows = [[('🔄 New Analysis', expiry_callback(entry.key, expiry, expiry_unit), 'success')],
                 [('⏱ Change Expiration', f'cb:market:a:{entry.key}', 'primary')],
                 [('📊 Change Asset', 'cb:market:open', 'primary')],
                 *BACK]
@@ -383,14 +396,21 @@ def install(dp, render):
             await cb.answer('Open the bot in a private chat.', show_alert=True)
             return
         action = cb.data.split(':')
-        if len(action) == 4 and action[1] == 'expire':
-            if action[3] not in tuple(map(str, EXPIRIES)):
-                await cb.answer('Choose an expiration from M1 to M10.', show_alert=True)
+        if len(action) == 4 and action[1] in ('expire', 'expire_s'):
+            unit = 's' if action[1] == 'expire_s' else 'm'
+            choices = SECOND_EXPIRIES if unit == 's' else EXPIRIES
+            if action[3] not in tuple(map(str, choices)):
+                await cb.answer('Choose an expiration using the buttons below.', show_alert=True)
                 return
-            return await analyse(cb, bot, state, render, action[2], expiry=int(action[3]))
+            return await analyse(cb, bot, state, render, action[2], expiry=int(action[3]), expiry_unit=unit)
         if len(action) == 3 and action[1] == 'locked':
-            await cb.answer('Second-based expirations are not available. Choose M1–M10.', show_alert=True)
-            return
+            # Historic locked buttons contain no asset key. Reopen the current
+            # asset's unlocked picker instead of guessing which asset they meant.
+            await cb.answer()
+            saved = await state.get_data()
+            if saved.get('market_asset'):
+                return await select_asset(bot, cb.from_user.id, state, render, saved['market_asset'])
+            return await open_picker(bot, cb.from_user.id, state, render)
         if len(action) == 4 and action[1] == 'run' and action[3] in ('60', '300'):
             # Period travels with the callback, so an old button cannot silently
             # analyse a newly selected timeframe. analyse claims concurrency

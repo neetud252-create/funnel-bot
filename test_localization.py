@@ -30,7 +30,7 @@ def sample(source):
                   trend='upward', momentum='buyers active', timer='1 minute', count=2,
                   invalidation='visible support breaks', condition='visible support breaks',
                   market='OTC', title='Select a currency pair', query='Home Depot &lt;test&gt;',
-                  qualification='Confirmed setup', minutes=1, close='1.2345', closed='2026-10-24 01:00 UTC',
+                  qualification='Confirmed setup', duration='1 minute', close='1.2345', closed='2026-10-24 01:00 UTC',
                   period=1, source='Pocket Option demo',
                   status=config.MSG_PREMIUM_ACTIVE.format(limit=50),
                   ref='https://example.com/Start?click_id=abc_BUY&src=Guide')

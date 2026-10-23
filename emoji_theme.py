@@ -44,6 +44,7 @@ ICONS = {
     'settings': '5341715473882955310',
     'analysis': '6012529369119987828',
     'market': '5206598117738177151',
+    'commodities': '5436341901290658109',
     'momentum': '5269254848703902904',
     'image': '5257974976094412956',
     'pending': '5445164438426507058',
@@ -95,7 +96,7 @@ GLYPHS = {
     '🖼️': 'image', '🖼': 'image', '▫️': 'pending', '▫': 'pending',
     '💱': 'currency', '⏱️': 'timer', '⏱': 'timer',
     '🔙': 'navigation_back', '◀️': 'navigation_back', '◀': 'navigation_back',
-    '🔔': 'notifications', '🔕': 'muted', '🔀': 'shuffle', '🔥': 'fire',
+    '🔔': 'notifications', '🔕': 'muted', '🔀': 'shuffle', '🔥': 'fire', '🛢': 'commodities',
     '🟢': 'green', '🔴': 'red', '⬆️': 'up', '⬆': 'up', '⬇️': 'down', '⬇': 'down',
     '‼️': 'attention', '‼': 'attention', '🎁': 'gift', '💰': 'money', '🧪': 'test',
     '🇬🇧': 'flag_gb', '🇷🇺': 'flag_ru', '🇺🇦': 'flag_ua', '🇮🇳': 'flag_in',
@@ -150,6 +151,11 @@ def button(button):
     # An explicit glyph chooses its supplied artwork. In particular, the new
     # speech-bubble Support icon must not fall back to the old phone artwork.
     name = GLYPHS[leading.group()] if leading else LABELS.get(label)
+    # Category artwork is tied to the action, so it survives every language
+    # without changing the flame used by M1 or other buttons.
+    action = (button.callback_data or '').split(':')
+    if len(action) == 4 and action[:2] == ['market', 'cat']:
+        name = {'indices': 'market', 'commodities': 'commodities'}.get(action[3], name)
     if name == 'play' and 'youtube' in label.casefold():
         name = 'youtube'
     # Gallery arrows need readable labels when their glyph becomes a native icon.
