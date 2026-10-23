@@ -20,24 +20,63 @@ The catalogue remains browsable without a feed key, during outages, and after
 an analysis allowance is exhausted. An empty FIN commodity category is explicit;
 we do not invent assets absent from the published catalogue.
 
-`market_catalog.py` joins names to the authorized OTCharts `/v1/symbols?venue=otc`
-response. Only that response supplies executable symbol identifiers. New listings
-not in the seed remain browsable under Other assets. The feed's five-minute
-catalogue cache detects plan changes without a deployment. Updating the static
-broker catalogue requires updating the JSON snapshot and reviewing its source.
+`market_catalog.py` joins the seed to the selected feed's live catalogue, with
+separate OTC and FIN identities. Only the feed supplies executable symbol IDs.
+Additional direct-feed listings appear in their broker-supplied categories.
+Closed assets remain browsable and are checked again before fetching candles.
 
 Every catalogue asset opens the expiration banner and reference button grid:
 locked S5; S10/S15; S20/S25/S30; S45/S50/S55; M1; M2/M3; M4/M5/M6;
 M7/M8/M9; M10, followed by a red Back button. M1–M10 select an expiry in minutes.
 Missing, closed, or unavailable assets also give a short explanation; choosing an
-expiry never bypasses the live-data, access, or allowance gates. FIN
-needs its own matching feed; upgrading an OTC plan does not create FIN coverage.
+expiry never bypasses the live-data, access, or allowance gates. FIN uses the
+direct broker feed's FIN symbols; market schedules still apply.
 No external spot-FX price is substituted for a broker OTC series.
 
-`OTCHARTS_API_KEY` remains a Railway secret. `MARKET_DATA_PUBLIC_ENABLED=false`
-keeps live analysis in the existing admin preview until feed-sharing eligibility
-is resolved. This flag does not hide the public catalogue. No paid subscription
-is created or changed by this update.
+## Direct feed (no data subscription)
+
+Set `MARKET_DATA_PROVIDER=pocketoption` and `MARKET_DATA_PUBLIC_ENABLED=true`.
+The independent `pocket_feed.py` adapter connects to Pocket Option's public
+guest-demo WebSocket with a short-lived guest token. It does not read account
+credentials or `OTCHARTS_API_KEY`, install a broker automation library, expose
+order methods, or fall back to a paid service. A single shared connection and
+15-second demand cache combine concurrent requests. There is no all-asset
+background poll. TLS hostname/certificate checks remain enabled.
+
+The production adapter sends only guest `auth`, `changeSymbol`, and protocol
+handshake/pong messages. Engine.IO/Socket.IO public wire references:
+[guest session](https://github.com/ChipaDevTeam/BinaryOptionsTools-v2/blob/master/docs/api/python.md),
+[event shapes](https://github.com/chema-creator/PocketOptionApi/blob/main/pocketoptionapi/ws/client.py).
+The implementation is independent; neither third-party trading package is a
+dependency. This is an unofficial endpoint, so ongoing availability and
+broker-side protocol stability are not guaranteed. Hosting and AI costs remain.
+
+Live checks on 2026-10-24 returned 183 symbols and matched all 172 seed entries.
+Open/closed counts change with the broker schedule. The full open-asset audit
+validated 115 of 118 symbols in one pass; three FIN crypto histories had gaps
+and correctly failed. A catalogue listing is not a promise of valid candles.
+M1 and M5 checks across all five categories, and fresh guest reconnections,
+passed. Run `python scripts/check_pocket_feed.py --all --chart` for an updated
+coverage report in ignored `test-results/`; this sends no Telegram messages,
+makes no AI calls and places no trades.
+
+The broker clock currently uses UTC+2. The adapter checks that a recent tick
+matches that offset, rather than guessing an offset from potentially stale
+history. The server OHLC list trails live ticks. Complete, contiguous tick
+intervals supply recent bars; the truncated first interval and current forming
+bar are excluded. Overlapping finalized OHLC must agree. The latest server M5
+bar can be partial: completed M1 bars supply its exact five-minute tail. Missing
+intervals are never forward-filled. Gaps, stale data and conflicting bars fail.
+
+Connection failures use a short backoff. Timed-out/cancelled requests close their
+socket so late responses cannot satisfy a later request. A deployment performs
+one bounded read-only feed check and logs only counts, a symbol and candle age.
+
+`MARKET_DATA_PUBLIC_ENABLED=false` retains the optional admin preview gate.
+The former OTCharts adapter remains available only with an explicit
+`MARKET_DATA_PROVIDER=otcharts` configuration (also the compatibility default
+when the variable is absent) and a valid key. It is not a fallback. No paid
+subscription is created, cancelled or changed by this update.
 
 ## Analysis and migration
 
@@ -76,3 +115,5 @@ Tests: `test_market_signals.py` covers the complete pagination, unavailable data
 plan refresh, forged/stale callbacks, dispatch priority, navigation cancellation,
 duplicate taps, shared usage, and chart delivery. `test_market_data.py` validates
 the provider contract and candle integrity without live or paid requests.
+`test_pocket_feed.py` covers the guest transport, clock validation, tick/history
+merging, FIN identity, shared cache, authentication, reconnects, and cancellation.

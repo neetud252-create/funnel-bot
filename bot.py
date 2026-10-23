@@ -2141,8 +2141,8 @@ async def main():
                  config.PREMIUM_MIN_DEPOSIT, config.daily_limit(True))
     logging.info('Verified chart quota ready; Start=%s/day; Premium=%s/day; reset=00:00 UTC',
                  config.daily_limit(False), config.daily_limit(True))
-    logging.info('Asset analysis ready; OTCharts configured=%s; public enabled=%s',
-                 market_data.configured(), market_data.public_enabled())
+    logging.info('Asset analysis ready; provider=%s; configured=%s; public enabled=%s',
+                 market_data.provider(), market_data.configured(), market_data.public_enabled())
     # Validate dashboard queries against the live schema before accepting commands.
     await activity_stats.report()
     for report_name in analytics_reports.QUERIES:
@@ -2180,7 +2180,7 @@ async def main():
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
     tasks = [server.serve(), dp.start_polling(bot), broadcast.worker(bot),
-             verification_reminders.worker(bot), _refresh_saved_welcomes(bot)]
+             verification_reminders.worker(bot), _refresh_saved_welcomes(bot), market_data.startup_check()]
     if config.ENABLE_AUTO_RETRY:
         logging.info("ENABLE_AUTO_RETRY on - background re-check every 30 min")
         tasks.append(retry_worker(bot))

@@ -295,6 +295,20 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f'cb:market:expire:{entry.key}:5', str(self.render.await_args.args[4]))
         flow.trial.reserve.assert_not_awaited()
 
+    async def test_fin_uses_matching_live_feed_and_preserves_source(self):
+        from dataclasses import replace
+        asset = data.Asset('EURUSD', 'EUR/USD', True, 80, 'forex')
+        self.feed.assets.return_value = (asset, ASSET)
+        self.feed.candles.return_value = replace(self.snapshot, asset=asset, source='Pocket Option demo feed')
+        entry = next(e for e in catalog.entries((asset, ASSET)) if e.name == 'EUR/USD')
+        await flow.select_asset(self.bot, 11, self.state, self.render, entry.key)
+        self.assertNotIn('not connected', self.render.await_args.args[3])
+        await flow.analyse(self.cb, self.bot, self.state, self.render, entry.key)
+        self.feed.candles.assert_awaited_once_with(asset.key, 60)
+        self.assertIn('Pocket Option demo feed', self.render.await_args.args[3])
+        self.assertNotIn('OTCharts', self.render.await_args.args[3])
+        flow.trial.consume.assert_awaited_once()
+
     async def test_market_navigation_cancels_pending_catalogue_response(self):
         async def navigating():
             await flow.open_picker(self.bot, 11, self.state, self.render)

@@ -32,7 +32,7 @@ ACCESS = [[('🚀 View Access Requirements', 'cb:home:access', 'success')],
           [('💬 Support', 'cb:flow:support')], *BACK]
 MESSAGES = {
     'configuration': 'Live asset analysis is being connected. You can browse all markets and assets now.',
-    'plan': 'Live candles for this asset are not available on the connected data plan yet. Please choose another asset.',
+    'plan': 'Live candles for this asset are not available from the connected feed. Please choose another asset.',
     'quota': 'The market-data allowance is currently exhausted. Please try again later.',
     'asset': 'This asset is no longer available. Please choose another asset.',
     'empty': 'No assets are available from the connected feed right now.',
@@ -168,9 +168,7 @@ async def select_asset(bot, tg_id, state, render, key):
     await state.update_data(market_book=entry.market, market_category=entry.category, market_asset=entry.key)
     back = [[('« Back', f'cb:market:list:{entry.market}:{entry.category}:{page}', 'danger')]]
     text = f'⏱ <b>Choose the expiration time</b>\n{html.escape(entry.name)}'
-    if entry.market == 'fin':
-        text += '\n\nLive FIN market data is not connected yet.'
-    elif not data.enabled(tg_id):
+    if not data.enabled(tg_id):
         text += '\n\n' + MESSAGES['configuration']
     elif not entry.live:
         text += '\n\n' + MESSAGES['plan']
@@ -225,7 +223,7 @@ def result_text(snapshot, result, expiry=1):
             f'<b>Last close:</b> {snapshot.candles[-1].close:.8g}\n'
             f'<b>Candle closed:</b> {closed}\n'
             f'<b>Chart candles:</b> M{snapshot.period//60}\n'
-            '<i>OTCharts data · AI analysis of completed candles. Predictions can be wrong.</i>')
+            f'<i>{html.escape(snapshot.source)} · AI analysis of completed candles. Predictions can be wrong.</i>')
 
 
 async def analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
@@ -280,7 +278,7 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
         entry = catalog.find(catalog.entries(await data.feed().assets()), asset_key)
         if not await active():
             return
-        if not entry or entry.market != 'otc' or not entry.live:
+        if not entry or not entry.live:
             raise data.FeedError('plan')
         if entry.live.open is False:
             raise data.FeedError('closed')
@@ -313,7 +311,7 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
             context = (f'Asset: {snapshot.asset.symbol}. Candle timeframe: {period} seconds. '
                        f'User-selected expiration: {expiry} minutes. This is a requested horizon, '
                        f'not proof that an entry is confirmed or an optimal expiry. '
-                       f'All candles shown are completed OHLC bars, sourced from OTCharts. '
+                       f'All candles shown are completed OHLC bars, sourced from {snapshot.source}. '
                        f'Latest close: {snapshot.candles[-1].close:.8g}; UTC close time: {snapshot.closed_at}.')
             result = await api.analyse(png, language, context, before_retry=retry)
         finally:
