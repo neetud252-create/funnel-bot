@@ -110,6 +110,8 @@ def asset_path(key, ext):
         ext = home_menu.PHOTO_EXT
     elif key == config.UID_GUIDE_PHOTO and ext == 'jpg':
         ext = 'png'
+    elif key == journey.REGISTER_PHOTO and ext == 'jpg':
+        ext = 'png'
     return "assets/" + key + "." + ext
 
 def content_hash(path):
@@ -304,7 +306,7 @@ def referenced_assets():
     uploaded, and adding a screen needs no change here.
     """
     ref = {(home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
-           (config.UID_GUIDE_PHOTO, 'jpg')}
+           (config.UID_GUIDE_PHOTO, 'jpg'), (journey.REGISTER_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -779,6 +781,14 @@ async def _open_uid_entry(bot, tg_id, state=None):
     await _journey(bot, tg_id, journey.uid(), key='account_id_prompt')
 
 
+async def _show_existing_registration(bot, tg_id, user):
+    ref = await _ref_url(tg_id) if user.get('eligibility_confirmed_at') else None
+    if ref:
+        await activity_stats.record(tg_id, 'registration_opened')
+    await _journey(bot, tg_id, journey.existing(ref),
+                   media=journey.REGISTER_PHOTO, key='existing_account_registration')
+
+
 async def _resume_setup(bot, tg_id, state=None):
     user = await db.get_user(tg_id) or {}
     stage = user.get('setup_stage')
@@ -790,8 +800,13 @@ async def _resume_setup(bot, tg_id, state=None):
         await _journey(bot, tg_id, journey.account_help(), key='account_question_help')
     elif stage == 'requirements' and user.get('account_kind') == 'new' and not user.get('uid'):
         await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
-    elif stage == 'existing_account' and not user.get('uid'):
-        await _journey(bot, tg_id, journey.existing(), key='existing_account')
+    elif stage == 'existing_account':
+        await _show_existing_registration(bot, tg_id, user)
+    elif stage == 'existing_register':
+        if user.get('eligibility_confirmed_at'):
+            await _show_existing_registration(bot, tg_id, user)
+        else:
+            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
     elif stage == 'referral_help':
         await _journey(bot, tg_id, journey.referral_help(), key='referral_help')
     elif not user.get('eligibility_confirmed_at'):
@@ -814,7 +829,7 @@ async def _resume_setup(bot, tg_id, state=None):
     elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
         await _journey(bot, tg_id, journey.pending(), key='verification_pending')
     elif user.get('account_kind') == 'existing' or user.get('uid'):
-        await _journey(bot, tg_id, journey.existing(), key='existing_account')
+        await _show_existing_registration(bot, tg_id, user)
     elif user.get('account_kind') == 'new':
         await _show_register(bot, tg_id)
     else:
@@ -852,16 +867,25 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         if user.get('verified'):
             await _show_menu(bot, tg_id)
             return
-        # A saved account must never be steered into creating a duplicate.
-        if user.get('uid'):
+        # An already-linked account continues from its saved deposit result.
+        if user.get('uid') and user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT:
             await db.set_setup_stage(tg_id, 'eligibility', account_kind='existing')
             await _resume_setup(bot, tg_id, state)
-        elif action == 'existing':
+        elif action == 'existing' or user.get('uid'):
             await db.set_setup_stage(tg_id, 'existing_account', account_kind='existing')
-            await _journey(bot, tg_id, journey.existing(), key='existing_account')
+            await _show_existing_registration(bot, tg_id, user)
         else:
             await db.set_setup_stage(tg_id, 'requirements', account_kind='new')
             await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
+    elif action == 'register_existing':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        if user.get('uid') and user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT:
+            await db.set_setup_stage(tg_id, 'deposit')
+        else:
+            await db.set_setup_stage(tg_id, 'existing_register', account_kind='existing')
+        await _resume_setup(bot, tg_id, state)
     elif action == 'eligibility':
         if user.get('verified'):
             await _show_menu(bot, tg_id)
@@ -1669,7 +1693,7 @@ async def _show_register(bot, tg_id):
     url = await _ref_url(tg_id)
     await db.set_setup_stage(tg_id, 'register')
     await activity_stats.record(tg_id, 'registration_opened')
-    await _journey(bot, tg_id, journey.registration(url), key='register')
+    await _journey(bot, tg_id, journey.registration(url), media=journey.REGISTER_PHOTO, key='register')
 
 
 async def _clear_nudge(bot, tg_id):
