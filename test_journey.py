@@ -26,7 +26,8 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         card = await self.tap('setup')
         self.assertIn('Do you already have a Pocket Option account?', card['body'])
         card = await self.tap('new')
-        self.assertIn('$50.00', card['body'])
+        self.assertNotIn('$', card['body'])
+        self.assertIn('qualifying deposits', card['body'])
         self.assertIn('commission', card['body'])
         await self.tap('eligibility')
         self.assertIsNone(self.row['eligibility_confirmed_at'])
@@ -95,7 +96,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             self.row.update(uid=saved, eligibility_confirmed_at='now', account_kind='existing')
             card = await self.tap('new' if saved else 'existing')
             self.assertEqual(self.row['account_kind'], 'existing')
-            self.assertIn('existing account', card['body'])
+            self.assertIn('Did you create your account through our link?', card['body'])
             self.assertFalse(any(b.url for row in card['markup'].inline_keyboard for b in row))
 
     async def test_saved_id_deposit_retry_and_restart_resume(self):
@@ -127,7 +128,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         await self.tap('new')
         card = await self.resume()
         self.assertIn('Ready to continue?', card['body'])
-        self.assertIn('$50.00', card['body'])
+        self.assertNotIn('$', card['body'])
         self.assertFalse(any(b.url for r in card['markup'].inline_keyboard for b in r))
         await self.tap('eligibility')
         self.assertIn('Before you continue', (await self.resume())['body'])
@@ -149,7 +150,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Let’s help you check.', (await self.resume())['body'])
         await self.tap('existing')
         card = await self.resume()
-        self.assertIn('Let’s check your existing account.', card['body'])
+        self.assertIn('Did you create your account through our link?', card['body'])
         self.assertFalse(any(b.url for r in card['markup'].inline_keyboard for b in r))
         await self.tap('enter_id')
         self.assertIn('Before you continue', (await self.resume())['body'])
@@ -176,6 +177,54 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(expected, (await self.resume())['body'])
             await self.tap('enter_id')
             self.assertIn('What is your Pocket Option Trader ID?', (await self.resume())['body'])
+
+    async def test_access_details_available_before_registration_without_losing_progress(self):
+        await self.tap('new')
+        with patch.object(config, 'MIN_DEPOSIT', Decimal('20')):
+            card = await self.tap('requirements')
+        self.assertIn('$20.00', card['body'])
+        self.assertIn('You do not need to deposit before your Trader ID is checked.', card['body'])
+        self.assertEqual(self.row['setup_stage'], 'requirements')
+        self.assertIn('Let’s set up your account first.', (await self.resume())['body'])
+        await self.tap('eligibility')
+        with patch.object(self.mod, '_ref_url', AsyncMock(return_value='https://pocketoption.com/?a=test')):
+            card = await self.tap('eligible')
+        self.assertNotIn('$', card['body'])
+        self.assertIn('flow:requirements', [b.callback_data for r in card['markup'].inline_keyboard for b in r])
+
+    async def test_existing_account_without_referral_has_support_and_resumable_id_check(self):
+        card = await self.tap('existing')
+        self.assertIn('registered through our referral link', card['body'])
+        card = await self.tap('referral_help')
+        self.assertIn('only one trading account', card['body'])
+        self.assertEqual(card['markup'].inline_keyboard[0][0].url, journey.support_url())
+        self.assertNotIn('$', card['body'])
+        self.assertIn('Let’s check your referral options.', (await self.resume())['body'])
+        await self.tap('enter_id')
+        self.assertEqual(self.row['setup_stage'], 'id')
+        await self.tap('eligible')
+        self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
+
+    async def test_twenty_dollar_request_only_after_confirmed_referral_and_insufficient_deposits(self):
+        self.row.update(eligibility_confirmed_at='now', account_kind='new')
+        await self.tap('enter_id')
+        with patch.object(config, 'MIN_DEPOSIT', Decimal('20')):
+            for amount, expected in ((Decimal('0'), config.VERIFY_NEED_DEPOSIT),
+                                     (Decimal('20'), config.VERIFY_GRANTED)):
+                self.mod._uid_lookup_at.clear()
+                with patch.object(self.mod.panelbot, 'lookup_trader', AsyncMock(return_value={
+                        'campaign_id': config.CAMPAIGN_ID, 'sum_deposits': amount})):
+                    await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
+                self.assertEqual(self.row['access_check_status'], expected)
+                card = H.last_screen(self.bot)
+                if expected == config.VERIFY_NEED_DEPOSIT:
+                    self.assertIn('Your Trader ID is confirmed under our link.', card['body'])
+                    self.assertIn('$20.00 or more', card['body'])
+                    self.assertNotIn('balance is low', card['body'])
+                    self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:recheck')
+                else:
+                    self.assertIn('Your Pocket IQ access is ready!', card['body'])
+                    self.assertTrue(self.row['verified'])
 
     async def test_finish_later_retains_deposit_and_existing_saved_accounts_skip_questions(self):
         self.row.update(eligibility_confirmed_at='now', account_kind='new', uid='123456789',

@@ -56,13 +56,18 @@ ACCOUNT_UNSURE = ('❓ <b>Let’s help you check.</b>\n\n'
     'If so, choose Yes and use that account.\n\n'
     'If you cannot remember, check your registration emails or use the broker’s '
     'official account recovery. Support can help explain the next step.')
-REQUIREMENTS = ('🆕 <b>New to Pocket Option? Here’s how setup works.</b>\n\n'
-    'Create your account using our link, then return to this chat to verify your Trader ID.\n\n'
+REGISTRATION_INTRO = ('🆕 <b>Let’s set up your account first.</b>\n\n'
+    'Create your Pocket Option account using our link, then return here to verify your Trader ID.\n\n'
+    'Full access also requires qualifying deposits. You can read Access Requirements '
+    'below before registering. We’ll show the deposit step after your Trader ID is confirmed.\n\n'
+    + DISCLOSURE + '\n\nReady to continue?')
+REQUIREMENTS = ('ℹ️ <b>Pocket IQ access requirements</b>\n\n'
+    'Your account must be registered through our referral link and its Trader ID verified.\n\n'
     'Standard access: <b>{limit} analyses per day</b>.\n'
     'Required qualifying deposits: <b>${required}</b>.\n\n'
     'This is the Pocket IQ access requirement, not the broker’s minimum deposit. '
     'Payments remain in your broker account; Pocket IQ does not collect them.\n\n'
-    + DISCLOSURE + '\n\nReady to continue?')
+    + DISCLOSURE + '\n\nYou do not need to deposit before your Trader ID is checked.')
 ELIGIBILITY = ('🌍 <b>Before you continue</b>\n\n'
     'Read the broker’s eligibility and restricted-location rules below. Only continue '
     'if you are 18 or older, meet the legal age requirement where you live, and '
@@ -72,23 +77,30 @@ REGISTER = ('🔗 <b>Let’s create your account.</b>\n\n'
     'Tap Create New Account and register on Pocket Option using our link.\n\n'
     'When you’re done, return here and tap <b>I’ve Created My Account</b>. '
     'We’ll ask for your Trader ID and check your access.\n\n'
-    'Pocket IQ access requires <b>${required}</b> in qualifying deposits after your account '
-    'is linked. ' + DISCLOSURE + '\n\n'
+    'Full access has a qualifying-deposit requirement. See Access Requirements below; '
+    'we’ll guide you through that step after checking your Trader ID. ' + DISCLOSURE + '\n\n'
     'Already have an account? Use the existing-account path. Do not create a duplicate.')
-EXISTING = ('👤 <b>Let’s check your existing account.</b>\n\n'
-    'We’ll use your Trader ID to check whether your current Pocket Option account '
-    'qualifies for Pocket IQ access. You don’t need to register again.\n\n'
-    'If it is not linked, support can explain the available options.')
+EXISTING = ('👤 <b>Did you create your account through our link?</b>\n\n'
+    'Pocket IQ access requires an account registered through our referral link.\n\n'
+    'If you used our link, verify your Trader ID below. If you didn’t, or you’re not sure, '
+    'choose No / I’m Not Sure for help checking the available options.')
+REFERRAL_HELP = ('🔗 <b>Let’s check your referral options.</b>\n\n'
+    'Pocket IQ access requires registration through our referral link. '
+    'Our bot cannot change the referral attached to an existing trading account.\n\n'
+    'Ask support about your options, or check your current Trader ID if you’re unsure. '
+    'Pocket Option’s rules allow only one trading account per client; do not create a duplicate.')
 UID = ('🔍 <b>What is your Pocket Option Trader ID?</b>\n\n'
     'Send your Pocket Option Trader ID as a message here. It contains 5–15 digits.\n'
     'Example: <code>123456789</code>\n\n'
     'Never send a password, login code, recovery code, or payment details.')
-DEPOSIT = ('💳 <b>Your account is linked. Would you like to finish setup?</b>\n\n'
-    'Required qualifying deposits: <b>${required}</b>\n'
+DEPOSIT = ('✅ <b>Your Trader ID is confirmed under our link.</b>\n\n'
+    '💳 <b>A deposit is needed to activate Pocket IQ access.</b>\n\n'
+    'Minimum qualifying deposits for access: <b>${required}</b>\n'
     'Confirmed qualifying deposits: <b>${confirmed}</b>\n'
     'Remaining requirement: <b>${remaining}</b>\n\n'
-    'If you choose to continue, log in on Pocket Option and open its Deposit section. '
-    'Use the same linked account. Depositing does not guarantee trading returns.\n\n'
+    'To activate access, deposit <b>${remaining} or more</b> into the same linked '
+    'Pocket Option account. Payments stay in your broker account. '
+    'Depositing does not guarantee trading returns.\n\n'
     'After depositing, tap I’ve Deposited — Check Again. We will reuse your saved '
     'Trader ID. You can also finish later; your progress is saved.')
 READY = ('✅ <b>Your Pocket IQ access is ready!</b>\n\n'
@@ -174,8 +186,8 @@ TEXTS = {
     'link_unavailable': ('💬 <b>This link is not available</b>\n\n'
         'Please contact support for the current destination. No registration or payment has been completed.'),
 }
-SOURCES = (RISK, DISCLOSURE, ACCOUNT_QUESTION, ACCOUNT_UNSURE, REQUIREMENTS,
-           ELIGIBILITY, REGISTER, EXISTING, UID, DEPOSIT, READY,
+SOURCES = (RISK, DISCLOSURE, ACCOUNT_QUESTION, ACCOUNT_UNSURE, REGISTRATION_INTRO, REQUIREMENTS,
+           ELIGIBILITY, REGISTER, EXISTING, REFERRAL_HELP, UID, DEPOSIT, READY,
            PENDING, UNLINKED, PREMIUM, PREMIUM_SHORT, *TEXTS.values())
 
 
@@ -206,7 +218,7 @@ def screen(name, user=None):
         'screenshot': [[cb('🖼 See Example Screenshot', 'example')],
                        [button('📸 Upload Chart', 'cb:chart:upload', 'success')], [help_button]],
         'explain': [[button('📸 Analyse Another Chart', 'cb:chart:upload', 'success')], [help_button]],
-        'faq': [[cb('🚀 View Access Requirements', 'setup', True)], [help_button]],
+        'faq': [[cb('🚀 View Access Requirements', 'requirements', True)], [help_button]],
         'risks': [[url('📖 Read Broker Terms', config.BROKER_TERMS_URL)], [help_button]],
         'privacy': [[contact]],
         'settings': [[button('🌐 Language', 'cb:home:language')],
@@ -232,10 +244,17 @@ def account_help():
 
 
 def new_account():
-    return REQUIREMENTS.format(limit=config.daily_limit(False), required=money(config.MIN_DEPOSIT)), [
+    return REGISTRATION_INTRO, [
         [cb('🚀 Continue Setup', 'eligibility', True)],
+        [cb('ℹ️ Access Requirements', 'requirements')],
         [cb('👤 I Already Have an Account', 'existing')],
         [cb('❓ Questions About Access', 'support')], *back('setup')]
+
+
+def requirements():
+    return REQUIREMENTS.format(limit=config.daily_limit(False), required=money(config.MIN_DEPOSIT)), [
+        [button('🚀 Continue Setup', 'cb:home:access', 'success')],
+        [cb('💬 Support', 'support')]]
 
 
 def eligibility():
@@ -245,17 +264,26 @@ def eligibility():
 
 
 def registration(ref):
-    return REGISTER.format(required=money(config.MIN_DEPOSIT)), [
+    return REGISTER, [
         [url('🔗 Create New Account', ref, True)],
         [button('✅ I’ve Created My Account', 'cb:flow:enter_id', 'primary')],
         [url('▶️ Watch Registration Guide', config.SETUP_GUIDE_URL)],
+        [cb('ℹ️ Access Requirements', 'requirements')],
         [cb('👤 I Already Have an Account', 'existing')], [cb('💬 Support', 'support'), cb('⬅️ Back', 'setup')]]
 
 
 def existing():
-    return EXISTING, [[cb('🔍 Verify My Trader ID', 'enter_id', True)],
+    return EXISTING, [[cb('✅ Yes — Verify My Trader ID', 'enter_id', True)],
+        [cb('❓ No / I’m Not Sure', 'referral_help')],
         [cb('📍 Where Is My Trader ID?', 'id_guide')],
+        [cb('ℹ️ Access Requirements', 'requirements')],
         [cb('💬 Support', 'support')], *back('setup')]
+
+
+def referral_help():
+    return REFERRAL_HELP, [[url('💬 Contact Support', support_url(), True)],
+        [cb('🔍 Verify My Trader ID', 'enter_id')],
+        [url('📖 Read Broker Terms', config.BROKER_TERMS_URL)], *back('existing')]
 
 
 def uid():
