@@ -10,11 +10,13 @@ VIDEO = 'home_banner_video'
 
 TEXT = (
     "👋 <b>Welcome to Pocket IQ</b>\n"
-    "Your AI-powered chart analysis assistant.\n"
-    "📸 Turn a clear chart screenshot into easy-to-follow market analysis.\n"
-    "🎁 <b>Explore two free analyses</b> before deciding whether to set up access.\n"
-    "📖 Start with <b>Guide</b>, read community <b>Reviews</b>, or speak to <b>Support</b> whenever you need help.\n"
-    "👇 Tap <b>Test Signals</b> to try your first analysis."
+    "Your AI-powered chart analysis assistant.\n\n"
+    "📸 <b>Send a chart. Understand the setup.</b>\n"
+    "Upload a clear screenshot to explore market trends, momentum, and potential price direction.\n\n"
+    "🎁 <b>Your first two analyses are free.</b>\n"
+    "Try Pocket IQ before deciding whether to set up access.\n\n"
+    "📖 New here? Open <b>How It Works</b>, or reach out to <b>Support</b> whenever you need help.\n\n"
+    "👇 <b>Tap “Try 2 Free Analyses” to get started.</b>"
 )
 
 
