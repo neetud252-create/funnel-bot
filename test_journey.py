@@ -100,8 +100,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.row['account_kind'], 'existing')
             self.assertEqual(card['kind'], 'photo')
             self.assertEqual(card['asset'], 'assets/register_account.png')
-            self.assertIn('Create an account through the Pocket IQ bot link', card['body'])
-            self.assertIn('Confirm with Pocket Option that a replacement is allowed', card['body'])
+            self.assertIn('Get Pocket IQ Access', card['body'])
             self.assertEqual(card['markup'].inline_keyboard[0][0].url, ref)
             self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:enter_id')
             self.assertEqual(self.row['uid'], saved)
@@ -157,7 +156,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Let’s help you check.', (await self.resume())['body'])
         await self.tap('existing')
         card = await self.resume()
-        self.assertIn('Create an account through the Pocket IQ bot link', card['body'])
+        self.assertIn('Get Pocket IQ Access', card['body'])
         self.assertFalse(any(b.url for r in card['markup'].inline_keyboard for b in r))
         await self.tap('enter_id')
         self.assertIn('Before you continue', (await self.resume())['body'])
@@ -201,7 +200,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_existing_account_without_referral_has_support_and_resumable_id_check(self):
         card = await self.tap('existing')
-        self.assertIn('registered through our referral link', card['body'])
+        self.assertIn('our link below', card['body'])
         card = await self.tap('referral_help')
         self.assertIn('only one trading account', card['body'])
         self.assertEqual(card['markup'].inline_keyboard[0][0].url, journey.support_url())
