@@ -1,6 +1,5 @@
 """Public /start menu: one animated video with welcome caption and buttons."""
 import config
-import journey
 
 PHOTO = 'home_banner'
 PHOTO_EXT = 'png'
@@ -22,25 +21,19 @@ SHEET_CAPTION = "📊 <b>Money Management Sheet</b>\n\nDownload your Excel sheet
 SHEET_UNAVAILABLE = "The money management sheet is temporarily unavailable. Please try again shortly or contact support."
 
 
-def _link(label, address, style):
-    """Keep the configured destination or the existing unavailable-link help."""
-    button = journey.url(label, address)
-    return (button[0], button[1], style)
-
-
 def keyboard(user=None):
-    verified = bool((user or {}).get('verified'))
-    access = '🏠 My Dashboard' if verified else '💎 Get Bot Access'
-    trial = '📸 Analyse My Chart' if verified else '🎯 Test Signals'
+    user = user or {}
+    access = ('🏠 Open My Dashboard' if user.get('verified') else
+              '🚀 Continue Setup' if user.get('uid') or user.get('setup_stage') not in (None, 'new')
+              else '🚀 Set Up My Account')
+    trial = '📸 Analyse My Chart' if user.get('verified') else '🎯 Try 2 Free Analyses'
     return [
-        [(access, 'cb:home:access', 'success')],
-        [('📖 Guide', 'cb:flow:how', 'primary'), (trial, 'cb:home:test', 'primary')],
-        [_link('⭐ Review', config.REVIEWS_URL, 'danger'),
-         _link('💬 Support', journey.support_url(), 'danger')],
-        [_link('▶️ YouTube', config.YOUTUBE_URL, 'primary'),
-         _link('📢 Channel', config.COMMUNITY_URL, 'primary')],
-        [('📊 Money Management Sheet', 'cb:home:sheet', 'primary')],
-        [('🌐 Change Language', 'cb:home:language', 'danger')],
+        [(trial, 'cb:home:test', 'success')],
+        [(access, 'cb:home:access', 'primary')],
+        [('📖 How It Works', 'cb:flow:how', 'primary'), ('📢 Community', 'cb:flow:community', 'primary')],
+        [('⭐ Reviews', 'cb:flow:reviews', 'danger'), ('💬 Support', 'cb:flow:support', 'danger')],
+        [('🧰 Tools & FAQ', 'cb:flow:tools', 'primary')],
+        [('🌐 Language', 'cb:home:language', 'danger')],
     ]
 
 
