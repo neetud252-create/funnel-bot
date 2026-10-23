@@ -32,6 +32,16 @@ ICONS = {
     'location': '5292291996717690768',
     'new': '6300677037086476915',
     'payment': '5472250091332993630',
+    'success': '5895763905719832199',
+    'error': '6219971367484266517',
+    'question': '5436113877181941026',
+    'info': '5334544901428229844',
+    'warning': '5420323339723881652',
+    'blocked': '5427240268589968037',
+    'waiting': '5206356981094310220',
+    'refresh': '5346269127059196142',
+    'pause': '5116447063432758252',
+    'settings': '5341715473882955310',
 }
 GLYPHS = {
     '👋': 'hello', '🤖': 'assistant',
@@ -44,6 +54,10 @@ GLYPHS = {
     '💬': 'chat', '📢': 'community', '🧰': 'tools', '🔓': 'unlocked',
     '👤': 'account', '👑': 'premium', '🏆': 'trophy', '🔑': 'key',
     '🔒': 'locked', '🔗': 'link', '📍': 'location', '🆕': 'new', '💳': 'payment',
+    '✅': 'success', '❌': 'error', '❓': 'question', 'ℹ️': 'info', 'ℹ': 'info',
+    '❗️': 'warning', '❗': 'warning', '⚠️': 'warning', '⚠': 'warning',
+    '⛔': 'blocked', '⏳': 'waiting', '🔄': 'refresh',
+    '⏸️': 'pause', '⏸': 'pause', '⚙️': 'settings', '⚙': 'settings',
 }
 LABELS = {
     'Get Bot Access': 'access', 'Get access to Go +': 'access',
