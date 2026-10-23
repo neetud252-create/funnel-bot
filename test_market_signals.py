@@ -15,6 +15,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import SendPhoto
 import market_data as data
 import market_signals as flow
+import market_catalog as catalog
 from test_market_data import ASSET, payload
 from test_chart_signals import VALID
 import test_signal_flow as H
@@ -108,8 +109,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         for verified in (False, True):
             flow.trial.status.return_value = (verified, 0)
             await flow.open_picker(self.bot, 11, self.state, self.render)
-            self.assertIn('Choose your asset', self.render.await_args.args[3])
-            self.assertIn('connected data plan', self.render.await_args.args[3])
+            self.assertIn('Select market type', self.render.await_args.args[3])
             self.assertEqual(await self.state.get_state(), flow.Market.browsing.state)
             await self.analyse()
             self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_limit')
@@ -125,14 +125,13 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             message=types.SimpleNamespace(register=lambda handler, *filters: messages.append(handler)))
         flow.install(dp, self.render)
         await flow.open_picker(self.bot, 11, self.state, self.render)
-        for action in ('market:tf:300', 'market:p:0', 'market:all'):
+        for action in ('market:cat:otc:forex', 'market:list:otc:forex:9', 'market:all'):
             cb = H.FakeCB(11, action, 123)
             await callbacks[0](cb, self.bot, self.state)
             self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_assets')
-        self.assertEqual((await self.state.get_data())['market_period'], 300)
         message = types.SimpleNamespace(chat=types.SimpleNamespace(type='private'),
                                         from_user=types.SimpleNamespace(id=11), text='EUR/USD')
-        await messages[1](message, self.bot, self.state)
+        await messages[-1](message, self.bot, self.state)
         self.assertIn('EUR/USD OTC', str(self.render.await_args.args[4]))
         flow.trial.status.assert_not_awaited()
         flow.trial.reserve.assert_not_awaited()
@@ -173,7 +172,9 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(data, 'enabled', return_value=False):
             await flow.open_picker(self.bot, 11, self.state, self.render)
         self.feed.assets.assert_not_awaited()
-        self.assertIn('being connected', self.render.await_args.args[3])
+        self.assertIn('Select market type', self.render.await_args.args[3])
+        await flow.show_categories(self.bot, 11, self.state, self.render, 'fin')
+        self.assertIn('Select an asset by category', self.render.await_args.args[3])
 
     async def test_cancelled_task_releases_slot_and_global_inflight(self):
         flow.api.analyse.side_effect = asyncio.CancelledError
@@ -204,17 +205,98 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(photo['markup'].inline_keyboard[0][0].callback_data, 'market:open')
 
     def test_all_assets_are_reachable_searchable_and_callbacks_fit_telegram(self):
-        assets = tuple(data.Asset(f'ASSET{i}_otc', f'Asset {i:03}', True, None) for i in range(135))
+        assets = tuple(catalog.Entry(f'Asset {i:03} OTC', 'stocks', 'otc') for i in range(135))
         seen = set()
-        for page in range(14):
-            text, rows = flow.picker(assets, 60, page)
+        for page in range(23):
+            text, rows = flow.picker(assets, 'otc', 'stocks', page)
             seen.update(b[1] for row in rows for b in row if b[1].startswith('cb:market:a:'))
             self.assertTrue(all(len(b[1][3:].encode()) <= 64 for row in rows for b in row))
         self.assertEqual(len(seen), 135)
         self.assertEqual(flow.filtered((ASSET,), 'EUR/USD'), [ASSET])
-        text, rows = flow.picker(assets, 300, 0, '<unknown>')
+        text, rows = flow.picker(assets, 'otc', 'stocks', 0, '<unknown>')
         self.assertIn('&lt;unknown&gt;', text)
         self.assertIn('No matching assets', text)
+
+    async def test_unavailable_assets_do_not_fetch_candles_reserve_or_fabricate_analysis(self):
+        unavailable = next(e for e in catalog.SEED if e.name == 'AUD/CAD OTC')
+        fin = next(e for e in catalog.SEED if e.market == 'fin')
+        for entry in (unavailable, fin):
+            await flow.select_asset(self.bot, 11, self.state, self.render, entry.key)
+            self.assertNotIn('cb:market:run:', str(self.render.await_args.args[4]))
+            # A forged/stale run callback is checked server-side too.
+            await flow.analyse(self.cb, self.bot, self.state, self.render, entry.key)
+        self.feed.candles.assert_not_awaited()
+        flow.trial.reserve.assert_not_awaited()
+        flow.api.analyse.assert_not_awaited()
+
+    async def test_plan_upgrade_unlocks_existing_catalogue_item_without_deploy(self):
+        entry = next(e for e in catalog.SEED if e.name == 'AUD/CAD OTC')
+        await flow.select_asset(self.bot, 11, self.state, self.render, entry.key)
+        self.assertIn('not available', self.render.await_args.args[3])
+        self.feed.assets.return_value = (ASSET, data.Asset('AUDCAD_otc', entry.name, True, None))
+        await flow.select_asset(self.bot, 11, self.state, self.render, entry.key)
+        self.assertIn('candle timeframe', self.render.await_args.args[3])
+        self.assertIn(f'cb:market:run:{entry.key}:300', str(self.render.await_args.args[4]))
+        flow.trial.reserve.assert_not_awaited()
+
+    async def test_market_navigation_cancels_pending_catalogue_response(self):
+        async def navigating():
+            await flow.open_picker(self.bot, 11, self.state, self.render)
+            return (ASSET,)
+        await flow.navigate(self.state, market_book='otc', market_category='forex')
+        self.feed.assets.side_effect = navigating
+        await flow.show_picker(self.bot, 11, self.state, self.render)
+        self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_type')
+
+    def test_reference_currency_order_page_shape_and_complete_public_catalogue(self):
+        import config
+        entries = [e for e in catalog.SEED if e.market == 'otc' and e.category == 'forex']
+        self.assertEqual([e.name for e in entries], config.PAIRS_RAW)
+        self.assertEqual(len(catalog.SEED), 172)
+        self.assertEqual(len({e.key for e in catalog.SEED}), 172)
+        for page in range(10):
+            text, rows = flow.picker(entries, page=page)
+            assets = [r for r in rows if r[0][1].startswith('cb:market:a:')]
+            self.assertEqual([len(r) for r in assets], [2, 2, 2] if page < 9 else [2, 1])
+            self.assertIn(f'{page+1}/10', str(rows))
+            self.assertEqual(rows[-1], [('« Back', 'cb:market:book:otc', 'danger')])
+        for entry in catalog.SEED:
+            self.assertIn(entry.category, catalog.CATEGORIES)
+
+    async def test_public_catalogue_available_without_key_or_generation_permission(self):
+        with patch.object(data, 'enabled', return_value=False):
+            await flow.open_picker(self.bot, 11, self.state, self.render)
+            await flow.show_categories(self.bot, 11, self.state, self.render, 'otc')
+            await flow.navigate(self.state, market_book='otc', market_category='forex')
+            await flow.show_picker(self.bot, 11, self.state, self.render, 9)
+            self.assertIn('KES/USD OTC', str(self.render.await_args.args[4]))
+            await self.analyse()
+        self.feed.assets.assert_not_awaited()
+        self.feed.candles.assert_not_awaited()
+        flow.trial.reserve.assert_not_awaited()
+
+    async def test_installed_legacy_callbacks_and_uploads_only_open_market_menu(self):
+        module = H._load_bot()
+        bot = H.FakeBot()
+        actions = ('chart:upload', 'mode:manual', 'type:otc', 'asset:forex',
+                   'pair:eurusdotc', 'pairpage:2', 'm:1', 's:5', 'new_signal', 'go:test_menu')
+        for action in actions:
+            cb = H.FakeCB(11, action, 123)
+            for handler in module.dp.callback_query.handlers:
+                matched, _ = await handler.check(cb)
+                if matched:
+                    self.assertEqual(handler.callback.__name__, 'legacy', action)
+                    await handler.callback(cb, bot, self.state)
+                    break
+            else:
+                self.fail('Missing callback: ' + action)
+            self.assertIn('Select market type', H.last_screen(bot)['body'])
+        self.assertFalse(any(h.callback.__module__ == 'chart_signals' for h in module.dp.message.handlers))
+        uploads = next(h.callback for h in module.dp.message.handlers if h.callback.__name__ == 'retired_upload')
+        await uploads(types.SimpleNamespace(chat=types.SimpleNamespace(type='private'),
+                                           from_user=types.SimpleNamespace(id=11)), bot, self.state)
+        self.assertIn('Select market type', H.last_screen(bot)['body'])
+        flow.api.analyse.assert_not_awaited()
 
 
 if __name__ == '__main__':

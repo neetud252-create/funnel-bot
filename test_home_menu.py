@@ -27,7 +27,7 @@ async def main():
     for progress in ({'uid': '123456789'}, {'setup_stage': 'requirements'}):
         assert home_menu.keyboard(progress)[1][0][0] == '🚀 Continue Setup'
     assert home_menu.keyboard({'verified': True})[:2] == [
-        [('📸 Analyse My Chart', 'cb:home:test', 'success')],
+        [('📊 Get Signals', 'cb:home:test', 'success')],
         [('🏠 Open My Dashboard', 'cb:home:access', 'primary')]]
     for verified in (False, True):
         uid = 72000 + int(verified)

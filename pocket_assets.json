@@ -1,0 +1,870 @@
+{
+  "checked_at": "2026-10-24",
+  "sources": [
+    "https://pocketoption.com/en/assets-otc/",
+    "https://pocketoption.com/en/assets/"
+  ],
+  "note": "Published asset names only; live eligibility is always resolved from the authorized candle feed. OTC currency order matches the supplied interface.",
+  "assets": [
+    {
+      "name": "EUR/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "AUD/CAD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "AUD/CHF OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "AUD/JPY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "AUD/NZD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "AUD/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "CAD/CHF OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "CAD/JPY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "CHF/JPY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/CHF OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/GBP OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/JPY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/NZD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "GBP/AUD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "GBP/JPY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "GBP/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "NZD/JPY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "NZD/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/CAD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/CHF OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/JPY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/RUB OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/RUB OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "CHF/NOK OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/HUF OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/CNH OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/TRY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/INR OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/SGD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/CLP OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/MYR OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/THB OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/VND OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/PKR OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/COP OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/EGP OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/PHP OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/MXN OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/DZD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/ARS OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/IDR OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/BRL OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "USD/BDT OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "YER/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "LBP/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "TND/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "MAD/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "BHD/CNY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "AED/CNY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "SAR/CNY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "QAR/CNY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "OMR/CNY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "JOD/CNY OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "NGN/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "KES/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "ZAR/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "UAH/USD OTC",
+      "category": "forex",
+      "market": "otc"
+    },
+    {
+      "name": "Gold OTC",
+      "category": "commodities",
+      "market": "otc"
+    },
+    {
+      "name": "Brent Oil OTC",
+      "category": "commodities",
+      "market": "otc"
+    },
+    {
+      "name": "WTI Crude Oil OTC",
+      "category": "commodities",
+      "market": "otc"
+    },
+    {
+      "name": "Silver OTC",
+      "category": "commodities",
+      "market": "otc"
+    },
+    {
+      "name": "Natural Gas OTC",
+      "category": "commodities",
+      "market": "otc"
+    },
+    {
+      "name": "Platinum spot OTC",
+      "category": "commodities",
+      "market": "otc"
+    },
+    {
+      "name": "Palladium spot OTC",
+      "category": "commodities",
+      "market": "otc"
+    },
+    {
+      "name": "Apple OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "McDonald's OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Microsoft OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "FACEBOOK INC OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Intel OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Tesla OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Pfizer Inc OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Johnson & Johnson OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Boeing Company OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "American Express OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Amazon OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Citigroup Inc OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "FedEx OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "VISA OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Cisco OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "ExxonMobil OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Alibaba OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Netflix OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "VIX OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Palantir Technologies OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "GameStop Corp OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Advanced Micro Devices OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Coinbase Global OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "Marathon Digital Holdings OTC",
+      "category": "stocks",
+      "market": "otc"
+    },
+    {
+      "name": "AUS 200 OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "E35EUR OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "100GBP OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "F40EUR OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "JPN225 OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "D30EUR OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "E50EUR OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "SP500 OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "DJI30 OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "US100 OTC",
+      "category": "indices",
+      "market": "otc"
+    },
+    {
+      "name": "BNB OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Solana OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Cardano OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "TRON OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Chainlink OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Toncoin OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Avalanche OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Bitcoin OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Dogecoin OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Polkadot OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Ethereum OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Litecoin OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Polygon OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "Bitcoin ETF OTC",
+      "category": "crypto",
+      "market": "otc"
+    },
+    {
+      "name": "EUR/USD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "AUD/CAD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "AUD/CHF",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "AUD/JPY",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "AUD/USD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "CAD/CHF",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "CAD/JPY",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "CHF/JPY",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "EUR/AUD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "EUR/CAD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "EUR/CHF",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "EUR/GBP",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "EUR/JPY",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "GBP/AUD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "GBP/CAD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "GBP/CHF",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "GBP/JPY",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "GBP/USD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "USD/CAD",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "USD/CHF",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "USD/JPY",
+      "category": "forex",
+      "market": "fin"
+    },
+    {
+      "name": "Apple",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Boeing Company",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "JPMorgan Chase & Co",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "McDonald's",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Microsoft",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "American Express",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Johnson & Johnson",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Pfizer Inc",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "ExxonMobil",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Cisco",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "FACEBOOK INC",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Intel",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Netflix",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Alibaba",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Tesla",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Citigroup Inc",
+      "category": "stocks",
+      "market": "fin"
+    },
+    {
+      "name": "Bitcoin",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "Dash",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "Ethereum",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "BCH/EUR",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "BCH/GBP",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "BCH/JPY",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "BTC/GBP",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "BTC/JPY",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "Chainlink",
+      "category": "crypto",
+      "market": "fin"
+    },
+    {
+      "name": "AUS 200",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "US100",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "E35EUR",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "100GBP",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "F40/EUR",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "JPN225",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "D30/EUR",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "E50/EUR",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "SP500",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "DJI30",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "AEX 25",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "CAC 40",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "HONG KONG 33",
+      "category": "indices",
+      "market": "fin"
+    },
+    {
+      "name": "SMI 20",
+      "category": "indices",
+      "market": "fin"
+    }
+  ]
+}

@@ -1,4 +1,9 @@
-# Screenshot Test Signals
+# Historical screenshot analysis implementation
+
+**Superseded 2026-10-24:** the public bot now uses asset selection and generated
+candle charts. Screenshot handlers are not installed. See
+[MARKET_SIGNALS.md](MARKET_SIGNALS.md) for the current flow and data permissions.
+The notes below document the retained provider and historical upload code.
 
 Home → Test Signals → trial screen with remaining signals → Test Signals → upload
 one chart photo/image document → analysis replying to that image. Results show

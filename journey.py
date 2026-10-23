@@ -42,7 +42,7 @@ def back(target='home'):
 
 def dashboard_keyboard():
     return [
-        [button('📸 Analyse My Chart', 'cb:menu:signal', 'success')],
+        [button('📊 Get Signals', 'cb:menu:signal', 'success')],
         [cb('👤 My Access & Usage', 'usage'), cb('📖 Guide', 'how')],
         [cb('🧰 Trading Tools', 'tools'), cb('💬 Support', 'support')],
         [cb('📢 Community', 'community'), cb('⚙️ Settings', 'settings')],
@@ -114,10 +114,10 @@ PREMIUM_SHORT = ('👑 <b>Premium requirement not met yet</b>\n\n'
     'Remaining requirement: <b>${remaining}</b>\n\n'
     'You can keep your current plan. Depositing does not guarantee trading returns.')
 TEXTS = {
-    'how': ('📖 <b>How Go Plus works</b>\n\n'
-        '1. Upload a clear chart screenshot.\n2. Read the trend, momentum, and analysis.\n'
-        '3. Check the exact asset and chart interval yourself.\n4. Decide whether to act or wait.\n\n'
-        'The bot analyses screenshots. It does not execute trades. The timer is the chart '
+    'how': ('📖 <b>How Pocket IQ works</b>\n\n'
+        '1. Choose OTC or FIN, then an asset category.\n2. Select an asset and candle timeframe.\n'
+        '3. View its chart, trend, and momentum when live data is available.\n4. Decide whether to act or wait.\n\n'
+        'Assets without connected data remain browsable. The bot does not execute trades. The timeframe is the candle '
         'interval, not a guaranteed entry or expiry.\n\n' + RISK),
     'reviews': ('⭐ <b>Community reviews</b>\n\n'
         'Read posts in the existing Go Plus review channel. These are individual experiences, '
@@ -138,22 +138,25 @@ TEXTS = {
         'Payment processing, fees, methods, identity checks, and withdrawals are handled by Pocket Option. '
         'Review the current terms in your broker account. Go Plus checks access; it cannot move your funds.\n\n'
         'For a payment problem, contact the broker through its official account interface.'),
-    'analysis_help': ('📸 <b>Analysis help</b>\n\nSend one JPG, PNG, or WebP under 8 MB. '
-        'Keep the asset, chart interval, and enough candle history visible. Crop out account details. '
-        'Unreadable images and failed analyses do not use your trial allowance.'),
-    'screenshot': ('📖 <b>Screenshot guide</b>\n\n'
-        '• Show the asset name and market type.\n• Keep the candle interval visible.\n'
-        '• Include recent and earlier candles.\n• Send one clear image under 8 MB.\n'
-        '• Crop out your balance, account ID, and personal details.\n\n'
-        'The example is an illustration, not live market data.'),
+    'analysis_help': ('📊 <b>Analysis help</b>\n\n'
+        'Choose a market, category, and asset, then select a candle timeframe. '
+        'The bot loads completed candles and generates a chart for analysis.\n\n'
+        'If live data is unavailable, choose another asset or try later. '
+        'Unavailable data and failed analyses do not use your allowance.'),
+    'screenshot': ('📖 <b>Asset guide</b>\n\n'
+        '1. Open Choose Asset or send /assets.\n'
+        '2. Select OTC or FIN and a category.\n'
+        '3. Browse with ‹ and ›, or type an asset name to search.\n'
+        '4. Select an asset with connected data and choose 1-minute or 5-minute candles.\n\n'
+        'You will receive its chart and analysis. A timeframe is the candle interval, not a trade expiry.'),
     'explain': ('📖 <b>Understand your result</b>\n\n'
-        '<b>Trend:</b> the visible price direction.\n<b>Momentum:</b> the strength seen in the screenshot.\n'
+        '<b>Trend:</b> the visible price direction.\n<b>Momentum:</b> the strength seen in the completed candles.\n'
         '<b>Prediction:</b> an uncertain interpretation, not a guarantee.\n'
-        '<b>Timer:</b> the candle interval shown in the screenshot, not a trade expiry.\n\n'
+        '<b>Timer:</b> the selected candle interval, not a trade expiry.\n\n'
         'A tentative result means the setup was not confirmed. Waiting is an option.\n\n' + RISK),
     'faq': ('❓ <b>Frequently asked questions</b>\n\n'
-        '<b>Do I need a deposit to try it?</b> No. Two free lifetime chart analyses are available.\n\n'
-        '<b>Does the bot trade for me?</b> No. It analyses your screenshot.\n\n'
+        '<b>Do I need a deposit to try it?</b> No. Two free lifetime analyses are available on assets with connected data.\n\n'
+        '<b>Does the bot trade for me?</b> No. It analyses market candles and shows a chart.\n\n'
         '<b>Are returns guaranteed?</b> No. Predictions can lose.\n\n'
         '<b>How is access checked?</b> Your Trader ID is checked against the referral offer '
         'and qualifying deposits. Clicking a link is not verification.\n\n'
@@ -165,8 +168,8 @@ TEXTS = {
     'privacy': ('🔒 <b>Your privacy</b>\n\n'
         'Go Plus stores your Telegram ID, selected language, setup progress, linked Trader ID, '
         'access checks, button activity, and usage in its database.\n\n'
-        'Chart screenshots and your caption are sent to the configured AI provider for analysis. '
-        'Crop out personal details before uploading. Telegram and the provider apply their own policies.\n\n'
+        'The selected asset, candle data, and generated chart are sent to the configured AI provider for analysis. '
+        'Telegram and the provider apply their own policies.\n\n'
         'The bot does not need your trading password, login codes, or payment details. '
         'Contact support about privacy or deletion requests.'),
     'settings': '⚙️ <b>Settings</b>\n\nChoose your language or control promotional notifications.',
@@ -188,7 +191,7 @@ def screen(name, user=None):
     contact = url('💬 Contact Support', support_url(), True)
     rows = {
         'how': [[button('▶️ Watch Tutorial', 'cb:go:guide')],
-                [button('📸 Analyse My Chart' if user.get('verified') else '📸 Try Free Analysis',
+                [button('📊 Get Signals' if user.get('verified') else '🎯 Try Free Analysis',
                         'cb:home:test', 'success')], [cb('❓ FAQs', 'faq')]],
         'reviews': [[url('⭐ Read Community Reviews', config.REVIEWS_URL, True)],
                     [cb('📊 Signal Results', 'results')], [cb('💬 Ask a Question', 'support')]],
@@ -196,18 +199,17 @@ def screen(name, user=None):
         'community': [[url('📢 Telegram Channel', config.COMMUNITY_URL, True)],
                       [url('▶️ YouTube Channel', config.YOUTUBE_URL)], [cb('⭐ Reviews', 'reviews')]],
         'tools': [[button('📊 Money Management Sheet', 'cb:home:sheet')],
-                  [cb('📖 Screenshot Guide', 'screenshot')], [cb('❓ FAQs', 'faq')],
+                  [cb('📖 Asset Guide', 'screenshot')], [cb('❓ FAQs', 'faq')],
                   [cb('ℹ️ Risks & Referral Info', 'risks')]],
         'support': [[cb('👤 Account Help', 'account_help')], [cb('💳 Deposit/Withdrawal Help', 'payment_help')],
-                    [cb('📸 Analysis Help', 'analysis_help')], [contact]],
+                    [cb('📊 Analysis Help', 'analysis_help')], [contact]],
         'account_help': [[cb('🔍 Check My Existing Account', 'existing', True)],
                          [cb('📍 Where Is My Account ID?', 'id_guide')], [contact]],
         'payment_help': [[url('💳 Open Pocket Option Account', config.BROKER_ACCOUNT_URL, True)],
                          [url('📖 Payment & Withdrawal Terms', config.BROKER_PAYMENT_URL)], [contact]],
-        'analysis_help': [[cb('📖 Screenshot Guide', 'screenshot')], [contact]],
-        'screenshot': [[cb('🖼 See Example Screenshot', 'example')],
-                       [button('📸 Upload Chart', 'cb:chart:upload', 'success')], [help_button]],
-        'explain': [[button('📸 Analyse Another Chart', 'cb:chart:upload', 'success')], [help_button]],
+        'analysis_help': [[cb('📖 Asset Guide', 'screenshot')], [contact]],
+        'screenshot': [[button('📊 Choose Asset', 'cb:market:open', 'success')], [help_button]],
+        'explain': [[button('📊 Choose Another Asset', 'cb:market:open', 'success')], [help_button]],
         'faq': [[cb('🚀 View Access Requirements', 'requirements', True)], [help_button]],
         'risks': [[url('📖 Read Broker Terms', config.BROKER_TERMS_URL)], [help_button]],
         'privacy': [[contact]],
@@ -287,7 +289,7 @@ def deposit_keyboard(premium=False):
 
 def ready():
     return READY, [
-        [button('📸 Analyse My Chart', 'cb:menu:signal', 'success')],
+        [button('📊 Get Signals', 'cb:menu:signal', 'success')],
         [cb('🏠 Open My Dashboard', 'dashboard')],
         [cb('📖 How It Works', 'how')]]
 

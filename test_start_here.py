@@ -54,7 +54,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
                          ['success', 'primary', 'primary', 'primary', 'danger', 'danger'])
         # Exercise the actual handlers, including the trial gate and configured links.
         trial = await self.tap('home:test', anchor)
-        self.assertIn('free', trial['body'].lower())
+        self.assertIn('Select market type', trial['body'])
         setup = await self.tap('home:access', anchor)
         self.assertIn('Do you already have a Pocket Option account?', setup['body'])
         self.assertFalse(row['verified'])
@@ -77,7 +77,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
                 self.mod.config.VERIFY_GRANTED, Decimal('50')))):
             await self.tap('flow:recheck', anchor)
         self.assertTrue(row['verified'])
-        self.assertEqual(self.labels()[:2], [['📸 Analyse My Chart'], ['🏠 My Dashboard']])
+        self.assertEqual(self.labels()[:2], [['📊 Get Signals'], ['🏠 My Dashboard']])
         self.assertEqual(self.bot.edits[-1]['message_id'], anchor)
         self.assertEqual(len(self.bot.pins), 1)
         chart = await self.tap('home:test', anchor)
@@ -139,7 +139,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(screen['markup'])
         self.assertEqual(row['welcome_content_hash'], previous_hash)
         await self.tap('home:access', anchor)
-        self.assertEqual(self.labels()[:2], [['📸 Analyse My Chart'], ['🏠 My Dashboard']])
+        self.assertEqual(self.labels()[:2], [['📊 Get Signals'], ['🏠 My Dashboard']])
         self.assertEqual(len(self.bot.pins), 1)
         # Deleted successful pins must not be re-created or forced back.
         row['welcome_content_hash'] = None
