@@ -13,6 +13,7 @@ from aiogram.methods import AnswerCallbackQuery, CopyMessage, SendDocument, Send
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import config
 import home_menu
+import start_here
 import localization as L
 import emoji_theme
 import test_signal_flow as H
@@ -146,6 +147,25 @@ async def check_delivery_and_selector():
         assert localized.reply_markup.inline_keyboard[0][0].callback_data == 'home:access'
         plain = html.unescape(re.sub('<[^>]+>', '', localized.caption))
         assert len(plain.encode('utf-16-le')) // 2 <= 1024
+
+    # Both welcome variants retain their native actions/colors after custom
+    # icons replace leading Unicode, including Support's new speech bubble.
+    for verified in (False, True):
+        for rows in (home_menu.keyboard({'verified': verified}), start_here.keyboard({'verified': verified})):
+            markup = bot_mod.build_kb(rows)
+            method = SendVideo(chat_id=2, video='banner-video-id', caption=start_here.TEXT,
+                               reply_markup=markup, parse_mode='HTML')
+            result = L.localize_method(method, 'en')
+            for original_row, rendered_row in zip(markup.inline_keyboard, result.reply_markup.inline_keyboard):
+                for original_button, rendered in zip(original_row, rendered_row):
+                    assert rendered.callback_data == original_button.callback_data
+                    assert rendered.style == original_button.style
+                    assert rendered.icon_custom_emoji_id
+                    assert not emoji_theme._glyph.match(rendered.text)
+                    if original_button.callback_data == 'flow:support':
+                        assert rendered.icon_custom_emoji_id == '5443038326535759644'
+            for emoji, key in (('📌', 'pin'), ('🔓', 'unlocked'), ('💬', 'chat')):
+                assert f'<tg-emoji emoji-id="{emoji_theme.ICONS[key]}">{emoji}</tg-emoji>' in result.caption
 
     async def callback_handler(event, data):
         # Allow other callbacks to overlap. A different recipient still wins over context.
