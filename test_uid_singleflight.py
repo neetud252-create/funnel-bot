@@ -200,8 +200,10 @@ async def main():
     fb = await submit(tg, GOOD_UID, H.FakeState())
     check("the user is verified without a second submission",
           fake_db._users[tg]["verified"])
-    check("the menu is delivered automatically",
-          any("Signals" in b or "level" in b.lower() for b in _bodies(fb)),
+    ready = H.last_screen(fb)
+    check("successful verification immediately offers analysis and dashboard",
+          {"menu:signal", "flow:dashboard"}.issubset(
+              {b.callback_data for row in ready["markup"].inline_keyboard for b in row}),
           str(_bodies(fb))[:160])
     check("no resend instruction on the success path",
           not any("send your account ID again" in b for b in _bodies(fb)),

@@ -782,7 +782,7 @@ async def _open_uid_entry(bot, tg_id, state=None):
 
 
 async def _show_existing_registration(bot, tg_id, user):
-    ref = await _ref_url(tg_id) if user.get('eligibility_confirmed_at') else None
+    ref = await _ref_url(tg_id)
     if ref:
         await activity_stats.record(tg_id, 'registration_opened')
     await _journey(bot, tg_id, journey.existing(ref),
@@ -800,25 +800,10 @@ async def _resume_setup(bot, tg_id, state=None):
         await _journey(bot, tg_id, journey.account_help(), key='account_question_help')
     elif stage == 'requirements' and user.get('account_kind') == 'new' and not user.get('uid'):
         await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
-    elif stage == 'existing_account':
+    elif stage in ('existing_account', 'existing_register'):
         await _show_existing_registration(bot, tg_id, user)
-    elif stage == 'existing_register':
-        if user.get('eligibility_confirmed_at'):
-            await _show_existing_registration(bot, tg_id, user)
-        else:
-            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
     elif stage == 'referral_help':
         await _journey(bot, tg_id, journey.referral_help(), key='referral_help')
-    elif not user.get('eligibility_confirmed_at'):
-        if stage == 'help':
-            await _journey(bot, tg_id, journey.screen('ineligible', user), key='eligibility_declined')
-        elif user.get('account_kind') or user.get('uid'):
-            if not user.get('account_kind'):
-                await db.set_setup_stage(tg_id, 'eligibility', account_kind='existing')
-            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
-        else:
-            await db.set_setup_stage(tg_id, 'account_question')
-            await _journey(bot, tg_id, journey.setup(), key='account_question')
     elif stage == 'id':
         # Explicit ID entry takes priority over an earlier failed check.
         await _open_uid_entry(bot, tg_id, state)
@@ -869,7 +854,7 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             return
         # An already-linked account continues from its saved deposit result.
         if user.get('uid') and user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT:
-            await db.set_setup_stage(tg_id, 'eligibility', account_kind='existing')
+            await db.set_setup_stage(tg_id, 'deposit', account_kind='existing')
             await _resume_setup(bot, tg_id, state)
         elif action == 'existing' or user.get('uid'):
             await db.set_setup_stage(tg_id, 'existing_account', account_kind='existing')
@@ -886,12 +871,15 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         else:
             await db.set_setup_stage(tg_id, 'existing_register', account_kind='existing')
         await _resume_setup(bot, tg_id, state)
-    elif action == 'eligibility':
+    elif action in ('register', 'eligibility', 'eligible'):
+        # Old Continue/confirmation buttons also resume the simplified setup.
+        # Do not record an age declaration that this flow no longer asks for.
         if user.get('verified'):
             await _show_menu(bot, tg_id)
             return
-        if user.get('account_kind') == 'new' and not user.get('uid'):
-            await db.set_setup_stage(tg_id, 'eligibility')
+        if (user.get('account_kind') == 'new' and not user.get('uid')
+                and user.get('setup_stage') != 'id'):
+            await db.set_setup_stage(tg_id, 'register')
         await _resume_setup(bot, tg_id, state)
     elif action == 'requirements':
         await _journey(bot, tg_id, journey.requirements(), key='access_requirements_details')
@@ -901,12 +889,6 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             return
         await db.set_setup_stage(tg_id, 'referral_help', account_kind='existing')
         await _journey(bot, tg_id, journey.referral_help(), key='referral_help')
-    elif action == 'eligible':
-        if user.get('account_kind') not in ('new', 'existing'):
-            await _journey(bot, tg_id, journey.setup(), key='account_question')
-            return
-        await db.confirm_eligibility(tg_id)
-        await _resume_setup(bot, tg_id, state)
     elif action == 'ineligible':
         await db.clear_eligibility(tg_id)
         await db.set_setup_stage(tg_id, 'help')
@@ -915,12 +897,8 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         if user.get('verified'):
             await _show_menu(bot, tg_id)
             return
-        if not user.get('eligibility_confirmed_at'):
-            # The visitor already registered (or has an existing account).
-            # Preserve the ID-entry intent through the eligibility screen.
-            await db.set_setup_stage(tg_id, 'id', account_kind=user.get('account_kind') or 'existing')
-            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
-            return
+        if not user.get('account_kind'):
+            await db.set_setup_stage(tg_id, 'id', account_kind='existing')
         await _open_uid_entry(bot, tg_id, state)
     elif action == 'id_guide':
         await _journey(bot, tg_id, (config.MSG_ENTER_UID,
@@ -930,7 +908,7 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     elif action == 'recheck':
         if user.get('verified'):
             await _show_menu(bot, tg_id)
-        elif not user.get('eligibility_confirmed_at') or not user.get('uid'):
+        elif not user.get('uid'):
             await _resume_setup(bot, tg_id)
         else:
             await _submit_uid(tg_id, str(user['uid']), bot, state)
@@ -1687,7 +1665,7 @@ async def _show_register(bot, tg_id):
     if user.get('verified'):
         await _show_menu(bot, tg_id)
         return
-    if not user.get('eligibility_confirmed_at') or user.get('account_kind') != 'new' or user.get('uid'):
+    if user.get('account_kind') != 'new' or user.get('uid'):
         await _resume_setup(bot, tg_id)
         return
     url = await _ref_url(tg_id)
@@ -2018,7 +1996,7 @@ async def _submit_uid(tg_id, uid, bot, state):
         await state.clear()
         await _show_menu(bot, tg_id)
         return
-    if not user or not user.get('eligibility_confirmed_at'):
+    if not user:
         await state.clear()
         await _resume_setup(bot, tg_id)
         return
