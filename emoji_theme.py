@@ -63,6 +63,18 @@ ICONS = {
     'gift': '5203996991054432397',
     'money': '5224257782013769471',
     'test': '5411512278740640309',
+    'flag_gb': '5458416160586342331',
+    'flag_ru': '5449408995691341691',
+    'flag_ua': '5447309366568953338',
+    'flag_in': '5447419223242449630',
+    'flag_bd': '5222131025877936317',
+    'flag_pk': '5305740445559570836',
+    'flag_vn': '5474542319673812606',
+    'flag_id': '5291997937486800451',
+    'flag_tr': '5226948110873278599',
+    'flag_es': '5884515815868339417',
+    'flag_sa': '5188644677699510586',
+    'flag_pt': '5382075788369605892',
 }
 GLYPHS = {
     '👋': 'hello', '🤖': 'assistant',
@@ -86,6 +98,9 @@ GLYPHS = {
     '🔔': 'notifications', '🔕': 'muted', '🔀': 'shuffle', '🔥': 'fire',
     '🟢': 'green', '🔴': 'red', '⬆️': 'up', '⬆': 'up', '⬇️': 'down', '⬇': 'down',
     '‼️': 'attention', '‼': 'attention', '🎁': 'gift', '💰': 'money', '🧪': 'test',
+    '🇬🇧': 'flag_gb', '🇷🇺': 'flag_ru', '🇺🇦': 'flag_ua', '🇮🇳': 'flag_in',
+    '🇧🇩': 'flag_bd', '🇵🇰': 'flag_pk', '🇻🇳': 'flag_vn', '🇮🇩': 'flag_id',
+    '🇹🇷': 'flag_tr', '🇪🇸': 'flag_es', '🇸🇦': 'flag_sa', '🇵🇹': 'flag_pt',
 }
 LABELS = {
     'Get Bot Access': 'access', 'Get access to Go +': 'access',
@@ -121,6 +136,15 @@ def html(text):
 def button(button):
     """One native icon per button; keep its label, action, style and language flags."""
     text = button.text
+    # Language buttons end with a flag. Give it the native icon slot even when
+    # a selected-language check precedes the name; keep selection as a text tick.
+    if (button.callback_data or '').startswith('lang:'):
+        label, _, flag = text.rpartition(' ')
+        name = GLYPHS.get(flag, '')
+        if label and name.startswith('flag_'):
+            if label.startswith('✅ '):
+                label = '✓ ' + label.removeprefix('✅ ')
+            return button.model_copy(update={'text': label, 'icon_custom_emoji_id': ICONS[name]})
     leading = _glyph.match(text)
     label = text[leading.end():].strip() if leading else text.removeprefix('« ').strip()
     # An explicit glyph chooses its supplied artwork. In particular, the new
