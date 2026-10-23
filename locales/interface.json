@@ -519,19 +519,6 @@
     "ar": "\nلا توجد أصول مطابقة. حاول اسم آخر.",
     "pt": "\nNão há recursos correspondentes. Tente outro nome."
   },
-  "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Expiration:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Trend:</b> {trend}\n<b>Momentum:</b> {momentum}\n\n<b>Last close:</b> {close}\n<b>Candle closed:</b> {closed}\n<b>Chart candles:</b> M{period}\n<i>{source} · AI analysis of completed candles. Predictions can be wrong.</i>": {
-    "ru": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Экспирация:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Тренд:</b> {trend}\n<b>Импульс:</b> {momentum}\n\n<b>Последняя цена закрытия:</b> {close}\n<b>Свеча закрылась:</b> {closed}\n<b>Свечи графика:</b> M{period}\n<i>{source} · ИИ-анализ закрытых свечей. Прогнозы могут быть ошибочными.</i>",
-    "uk": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Експірація:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Тренд:</b> {trend}\n<b>Імпульс:</b> {momentum}\n\n<b>Остання ціна закриття:</b> {close}\n<b>Свічка закрилася:</b> {closed}\n<b>Свічки графіка:</b> M{period}\n<i>{source} · ШІ-аналіз закритих свічок. Прогнози можуть бути хибними.</i>",
-    "hi": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>एक्सपायरी:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>ट्रेंड:</b> {trend}\n<b>मोमेंटम:</b> {momentum}\n\n<b>अंतिम बंद भाव:</b> {close}\n<b>कैंडल बंद हुई:</b> {closed}\n<b>चार्ट की कैंडल:</b> M{period}\n<i>{source} · बंद कैंडल का AI विश्लेषण। अनुमान गलत हो सकते हैं।</i>",
-    "bn": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>মেয়াদ:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>ট্রেন্ড:</b> {trend}\n<b>মোমেন্টাম:</b> {momentum}\n\n<b>সর্বশেষ বন্ধের মূল্য:</b> {close}\n<b>ক্যান্ডেল বন্ধ হয়েছে:</b> {closed}\n<b>চার্টের ক্যান্ডেল:</b> M{period}\n<i>{source} · বন্ধ ক্যান্ডেলের AI বিশ্লেষণ। পূর্বাভাস ভুল হতে পারে।</i>",
-    "ur": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>میعاد:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>رجحان:</b> {trend}\n<b>مومینٹم:</b> {momentum}\n\n<b>آخری اختتامی قیمت:</b> {close}\n<b>کینڈل بند ہوئی:</b> {closed}\n<b>چارٹ کی کینڈلز:</b> M{period}\n<i>{source} · بند کینڈلز کا AI تجزیہ۔ پیش گوئیاں غلط ہو سکتی ہیں۔</i>",
-    "vi": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Thời gian hết hạn:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Xu hướng:</b> {trend}\n<b>Động lượng:</b> {momentum}\n\n<b>Giá đóng cửa gần nhất:</b> {close}\n<b>Nến đóng lúc:</b> {closed}\n<b>Nến trên biểu đồ:</b> M{period}\n<i>{source} · AI phân tích các nến đã đóng. Dự đoán có thể sai.</i>",
-    "id": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Waktu kedaluwarsa:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Tren:</b> {trend}\n<b>Momentum:</b> {momentum}\n\n<b>Harga penutupan terakhir:</b> {close}\n<b>Candle ditutup:</b> {closed}\n<b>Candle grafik:</b> M{period}\n<i>{source} · Analisis AI atas candle yang telah ditutup. Prediksi bisa salah.</i>",
-    "tr": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Vade süresi:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Trend:</b> {trend}\n<b>Momentum:</b> {momentum}\n\n<b>Son kapanış fiyatı:</b> {close}\n<b>Mum kapanış zamanı:</b> {closed}\n<b>Grafik mumları:</b> M{period}\n<i>{source} · Kapanmış mumların yapay zekâ analizi. Tahminler yanlış olabilir.</i>",
-    "es": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Vencimiento:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Tendencia:</b> {trend}\n<b>Impulso:</b> {momentum}\n\n<b>Último precio de cierre:</b> {close}\n<b>Cierre de la vela:</b> {closed}\n<b>Velas del gráfico:</b> M{period}\n<i>{source} · Análisis con IA de velas cerradas. Las predicciones pueden fallar.</i>",
-    "ar": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>مدة الصفقة:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>الاتجاه:</b> {trend}\n<b>الزخم:</b> {momentum}\n\n<b>سعر الإغلاق الأخير:</b> {close}\n<b>أُغلقت الشمعة في:</b> {closed}\n<b>إطار شموع الرسم:</b> M{period}\n<i>{source} · تحليل الشموع المكتملة بالذكاء الاصطناعي. قد تكون التوقعات خاطئة.</i>",
-    "pt": "📊 <b>{asset}</b>\n\n<b>{direction}</b>\n<b>Expiração:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n<b>Tendência:</b> {trend}\n<b>Impulso:</b> {momentum}\n\n<b>Último preço de fechamento:</b> {close}\n<b>Fechamento da vela:</b> {closed}\n<b>Velas do gráfico:</b> M{period}\n<i>{source} · Análise por IA de velas fechadas. As previsões podem estar erradas.</i>"
-  },
   "Open the bot in a private chat.": {
     "ru": "Откройте бота в приватном чате.",
     "uk": "Відкрийте бота в приватному чаті.",
@@ -1909,5 +1896,31 @@
     "es": "Elige el tiempo de vencimiento con los botones de abajo.",
     "ar": "اختر مدة الصفقة باستخدام الأزرار أدناه.",
     "pt": "Escolha o tempo de expiração usando os botões abaixo."
+  },
+  "✅ <b>Your Signal Is Ready!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Expiration: <b>{expiry}</b>\n<b>Reason:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>": {
+    "ru": "✅ <b>Ваш сигнал готов!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Экспирация: <b>{expiry}</b>\n<b>Причина:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "uk": "✅ <b>Ваш сигнал готовий!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Експірація: <b>{expiry}</b>\n<b>Причина:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "hi": "✅ <b>आपका सिग्नल तैयार है!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ समाप्ति समय: <b>{expiry}</b>\n<b>कारण:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "bn": "✅ <b>আপনার সিগন্যাল প্রস্তুত!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ মেয়াদ: <b>{expiry}</b>\n<b>কারণ:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "ur": "✅ <b>آپ کا سگنل تیار ہے!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ میعاد: <b>{expiry}</b>\n<b>وجہ:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "vi": "✅ <b>Tín hiệu của bạn đã sẵn sàng!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Thời gian hết hạn: <b>{expiry}</b>\n<b>Lý do:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "id": "✅ <b>Sinyal Anda Siap!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Waktu kedaluwarsa: <b>{expiry}</b>\n<b>Alasan:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "tr": "✅ <b>Sinyaliniz Hazır!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Vade süresi: <b>{expiry}</b>\n<b>Gerekçe:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "es": "✅ <b>¡Tu señal está lista!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Vencimiento: <b>{expiry}</b>\n<b>Motivo:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "ar": "✅ <b>إشارتك جاهزة!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ مدة الصفقة: <b>{expiry}</b>\n<b>السبب:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>",
+    "pt": "✅ <b>Seu sinal está pronto!</b>\n\n{asset_label} <b>{asset}</b>\n⏱ Expiração: <b>{expiry}</b>\n<b>Motivo:</b> {reason}{qualification}\n\n{direction_icon} <b>{direction}</b>"
+  },
+  "Asset:": {
+    "ru": "Актив:",
+    "uk": "Актив:",
+    "hi": "एसेट:",
+    "bn": "সম্পদ:",
+    "ur": "اثاثہ:",
+    "vi": "Tài sản:",
+    "id": "Aset:",
+    "tr": "Varlık:",
+    "es": "Activo:",
+    "ar": "الأصل:",
+    "pt": "Ativo:"
   }
 }

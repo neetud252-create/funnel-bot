@@ -115,6 +115,8 @@ def asset_path(key, ext):
         ext = 'png'
     elif key == journey.REGISTER_PHOTO and ext == 'jpg':
         ext = 'png'
+    elif key in market_signals.DIRECTION_BANNERS.values() and ext == 'jpg':
+        ext = 'png'
     return "assets/" + key + "." + ext
 
 def content_hash(path):
@@ -467,17 +469,18 @@ async def wipe(bot, tg_id):
         await db.set_album(tg_id, None)
 
 async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
-                 reply_to_message_id=None, raise_on_error=False, screen_key=None):
+                 reply_to_message_id=None, raise_on_error=False, screen_key=None, companion_key=None):
     token = analytics._screen.set(screen_key or analytics.screen_name(text))
     try:
         return await _render(bot, tg_id, media_key, text, kb_rows, is_video,
-                             reply_to_message_id=reply_to_message_id, raise_on_error=raise_on_error)
+                             reply_to_message_id=reply_to_message_id, raise_on_error=raise_on_error,
+                             companion_key=companion_key)
     finally:
         analytics._screen.reset(token)
 
 
 async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
-                 reply_to_message_id=None, raise_on_error=False):
+                 reply_to_message_id=None, raise_on_error=False, companion_key=None):
     is_home_media = media_key in (home_menu.ANIMATION, home_menu.VIDEO)
     if is_home_media and media_missing(media_key, 'mp4'):
         media_key, is_video = home_menu.PHOTO, False
@@ -555,7 +558,38 @@ async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
         await _screen_error(bot, tg_id)
         return
     await db.set_ui_msg(tg_id, m.message_id)
+    if companion_key:
+        await _send_result_banner(bot, tg_id, m.message_id, companion_key, kb)
     return m
+
+
+async def _send_result_banner(bot, tg_id, chart_id, key, kb):
+    """Keep an already-delivered result usable if its decorative banner fails."""
+    banner = None
+    try:
+        user = await db.get_user(tg_id)
+        if not user or user.get('ui_msg_id') != chart_id or media_missing(key, 'jpg'):
+            return
+        banner = await send_media(bot, tg_id, key, False, '', kb)
+        await remember(key, banner)
+        if not await db.set_album_for_ui(tg_id, chart_id, str(banner.message_id)):
+            await _drop_msgs(bot, tg_id, [banner.message_id])
+            return
+    except asyncio.CancelledError:
+        if banner:
+            await _drop_msgs(bot, tg_id, [banner.message_id])
+        raise
+    except Exception as exc:
+        if banner:
+            await _drop_msgs(bot, tg_id, [banner.message_id])
+        logging.warning('Signal banner unavailable: %s', type(exc).__name__)
+        return
+    # Only move controls after both messages are delivered and tracked. The
+    # chart keeps its buttons if sending the banner failed; neither costs again.
+    try:
+        await bot.edit_message_reply_markup(chat_id=tg_id, message_id=chart_id, reply_markup=None)
+    except Exception as exc:
+        logging.warning('Signal chart controls retained: %s', type(exc).__name__)
 
 async def _screen_error(bot, tg_id):
     # Plain text: no HTML, no entities, no keyboard. Whatever broke the screen

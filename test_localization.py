@@ -27,6 +27,7 @@ def sample(source):
                   balance=12, needed=38, seconds=20, wait='00:30', pair='GBP/USD OTC',
                   expiry='M1', direction=config.SIGNAL_DIRECTIONS[0][0],
                   asset='GBP/USD OTC', timeframe='M1', reason='visible structure',
+                  asset_label='💱 Currency pair:', direction_icon='📈',
                   trend='upward', momentum='buyers active', timer='1 minute', count=2,
                   invalidation='visible support breaks', condition='visible support breaks',
                   market='OTC', title='Select a currency pair', query='Home Depot &lt;test&gt;',

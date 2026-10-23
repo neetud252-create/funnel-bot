@@ -1,6 +1,5 @@
 """Asset picker -> validated candles -> generated chart -> existing AI analysis."""
 import asyncio
-from datetime import datetime, timezone
 import html
 import logging
 import secrets
@@ -24,6 +23,7 @@ import market_catalog as catalog
 PAGE_SIZE = 6
 EXPIRIES = tuple(range(1, 11))
 SECOND_EXPIRIES = (5, 10, 15, 20, 25, 30, 45, 50, 55)
+DIRECTION_BANNERS = {'BUY': 'signal_buy', 'SELL': 'signal_sell'}
 BACK = [[('⬅️ Home', 'cb:home:back', 'danger')]]
 RETRY = [[('📊 Choose Asset', 'cb:market:open', 'primary')],
          *BACK]
@@ -50,17 +50,16 @@ EMPTY_CATEGORY = '📋 <b>{title}</b>\n\nNo assets are listed in this market cat
 EXPIRATION_TITLE = '⏱ <b>Choose the expiration time</b>\n{asset}'
 SEARCH = '\n\nSearch: <b>{query}</b>'
 NO_MATCHES = '\nNo matching assets. Try another name.'
-RESULT = ('📊 <b>{asset}</b>\n\n<b>{direction}</b>\n'
-          '<b>Expiration:</b> {expiry} · {duration}\n<i>{qualification}</i>\n\n'
-          '<b>Trend:</b> {trend}\n<b>Momentum:</b> {momentum}\n\n'
-          '<b>Last close:</b> {close}\n<b>Candle closed:</b> {closed}\n'
-          '<b>Chart candles:</b> M{period}\n'
-          '<i>{source} · AI analysis of completed candles. Predictions can be wrong.</i>')
+RESULT = ('✅ <b>Your Signal Is Ready!</b>\n\n'
+          '{asset_label} <b>{asset}</b>\n'
+          '⏱ Expiration: <b>{expiry}</b>\n'
+          '<b>Reason:</b> {reason}{qualification}\n\n'
+          '{direction_icon} <b>{direction}</b>')
 ALERTS = ('Open the bot in a private chat.', 'Choose an expiration using the buttons below.',
           'Type an asset name, or use the buttons below.',
           'Choose a market and category using the buttons below.')
 SOURCES = (*MESSAGES.values(), MARKET_TITLE, CATEGORY_TITLE, PICKER_TITLE,
-           EMPTY_CATEGORY, EXPIRATION_TITLE, SEARCH, NO_MATCHES, RESULT, *ALERTS)
+           EMPTY_CATEGORY, EXPIRATION_TITLE, SEARCH, NO_MATCHES, RESULT, 'Asset:', *ALERTS)
 
 
 class Market(StatesGroup):
@@ -245,17 +244,20 @@ def result_text(snapshot, result, expiry=1, language='en', *, expiry_unit='m'):
     direction = result.get('direction')
     if not chart_strategy.supports_signal(result) or not valid_expiry(expiry, expiry_unit):
         raise api.AnalysisError('response')
-    status = '🟢 BUY' if direction == 'BUY' else '🔴 SELL'
     tr = lambda text: localization.translate_parts(text, language)
-    qualification = tr('Confirmed setup' if confirmed else chart_strategy.TENTATIVE_NOTE)
-    safe = lambda value: html.escape(str(value)[:180])
-    closed = datetime.fromtimestamp(snapshot.closed_at, timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    return tr(RESULT).format(asset=html.escape(snapshot.asset.name), direction=status,
-        expiry=f'{expiry_unit.upper()}{expiry}',
-        duration=chart_signals.timer_text(f'{expiry_unit}{expiry}', language), qualification=qualification,
-        trend=safe(result.get('trend', '')), momentum=safe(result.get('momentum', '')),
-        close=f'{snapshot.candles[-1].close:.8g}', closed=closed,
-        period=snapshot.period//60, source=html.escape(snapshot.source))
+    qualification = '' if confirmed else '\n<i>' + tr(chart_strategy.TENTATIVE_NOTE) + '</i>'
+    reason = result.get('reason')
+    if not isinstance(reason, str) or not reason.strip():
+        raise api.AnalysisError('response')
+    reason = ' '.join(reason.split())
+    if len(reason) > 240:
+        reason = reason[:237].rsplit(' ', 1)[0].rstrip('.,;:') + '…'
+    entry = catalog.find(catalog.entries((snapshot.asset,)), snapshot.asset.key)
+    is_forex = entry and entry.category == 'forex'
+    label = ('💱 ' + tr('Currency pair:')) if is_forex else ('📊 ' + tr('Asset:'))
+    return tr(RESULT).format(asset_label=label, asset=html.escape(snapshot.asset.name),
+        expiry=f'{expiry_unit.upper()}{expiry}', reason=html.escape(reason),
+        qualification=qualification, direction_icon='📈' if direction == 'BUY' else '📉', direction=direction)
 
 
 async def analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, expiry_unit='m'):
@@ -365,7 +367,8 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, 
         try:
             delivery_attempted = True
             await render(bot, tg_id, BufferedInputFile(png, filename='pocket-iq-chart.png'),
-                         caption, rows, raise_on_error=True, screen_key='market_result')
+                         caption, rows, raise_on_error=True, screen_key='market_result',
+                         companion_key=DIRECTION_BANNERS[result['direction']])
         except (TelegramBadRequest, TelegramForbiddenError):
             await trial.release(db.pool, token, delivery_rejected=True)
             raise

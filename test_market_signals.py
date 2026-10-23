@@ -65,9 +65,12 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(args[2], BufferedInputFile)
         self.assertEqual(args[2].data, b'PNG')
         self.assertIn('EUR/USD OTC', args[3])
-        self.assertIn('🟢 BUY', args[3])
-        self.assertIn('Expiration:</b> M1', args[3])
-        self.assertIn('Confirmed setup', args[3])
+        self.assertIn('✅ <b>Your Signal Is Ready!</b>', args[3])
+        self.assertIn('Currency pair: <b>EUR/USD OTC</b>', args[3])
+        self.assertIn('Expiration: <b>M1</b>', args[3])
+        self.assertIn('<b>Reason:</b> '+VALID['reason'], args[3])
+        self.assertTrue(args[3].endswith('📈 <b>BUY</b>'))
+        self.assertEqual(self.render.await_args.kwargs['companion_key'], 'signal_buy')
         self.assertIn('60 seconds', flow.api.analyse.await_args.args[2])
         flow.trial.reserve.assert_awaited_once_with(None, 11, -123)
         flow.trial.consume.assert_awaited_once_with(None, 'slot')
@@ -82,6 +85,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('WAIT', self.render.await_args.args[3])
             self.assertIn(direction, self.render.await_args.args[3])
             self.assertIn('Tentative bias', self.render.await_args.args[3])
+            self.assertEqual(self.render.await_args.kwargs['companion_key'],
+                             'signal_buy' if direction=='BUY' else 'signal_sell')
 
     async def test_invalid_strategy_result_never_fabricates_or_consumes(self):
         for result in (dict(VALID, direction=None), dict(VALID, direction='WAIT'),
@@ -106,9 +111,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
                 await callbacks[0](cb, self.bot, self.state)
                 self.feed.candles.assert_awaited_with(ASSET.key, 60)
                 code = f'{unit.upper()}{expiry}'
-                duration = flow.chart_signals.timer_text(code, 'en')
-                self.assertIn(f'Expiration:</b> {code} · {duration}', self.render.await_args.args[3])
-                self.assertIn('Chart candles:</b> M1', self.render.await_args.args[3])
+                self.assertIn(f'Expiration: <b>{code}</b>', self.render.await_args.args[3])
                 word = 'seconds' if unit == 's' else 'minutes'
                 self.assertIn(f'User-selected expiration: {expiry} {word}', flow.api.analyse.await_args.args[2])
                 self.assertIn('cb:'+callback, str(self.render.await_args.args[4]))
@@ -330,7 +333,9 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('not connected', self.render.await_args.args[3])
         await flow.analyse(self.cb, self.bot, self.state, self.render, entry.key)
         self.feed.candles.assert_awaited_once_with(asset.key, 60)
-        self.assertIn('Pocket Option demo feed', self.render.await_args.args[3])
+        # Provenance remains on the chart, while the requested caption is short.
+        self.assertEqual(flow.market_chart.render.call_args.args[0].source, 'Pocket Option demo feed')
+        self.assertIn('Currency pair: <b>EUR/USD</b>', self.render.await_args.args[3])
         self.assertNotIn('OTCharts', self.render.await_args.args[3])
         flow.trial.consume.assert_awaited_once()
 
