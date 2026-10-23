@@ -75,6 +75,9 @@ the blue arrow; tutorials and forward navigation use the green play icon, while
 YouTube-labelled buttons retain their branded icon. Gallery arrows gain Back/Next
 labels with native icons. The supplied warning ID already matches the theme;
 the OTC diamond still awaits a custom ID.
+All twelve language buttons use the owner's custom flag IDs as native icons.
+The selected language keeps its flag and displays a text checkmark beside its
+name; the existing two-column layout, language callbacks, and saved choice remain.
 Text-only fallback welcomes are updated with the text-edit API. Deleted or
 blocked chats are left alone; failed edits never block access to normal menus.
 

@@ -102,6 +102,25 @@ async def check_delivery_and_selector():
     assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 1]
     selected = [b.callback_data for row in markup.inline_keyboard for b in row if b.text.startswith('✅')]
     assert selected == ['lang:hi']
+    # Every selected language must retain its flag icon, not have the selection
+    # check take the only native icon slot. Names and callbacks stay recognizable.
+    for language in L.CODES:
+        source = SendMessage(chat_id=1, text=L.SELECTOR_TEXT, parse_mode='HTML',
+                             reply_markup=bot_mod.build_kb(L.selector_keyboard(language)))
+        rendered = L.localize_method(source, language)
+        buttons = [b for row in rendered.reply_markup.inline_keyboard for b in row]
+        assert [len(row) for row in rendered.reply_markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 1]
+        assert [b.callback_data for b in buttons if b.text.startswith('✓ ')] == ['lang:' + language]
+        for button, (code, label) in zip(buttons, L.LANGUAGES):
+            name, flag = label.rsplit(' ', 1)
+            assert button.text == ('✓ ' if code == language else '') + name
+            assert button.icon_custom_emoji_id == emoji_theme.ICONS[emoji_theme.GLYPHS[flag]]
+            assert button.callback_data == 'lang:' + code and button.style == 'success'
+            assert '<tg-emoji' not in button.text and flag not in button.text
+        assert buttons[-1].callback_data == 'home:back'
+        # Rendering twice must not replace the selected flag with a check icon.
+        assert L.localize_method(rendered, language).reply_markup == rendered.reply_markup
+        assert any(b.text.startswith('✅ ') for row in source.reply_markup.inline_keyboard for b in row)
     initial = dict(db._users[1])
     await bot_mod.choose_language(H.FakeCB(1, 'lang:pt', 10), bot)
     assert await L.language_for(1) == 'pt'
