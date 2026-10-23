@@ -6,11 +6,14 @@ This updates the existing aiogram bot. There is no Mini App or second polling se
 flowchart TD
   Home[Pocket IQ welcome animation and home menu] --> Trial[Two free lifetime chart analyses]
   Home --> Learn[How it works / Reviews / Community / Tools / Support]
-  Home --> Requirements[Access requirements and referral disclosure]
-  Requirements --> Kind{New or existing account?}
-  Kind --> Eligibility[Read eligibility rules and self-confirm]
-  Eligibility --> New[New account: existing tracked referral link]
-  Eligibility --> Existing[Existing account: keep current account]
+  Home --> Kind{Already have a Pocket Option account?}
+  Kind -->|No| Intro[Account setup introduction]
+  Intro -->|Continue Setup| New[Tracked registration link]
+  Kind -->|Yes| Existing[Registration link and UID verification]
+  Kind -->|Not sure| AccountHelp[Account recovery guidance]
+  AccountHelp --> Kind
+  New --> Requirements[Access requirements and referral disclosure]
+  Existing --> Requirements
   New --> ID[Submit Trader ID]
   Existing --> ID
   ID --> Check{Live affiliate verification}
@@ -89,8 +92,11 @@ blocked chats are left alone; failed edits never block access to normal menus.
 
 `db.SCHEMA` adds setup progress, account path, eligibility timestamp, and the last access-check outcome.
 All migrations use `ADD COLUMN IF NOT EXISTS`; existing verification, language, attribution, and quotas remain.
-Returning setup resumes from persisted account state. Eligibility is a self-declaration, not broker KYC.
-The optional background retry only checks users who have confirmed eligibility.
+Returning setup resumes from persisted account state. Continue Setup opens registration directly;
+there is no separate age-confirmation screen. Older eligibility callbacks and saved stages resume
+the current registration or UID step. The historical eligibility timestamp is retained without
+automatically recording a declaration for users in the simplified flow.
+The optional background retry checks unverified users who have submitted a UID.
 The existing panel campaign check and qualifying-deposit totals decide access.
 Missing, non-finite, or invalid deposit data produces pending status, never a confirmed zero or access grant.
 Typed ID retries remain single-flight and throttled. Premium stays tied to the verified account and real deposit check.
@@ -125,7 +131,7 @@ For rollback, redeploy the previous commit; the added nullable/defaulted columns
 
 Run `python scripts/check_offline.py` with the existing requirements installed.
 It isolates each test process and excludes tests requiring live AI or a PostgreSQL test database.
-Navigation tests cover eligibility, new/existing accounts, resume after restart, saved-ID deposit retries,
+Navigation tests cover direct setup, legacy callbacks, new/existing accounts, resume after restart, saved-ID deposit retries,
 unavailable/wrong-link states, notification preferences, every help screen, and Premium checks.
 Existing suites cover quota refunds, duplicate uploads, cancellation, panel single-flight checks,
 media fallbacks, localization, analytics, reminders, and broadcasts.

@@ -72,11 +72,6 @@ REQUIREMENTS = ('ℹ️ <b>Pocket IQ access requirements</b>\n\n'
     'Already have an account? Confirm with Pocket Option that a replacement is allowed '
     'before registering. Its terms permit only one trading account per client.\n\n'
     + DISCLOSURE + '\n\nYou do not need to deposit before your Trader ID is checked.')
-ELIGIBILITY = ('🌍 <b>Before you continue</b>\n\n'
-    'Read the broker’s eligibility and restricted-location rules below. Only continue '
-    'if you are 18 or older, meet the legal age requirement where you live, and '
-    'the service is available to you under those rules.\n\n'
-    + RISK + '\n\nYour confirmation is a self-declaration, not broker identity verification.')
 REGISTER = ('🔗 <b>Get Pocket IQ Access</b>\n\n'
     'Ready to explore your charts with Pocket IQ? Get clear, easy-to-follow '
     'market analysis directly in Telegram.\n\n'
@@ -178,7 +173,7 @@ TEXTS = {
         'and bonus terms before depositing. Go Plus does not receive or hold your trading funds.',
     'privacy': ('🔒 <b>Your privacy</b>\n\n'
         'Go Plus stores your Telegram ID, selected language, setup progress, linked Trader ID, '
-        'access checks, button activity, and usage in its database. Eligibility is self-declared.\n\n'
+        'access checks, button activity, and usage in its database.\n\n'
         'Chart screenshots and your caption are sent to the configured AI provider for analysis. '
         'Crop out personal details before uploading. Telegram and the provider apply their own policies.\n\n'
         'The bot does not need your trading password, login codes, or payment details. '
@@ -191,7 +186,7 @@ TEXTS = {
         'Please contact support for the current destination. No registration or payment has been completed.'),
 }
 SOURCES = (RISK, DISCLOSURE, ACCOUNT_QUESTION, ACCOUNT_UNSURE, REGISTRATION_INTRO, REQUIREMENTS,
-           ELIGIBILITY, REGISTER, EXISTING, REFERRAL_HELP, UID, DEPOSIT, READY,
+           REGISTER, EXISTING, REFERRAL_HELP, UID, DEPOSIT, READY,
            PENDING, UNLINKED, PREMIUM, PREMIUM_SHORT, *TEXTS.values())
 
 
@@ -249,7 +244,7 @@ def account_help():
 
 def new_account():
     return REGISTRATION_INTRO, [
-        [cb('🚀 Continue Setup', 'eligibility', True)],
+        [cb('🚀 Continue Setup', 'register', True)],
         [cb('ℹ️ Access Requirements', 'requirements')],
         [cb('👤 I Already Have an Account', 'existing')],
         [cb('❓ Questions About Access', 'support')], *back('setup')]
@@ -259,12 +254,6 @@ def requirements():
     return REQUIREMENTS.format(limit=config.daily_limit(False), required=money(config.MIN_DEPOSIT)), [
         [button('🚀 Continue Setup', 'cb:home:access', 'success')],
         [cb('💬 Support', 'support')]]
-
-
-def eligibility():
-    return ELIGIBILITY, [[url('🌍 Read Eligibility & Restricted Locations', config.BROKER_TERMS_URL)],
-        [cb('✅ I’m 18+ and Meet the Requirements', 'eligible', True)],
-        [cb('I Do Not Meet the Requirements', 'ineligible')], *back('setup')]
 
 
 def registration(ref):

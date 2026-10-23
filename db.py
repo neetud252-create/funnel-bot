@@ -692,5 +692,4 @@ async def consume_signal(tg_id: int, limit: int):
 async def unverified_with_uid():
     async with pool.acquire() as c:
         return await c.fetch(
-            "SELECT tg_id, uid FROM users WHERE uid IS NOT NULL AND verified=FALSE "
-            "AND eligibility_confirmed_at IS NOT NULL")
+            "SELECT tg_id, uid FROM users WHERE uid IS NOT NULL AND verified=FALSE")
