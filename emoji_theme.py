@@ -42,6 +42,13 @@ ICONS = {
     'refresh': '5346269127059196142',
     'pause': '5116447063432758252',
     'settings': '5341715473882955310',
+    'analysis': '6012529369119987828',
+    'market': '5206598117738177151',
+    'momentum': '5269254848703902904',
+    'image': '5257974976094412956',
+    'pending': '5445164438426507058',
+    'currency': '5377336227533969892',
+    'timer': '5195352914104694560',
 }
 GLYPHS = {
     '👋': 'hello', '🤖': 'assistant',
@@ -58,6 +65,9 @@ GLYPHS = {
     '❗️': 'warning', '❗': 'warning', '⚠️': 'warning', '⚠': 'warning',
     '⛔': 'blocked', '⏳': 'waiting', '🔄': 'refresh',
     '⏸️': 'pause', '⏸': 'pause', '⚙️': 'settings', '⚙': 'settings',
+    '🔲': 'analysis', '💗': 'market', '🪙': 'momentum',
+    '🖼️': 'image', '🖼': 'image', '▫️': 'pending', '▫': 'pending',
+    '💱': 'currency', '⏱️': 'timer', '⏱': 'timer',
 }
 LABELS = {
     'Get Bot Access': 'access', 'Get access to Go +': 'access',
