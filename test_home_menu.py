@@ -44,8 +44,8 @@ async def main():
         if verified:
             assert 'menu:signal' in [b.callback_data for row in bot.calls[-1]['markup'].inline_keyboard for b in row]
         else:
-            assert 'qualifying deposits' in bot.calls[-1]['body']
-            assert fake_db._users[uid]['setup_stage'] == 'requirements'
+            assert 'Do you already have a Pocket Option account?' in bot.calls[-1]['body']
+            assert fake_db._users[uid]['setup_stage'] == 'account_question'
         await bot_mod.nav(H.FakeCB(uid, 'go:guide', 1), bot, state)
         assert bot.calls[-1]['asset'] == 'assets/guide_opPxk6Af.mp4'
         await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)

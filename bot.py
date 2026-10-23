@@ -780,29 +780,44 @@ async def _open_uid_entry(bot, tg_id, state=None):
 
 
 async def _resume_setup(bot, tg_id, state=None):
-    user = await db.get_user(tg_id)
-    if user and user.get('verified'):
+    user = await db.get_user(tg_id) or {}
+    stage = user.get('setup_stage')
+    if user.get('verified'):
         await _show_menu(bot, tg_id)
-    elif not user or not user.get('eligibility_confirmed_at'):
-        if user and user.get('account_kind'):
+    elif stage == 'account_question':
+        await _journey(bot, tg_id, journey.setup(), key='account_question')
+    elif stage == 'account_help':
+        await _journey(bot, tg_id, journey.account_help(), key='account_question_help')
+    elif stage == 'requirements' and user.get('account_kind') == 'new' and not user.get('uid'):
+        await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
+    elif stage == 'existing_account' and not user.get('uid'):
+        await _journey(bot, tg_id, journey.existing(), key='existing_account')
+    elif not user.get('eligibility_confirmed_at'):
+        if stage == 'help':
+            await _journey(bot, tg_id, journey.screen('ineligible', user), key='eligibility_declined')
+        elif user.get('account_kind') or user.get('uid'):
+            if not user.get('account_kind'):
+                await db.set_setup_stage(tg_id, 'eligibility', account_kind='existing')
             await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
         else:
-            await db.set_setup_stage(tg_id, 'requirements')
-            await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+            await db.set_setup_stage(tg_id, 'account_question')
+            await _journey(bot, tg_id, journey.setup(), key='account_question')
+    elif stage == 'id':
+        # Explicit ID entry takes priority over an earlier failed check.
+        await _open_uid_entry(bot, tg_id, state)
     elif user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT and user.get('uid'):
         await _journey(bot, tg_id, journey.deposit(user['access_check_deposit']), key='deposit_requirements')
     elif user.get('access_check_status') == config.VERIFY_WRONG_LINK:
         await _journey(bot, tg_id, journey.unlinked(), key='account_unlinked')
     elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
         await _journey(bot, tg_id, journey.pending(), key='verification_pending')
-    elif user.get('setup_stage') == 'id':
-        await _open_uid_entry(bot, tg_id, state)
     elif user.get('account_kind') == 'existing' or user.get('uid'):
         await _journey(bot, tg_id, journey.existing(), key='existing_account')
     elif user.get('account_kind') == 'new':
         await _show_register(bot, tg_id)
     else:
-        await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+        await db.set_setup_stage(tg_id, 'account_question')
+        await _journey(bot, tg_id, journey.setup(), key='account_question')
 
 
 @dp.callback_query(F.data.startswith('flow:'))
@@ -823,24 +838,38 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         if user.get('verified'):
             await _show_menu(bot, tg_id)
             return
-        await db.set_setup_stage(tg_id, 'requirements')
-        await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+        await db.set_setup_stage(tg_id, 'account_question')
+        await _journey(bot, tg_id, journey.setup(), key='account_question')
+    elif action == 'not_sure':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        await db.set_setup_stage(tg_id, 'account_help')
+        await _journey(bot, tg_id, journey.account_help(), key='account_question_help')
     elif action in ('new', 'existing'):
         if user.get('verified'):
             await _show_menu(bot, tg_id)
             return
         # A saved account must never be steered into creating a duplicate.
-        kind = 'existing' if user.get('uid') else action
-        await db.set_setup_stage(tg_id, 'eligibility', account_kind=kind)
-        if not user.get('eligibility_confirmed_at'):
-            await _journey(bot, tg_id, journey.eligibility(), key='eligibility')
-        elif kind == 'existing':
+        if user.get('uid'):
+            await db.set_setup_stage(tg_id, 'eligibility', account_kind='existing')
+            await _resume_setup(bot, tg_id, state)
+        elif action == 'existing':
+            await db.set_setup_stage(tg_id, 'existing_account', account_kind='existing')
             await _journey(bot, tg_id, journey.existing(), key='existing_account')
         else:
-            await _show_register(bot, tg_id)
+            await db.set_setup_stage(tg_id, 'requirements', account_kind='new')
+            await _journey(bot, tg_id, journey.new_account(), key='access_requirements')
+    elif action == 'eligibility':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        if user.get('account_kind') == 'new' and not user.get('uid'):
+            await db.set_setup_stage(tg_id, 'eligibility')
+        await _resume_setup(bot, tg_id, state)
     elif action == 'eligible':
         if user.get('account_kind') not in ('new', 'existing'):
-            await _journey(bot, tg_id, journey.setup(), key='access_requirements')
+            await _journey(bot, tg_id, journey.setup(), key='account_question')
             return
         await db.confirm_eligibility(tg_id)
         await _resume_setup(bot, tg_id, state)
@@ -861,7 +890,8 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await _open_uid_entry(bot, tg_id, state)
     elif action == 'id_guide':
         await _journey(bot, tg_id, (config.MSG_ENTER_UID,
-            [[journey.cb('✅ Ready — Enter My ID', 'enter_id')], *journey.back('setup')]),
+            [[journey.cb('✅ Ready — Enter My ID', 'enter_id')],
+             [journey.button('⬅️ Back', 'cb:home:access')]]),
             media=config.UID_GUIDE_PHOTO, key='account_id_guide')
     elif action == 'recheck':
         if user.get('verified'):
@@ -1733,13 +1763,12 @@ async def _run_verification(bot, tg_id, uid):
         await db.record_access_check(tg_id, status, detail)
         await db.set_setup_stage(tg_id, 'active')
         await _clear_nudge(bot, tg_id)
-        # Verified: drop the acknowledgement and open the trading menu.
-        # The workbook is available only from the welcome-menu sheet button.
+        # Confirm completion and let the user choose their next action.
         try:
             await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
         except Exception:
             pass
-        await _show_menu(bot, tg_id)
+        await _journey(bot, tg_id, journey.ready(), key='access_ready')
         return status
     if status == config.VERIFY_NEED_DEPOSIT:
         await db.record_access_check(tg_id, status, detail)
@@ -1763,6 +1792,7 @@ async def _run_verification(bot, tg_id, uid):
     logging.warning("VERIFY EXHAUSTED tg_id=%s uid=%s reason=%s after %d retries",
                     tg_id, uid, detail, attempt)
     await db.record_access_check(tg_id, config.VERIFY_TEMPORARY)
+    await db.set_setup_stage(tg_id, 'help')
     text, rows = journey.pending()
     await _replace(bot, tg_id, ack.message_id, text, rows)
     return config.VERIFY_TEMPORARY
