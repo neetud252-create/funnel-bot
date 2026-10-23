@@ -7,15 +7,12 @@ flowchart TD
   Home[Pocket IQ welcome animation and home menu] --> Trial[Two free lifetime chart analyses]
   Home --> Learn[How it works / Reviews / Community / Tools / Support]
   Home --> Kind{Already have a Pocket Option account?}
-  Kind -->|No| Intro[Account setup introduction]
-  Intro -->|Continue Setup| New[Tracked registration link]
-  Kind -->|Yes| Existing[Registration link and UID verification]
+  Kind -->|No| Register[Account banner / Tracked link / Numeric UID instructions]
+  Kind -->|Yes| Register
   Kind -->|Not sure| AccountHelp[Account recovery guidance]
   AccountHelp --> Kind
-  New --> Requirements[Access requirements and referral disclosure]
-  Existing --> Requirements
-  New --> ID[Submit Trader ID]
-  Existing --> ID
+  Register -->|Created an account - Check ID| ID[Submit Trader ID]
+  Register -->|Back| Kind
   ID --> Check{Live affiliate verification}
   Check -->|Qualifies| Dashboard[Chart analysis / Access and usage / Tools / Settings]
   Check -->|Deposit below requirement| Deposit[Confirmed amount and remaining requirement]
@@ -28,6 +25,11 @@ flowchart TD
 
 Home has Try 2 Free Analyses; Set Up My Account (or Continue Setup / Open My Dashboard);
 How It Works; Reviews; Support; Community; Tools & FAQ; Language.
+Both account answers open the same registration card with three full-width buttons:
+Create New Account (green), I Created an Account — Check ID (blue), and Back (red).
+The caption and first button use the same tracked referral URL; users can submit a numeric
+UID directly in chat or open the ID prompt. UID guidance and Support remain on that prompt.
+Already verified or referral-confirmed accounts continue from their saved access state.
 Community contains the existing Telegram channel, YouTube, and reviews destinations.
 Tools contains the money-management workbook, screenshot guide/example, FAQs, and risk/referral information.
 Settings contains language, shared notification preferences, and privacy information.
@@ -92,8 +94,8 @@ blocked chats are left alone; failed edits never block access to normal menus.
 
 `db.SCHEMA` adds setup progress, account path, eligibility timestamp, and the last access-check outcome.
 All migrations use `ADD COLUMN IF NOT EXISTS`; existing verification, language, attribution, and quotas remain.
-Returning setup resumes from persisted account state. Continue Setup opens registration directly;
-there is no separate age-confirmation screen. Older eligibility callbacks and saved stages resume
+Returning setup resumes from persisted account state. Both account answers open registration directly;
+there is no separate introduction or age-confirmation screen. Older callbacks and saved stages resume
 the current registration or UID step. The historical eligibility timestamp is retained without
 automatically recording a declaration for users in the simplified flow.
 The optional background retry checks unverified users who have submitted a UID.

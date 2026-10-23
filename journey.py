@@ -1,5 +1,6 @@
 """Trust-first Go Plus screens. Pure builders; account state stays in Postgres."""
 from decimal import Decimal
+from html import escape
 from urllib.parse import urlsplit
 import config
 
@@ -58,11 +59,6 @@ ACCOUNT_UNSURE = ('❓ <b>Let’s help you check.</b>\n\n'
     'If so, choose Yes and use that account.\n\n'
     'If you cannot remember, check your registration emails or use the broker’s '
     'official account recovery. Support can help explain the next step.')
-REGISTRATION_INTRO = ('🆕 <b>Let’s set up your account first.</b>\n\n'
-    'Create your Pocket Option account using our link, then return here to verify your Trader ID.\n\n'
-    'Full access also requires qualifying deposits. You can read Access Requirements '
-    'below before registering. We’ll show the deposit step after your Trader ID is confirmed.\n\n'
-    + DISCLOSURE + '\n\nReady to continue?')
 REQUIREMENTS = ('ℹ️ <b>Pocket IQ account requirement</b>\n\n'
     'To continue Pocket IQ setup, you must create a <b>new Pocket Option account '
     'through our bot link</b>.\n\n'
@@ -70,16 +66,13 @@ REQUIREMENTS = ('ℹ️ <b>Pocket IQ account requirement</b>\n\n'
     'to verify your account.\n\n'
     'Already have an account? Contact <b>Support</b> before creating another.\n\n'
     '<i>' + DISCLOSURE + '</i>')
-REGISTER = ('🔗 <b>Get Pocket IQ Access</b>\n\n'
-    'Ready to explore your charts with Pocket IQ? Get clear, easy-to-follow '
-    'market analysis directly in Telegram.\n\n'
-    '<b>Continue setup in two simple steps:</b>\n'
-    '1. Tap <b>Create New Account</b> and register a new Pocket Option account '
-    'using <b>our link below</b>.\n'
-    '2. Return here and send your <b>Pocket Option UID</b>. We’ll check your '
-    'account and guide you through the next step.\n\n'
-    '👇 <b>Tap Create New Account to get started.</b>\n'
-    '<i>Review Access Requirements before registering.</i>')
+REGISTER = ('🔒 To continue Pocket IQ setup, you must create a <b>new Pocket Option '
+    'account using our bot link</b>:\n'
+    '👉 {ref}\n\n'
+    '✅ Once registered, send your <b>Pocket Option UID</b> in this chat '
+    'to verify your account.\n\n'
+    '⚠️ Your UID must contain <b>numbers only</b> — no spaces or symbols.\n'
+    'Example: <code>123456789</code>')
 EXISTING = REGISTER
 REFERRAL_HELP = ('🔗 <b>Let’s check your referral options.</b>\n\n'
     'Pocket IQ access requires registration through our referral link. '
@@ -183,7 +176,7 @@ TEXTS = {
     'link_unavailable': ('💬 <b>This link is not available</b>\n\n'
         'Please contact support for the current destination. No registration or payment has been completed.'),
 }
-SOURCES = (RISK, DISCLOSURE, ACCOUNT_QUESTION, ACCOUNT_UNSURE, REGISTRATION_INTRO, REQUIREMENTS,
+SOURCES = (RISK, DISCLOSURE, ACCOUNT_QUESTION, ACCOUNT_UNSURE, REQUIREMENTS,
            REGISTER, EXISTING, REFERRAL_HELP, UID, DEPOSIT, READY,
            PENDING, UNLINKED, PREMIUM, PREMIUM_SHORT, *TEXTS.values())
 
@@ -240,14 +233,6 @@ def account_help():
         [cb('💬 Support', 'support')], *back('setup')]
 
 
-def new_account():
-    return REGISTRATION_INTRO, [
-        [cb('🚀 Continue Setup', 'register', True)],
-        [cb('ℹ️ Access Requirements', 'requirements')],
-        [cb('👤 I Already Have an Account', 'existing')],
-        [cb('❓ Questions About Access', 'support')], *back('setup')]
-
-
 def requirements():
     return REQUIREMENTS, [
         [button('🚀 Continue Setup', 'cb:home:access', 'success')],
@@ -255,21 +240,21 @@ def requirements():
 
 
 def registration(ref):
-    return REGISTER, [
+    valid = safe_url(ref)
+    if valid:
+        # Keep long tracking URLs clickable without overflowing Telegram's caption.
+        label = valid if len(valid) <= 120 else 'Open Pocket Option registration'
+        link = f'<a href="{escape(valid, quote=True)}">{escape(label)}</a>'
+    else:
+        link = 'Link unavailable — tap Create New Account below for support.'
+    return REGISTER.format(ref=link), [
         [url('🔗 Create New Account', ref, True)],
-        [button('✅ I’ve Created My Account', 'cb:flow:enter_id', 'primary')],
-        [url('▶️ Watch Registration Guide', config.SETUP_GUIDE_URL)],
-        [cb('ℹ️ Access Requirements', 'requirements')],
-        [cb('👤 I Already Have an Account', 'existing')], [cb('💬 Support', 'support'), cb('⬅️ Back', 'setup')]]
+        [button('✅ I Created an Account — Check ID', 'cb:flow:enter_id', 'primary')],
+        [button('⬅️ Back', 'cb:flow:setup', 'danger')]]
 
 
 def existing(ref=None):
-    register = url('🔗 Create New Account', ref, True) if ref else cb('🔗 Create New Account', 'register_existing', True)
-    return EXISTING, [[register],
-        [button('✅ Verify My Trader ID', 'cb:flow:enter_id', 'primary')],
-        [cb('📍 Where Is My Trader ID?', 'id_guide')],
-        [cb('ℹ️ Access Requirements', 'requirements')],
-        [cb('💬 Support', 'support'), cb('⬅️ Back', 'setup')]]
+    return registration(ref)
 
 
 def referral_help():
