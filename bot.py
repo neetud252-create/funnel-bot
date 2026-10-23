@@ -115,7 +115,8 @@ def asset_path(key, ext):
         ext = 'png'
     elif key == journey.REGISTER_PHOTO and ext == 'jpg':
         ext = 'png'
-    elif key in market_signals.DIRECTION_BANNERS.values() and ext == 'jpg':
+    elif ext == 'jpg' and key in (*market_signals.DIRECTION_BANNERS.values(),
+                                  'trading_type', 'asset_category', 'currency_pair', 'expiration_time'):
         ext = 'png'
     return "assets/" + key + "." + ext
 
