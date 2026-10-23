@@ -59,6 +59,9 @@ A persisted content hash avoids redundant Telegram edits across restarts.
 The hash includes the custom emoji theme so new owner-supplied IDs refresh
 existing pins. Pin, camera, rocket, home, support bubble, community, tools,
 and unlock icons use the supplied custom IDs in captions and native buttons.
+Account, Premium crown, trophy, key, lock, referral link, account-ID location,
+new-account, and payment icons use the owner's second batch. The account-ID
+location pin is separate from the welcome pin; no new search-icon ID was supplied.
 Text-only fallback welcomes are updated with the text-edit API. Deleted or
 blocked chats are left alone; failed edits never block access to normal menus.
 
