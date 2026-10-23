@@ -32,7 +32,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.snapshot = data.parse_candles(payload(now=time.time()), ASSET, 60)
         self.feed = types.SimpleNamespace(assets=AsyncMock(return_value=(ASSET,)),
                                          candles=AsyncMock(return_value=self.snapshot))
-        self.progress = types.SimpleNamespace(start=Mock(), stop=AsyncMock(), retrying=False)
+        self.progress = types.SimpleNamespace(start=AsyncMock(), stop=AsyncMock(), reconnecting=AsyncMock())
         self.patches = [
             patch.object(data, 'enabled', return_value=True),
             patch.object(data, 'feed', return_value=self.feed),
@@ -45,7 +45,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             patch.object(flow.api, 'analyse', AsyncMock(return_value=VALID)),
             patch.object(flow.localization, 'language_for', AsyncMock(return_value='en')),
             patch.object(flow.market_chart, 'render', return_value=b'PNG'),
-            patch.object(flow.chart_progress, 'Progress', return_value=self.progress),
+            patch.object(flow.market_progress, 'Loading', return_value=self.progress),
         ]
         for p in self.patches:
             p.start()
@@ -65,18 +65,71 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(args[2], BufferedInputFile)
         self.assertEqual(args[2].data, b'PNG')
         self.assertIn('EUR/USD OTC', args[3])
-        self.assertIn('BUY bias', args[3])
+        self.assertIn('🟢 BUY', args[3])
+        self.assertIn('Expiration:</b> M1', args[3])
+        self.assertIn('Confirmed setup', args[3])
         self.assertIn('60 seconds', flow.api.analyse.await_args.args[2])
         flow.trial.reserve.assert_awaited_once_with(None, 11, -123)
         flow.trial.consume.assert_awaited_once_with(None, 'slot')
         self.assertTrue(self.render.await_args.kwargs['raise_on_error'])
         self.assertFalse(flow.chart_signals._inflight)
 
-    async def test_incomplete_setup_becomes_wait(self):
-        flow.api.analyse.return_value = dict(VALID, checks=dict(VALID['checks'], follow_through=False))
-        await self.analyse()
-        self.assertIn('WAIT', self.render.await_args.args[3])
-        self.assertNotIn('BUY bias', self.render.await_args.args[3])
+    async def test_incomplete_setup_retains_strategy_direction_with_tentative_label(self):
+        for direction, setup in (('BUY', 'directional_buy'), ('SELL', 'directional_sell')):
+            flow.api.analyse.return_value = dict(VALID, direction=direction, setup=setup,
+                                                checks=dict(VALID['checks'], follow_through=False))
+            await self.analyse()
+            self.assertNotIn('WAIT', self.render.await_args.args[3])
+            self.assertIn(direction, self.render.await_args.args[3])
+            self.assertIn('Tentative bias', self.render.await_args.args[3])
+
+    async def test_invalid_strategy_result_never_fabricates_or_consumes(self):
+        for result in (dict(VALID, direction=None), dict(VALID, direction='WAIT'),
+                       dict(VALID, direction='SELL'), dict(VALID, evidence=[])):
+            flow.api.analyse.return_value = result
+            await self.analyse()
+            self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_error')
+        flow.trial.consume.assert_not_awaited()
+
+    async def test_all_expiries_preserved_without_inventing_candle_intervals(self):
+        callbacks = []
+        dp = types.SimpleNamespace(callback_query=types.SimpleNamespace(register=lambda h, *f: callbacks.append(h)),
+                                   message=types.SimpleNamespace(register=lambda *a: None))
+        flow.install(dp, self.render)
+        key = catalog.find(catalog.entries((ASSET,)), ASSET.key).key
+        for expiry in flow.EXPIRIES:
+            await self.state.update_data(market_period=300, market_expiry=10)
+            cb = H.FakeCB(11, f'market:expire:{key}:{expiry}', 123)
+            await callbacks[0](cb, self.bot, self.state)
+            self.feed.candles.assert_awaited_with(ASSET.key, 60)
+            self.assertIn(f'Expiration:</b> M{expiry} · {expiry} min', self.render.await_args.args[3])
+            self.assertIn('Chart candles:</b> M1', self.render.await_args.args[3])
+            self.assertIn(f'User-selected expiration: {expiry} minutes', flow.api.analyse.await_args.args[2])
+            self.assertIn(f'cb:market:expire:{key}:{expiry}', str(self.render.await_args.args[4]))
+        self.assertEqual(self.progress.start.await_count, 10)
+
+    async def test_locked_and_malformed_expiries_never_start_analysis(self):
+        callbacks = []
+        dp = types.SimpleNamespace(callback_query=types.SimpleNamespace(register=lambda h, *f: callbacks.append(h)),
+                                   message=types.SimpleNamespace(register=lambda *a: None))
+        flow.install(dp, self.render)
+        for action in [f'market:locked:{n}' for n in flow.LOCKED_SECONDS] + [
+                f'market:expire:{ASSET.key}:{n}' for n in ('0', '11', '-1', '5.0', 'abc')]:
+            cb = H.FakeCB(11, action, 123)
+            await callbacks[0](cb, self.bot, self.state)
+            self.assertTrue(cb.answers[0][1])
+        flow.trial.reserve.assert_not_awaited()
+        flow.api.analyse.assert_not_awaited()
+        self.progress.start.assert_not_awaited()
+
+    def test_reference_expiration_grid_shape_style_and_callbacks(self):
+        rows = flow.expiration_rows(ASSET.key)
+        self.assertEqual([len(r) for r in rows], [1, 2, 3, 3, 1, 2, 3, 3, 1])
+        self.assertEqual([b[0] for r in rows for b in r], [
+            '🔒 S5', '🔒 S10', '🔒 S15', '🔒 S20', '🔒 S25', '🔒 S30',
+            '🔒 S45', '🔒 S50', '🔒 S55', '🔥 M1', 'M2', 'M3',
+            'M4', 'M5', 'M6', 'M7', 'M8', 'M9', '✅ M10'])
+        self.assertTrue(all(b[2] == 'primary' and len(b[1][3:].encode()) <= 64 for r in rows for b in r))
 
     async def test_fast_double_tap_claims_before_callback_acknowledgement(self):
         entered, release = asyncio.Event(), asyncio.Event()
@@ -144,6 +197,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             flow.trial.consume.assert_not_awaited()
             flow.api.analyse.assert_not_awaited()
             self.assertFalse(flow.chart_signals._inflight)
+            self.progress.stop.assert_awaited()
         self.feed.candles.side_effect = None
         flow.api.analyse.side_effect = flow.api.AnalysisError('service')
         await self.analyse()
@@ -222,7 +276,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         fin = next(e for e in catalog.SEED if e.market == 'fin')
         for entry in (unavailable, fin):
             await flow.select_asset(self.bot, 11, self.state, self.render, entry.key)
-            self.assertNotIn('cb:market:run:', str(self.render.await_args.args[4]))
+            self.assertEqual(self.render.await_args.args[2], 'expiration_time')
+            self.assertIn('cb:market:expire:', str(self.render.await_args.args[4]))
             # A forged/stale run callback is checked server-side too.
             await flow.analyse(self.cb, self.bot, self.state, self.render, entry.key)
         self.feed.candles.assert_not_awaited()
@@ -235,8 +290,9 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('not available', self.render.await_args.args[3])
         self.feed.assets.return_value = (ASSET, data.Asset('AUDCAD_otc', entry.name, True, None))
         await flow.select_asset(self.bot, 11, self.state, self.render, entry.key)
-        self.assertIn('candle timeframe', self.render.await_args.args[3])
-        self.assertIn(f'cb:market:run:{entry.key}:300', str(self.render.await_args.args[4]))
+        self.assertIn('Choose the expiration time', self.render.await_args.args[3])
+        self.assertNotIn('not available', self.render.await_args.args[3])
+        self.assertIn(f'cb:market:expire:{entry.key}:5', str(self.render.await_args.args[4]))
         flow.trial.reserve.assert_not_awaited()
 
     async def test_market_navigation_cancels_pending_catalogue_response(self):
