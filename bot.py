@@ -6,7 +6,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
-                           InlineKeyboardButton, FSInputFile, InputMediaPhoto, ReplyParameters)
+                           InlineKeyboardButton, FSInputFile, InputMediaPhoto, InputMediaVideo, ReplyParameters)
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 import uvicorn
 import db, config, panelbot
@@ -212,7 +212,10 @@ def media_send_options(key, ext):
     # Telegram retains the uploaded video's metadata when its file_id is reused.
     if ext == "mp4":
         if key in (home_menu.ANIMATION, home_menu.VIDEO):
-            return {"width": 1280, "height": 720, "duration": 6}
+            options = {"width": 1280, "height": 720, "duration": 6}
+            if key == home_menu.VIDEO:
+                options["supports_streaming"] = True
+            return options
         for screen in config.SCREENS.values():
             if screen.get("video") == key:
                 options = dict(screen.get("video_options", {}))
@@ -300,7 +303,7 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.ANIMATION, 'mp4'),
+    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
            (config.UID_GUIDE_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
@@ -628,7 +631,7 @@ async def start(m: Message, bot: Bot, state: FSMContext,
 
 async def _show_home(bot, tg_id):
     user = await db.get_user(tg_id)
-    return await render(bot, tg_id, home_menu.ANIMATION, home_menu.TEXT, home_menu.keyboard(user), is_video=True)
+    return await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(user), is_video=True)
 
 
 async def _pin_welcome(bot, tg_id, message):
@@ -661,6 +664,31 @@ async def _pin_welcome(bot, tg_id, message):
                         tg_id, exc_info=True)
 
 
+async def _upgrade_welcome_media(bot, tg_id, message_id, keyboard):
+    """Replace the old GIF in place, reusing only a video-type Telegram file ID."""
+    key = home_menu.VIDEO
+    file_id = cached_id(key, 'mp4')
+    for attempt in range(2):
+        media = InputMediaVideo(
+            media=file_id or FSInputFile(asset_path(key, 'mp4')),
+            caption=start_here.TEXT, parse_mode='HTML',
+            **media_send_options(key, 'mp4'))
+        try:
+            message = await bot.edit_message_media(
+                chat_id=tg_id, message_id=message_id, media=media, reply_markup=keyboard)
+        except TelegramBadRequest as error:
+            description = str(error).lower()
+            if 'message is not modified' in description:
+                return
+            if not file_id or attempt or 'message to edit not found' in description:
+                raise
+            await _forget(key, 'mp4')
+            file_id = None
+        else:
+            await remember_video(key, message)
+            return
+
+
 async def _sync_welcome(bot, tg_id, *, raise_retry_after=False):
     """Edit the saved card in place; never re-pin a user's dismissed message."""
     lock = _welcome_sync_locks.setdefault(tg_id, asyncio.Lock())
@@ -676,9 +704,14 @@ async def _sync_welcome(bot, tg_id, *, raise_retry_after=False):
                 return 'unchanged'
             kwargs = dict(chat_id=tg_id, message_id=message_id, parse_mode='HTML',
                           reply_markup=build_kb(start_here.keyboard(user)))
+            media_ready = (user.get('welcome_content_hash') or '').startswith(start_here.MEDIA_VERSION)
+            if not media_ready and not media_missing(home_menu.VIDEO, 'mp4'):
+                await _upgrade_welcome_media(bot, tg_id, message_id, kwargs['reply_markup'])
+                await db.mark_welcome_content(tg_id, message_id, signature)
+                return 'updated'
             try:
                 try:
-                    # Keep the approved GIF (or still image) and replace its caption.
+                    # Once migrated, ordinary copy/keyboard updates only edit the caption.
                     await bot.edit_message_caption(caption=start_here.TEXT, **kwargs)
                 except TelegramBadRequest as error:
                     description = str(error).lower()
@@ -692,6 +725,9 @@ async def _sync_welcome(bot, tg_id, *, raise_retry_after=False):
                     raise
             # Persist only after Telegram accepts the edit, including a retry
             # whose previous edit succeeded but whose database write failed.
+            if not media_ready:
+                # A missing local video must not permanently mark a fallback as migrated.
+                return 'unavailable'
             await db.mark_welcome_content(tg_id, message_id, signature)
             return 'updated'
     except TelegramRetryAfter:

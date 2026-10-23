@@ -156,6 +156,16 @@ async def check_delivery_and_selector():
     assert result.reply_markup.inline_keyboard[0][0].icon_custom_emoji_id == '5427168083074628963'
     assert result.text == emoji_theme.html(L.translate_message(home_menu.TEXT, 'ru'))
 
+    # Media edits carry captions inside InputMedia, including pinned GIF -> video upgrades.
+    from aiogram.methods import EditMessageMedia
+    from aiogram.types import InputMediaVideo
+    media_edit = EditMessageMedia(chat_id=2, message_id=90, media=InputMediaVideo(
+        media='banner-video-id', caption=start_here.TEXT, parse_mode='HTML', supports_streaming=True))
+    edited = await outbound(transport, None, media_edit)
+    assert edited.media.caption == emoji_theme.html(L.translate_message(start_here.TEXT, 'ru'))
+    assert edited.media.media == 'banner-video-id' and edited.media.supports_streaming
+    assert media_edit.media.caption == start_here.TEXT
+
     for language in L.CODES:
         video = SendVideo(chat_id=2, video='banner-video-id',
                           caption=home_menu.TEXT, reply_markup=markup, parse_mode='HTML')

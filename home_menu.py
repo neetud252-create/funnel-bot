@@ -1,4 +1,4 @@
-"""Public /start menu: one looping animation with welcome caption and buttons."""
+"""Public /start menu: one animated video with welcome caption and buttons."""
 import config
 import journey
 
@@ -6,6 +6,7 @@ PHOTO = 'home_banner'
 PHOTO_EXT = 'png'
 ANIMATION = 'home_banner_loop'
 # Separate Telegram cache key: video.file_id cannot reuse animation.file_id.
+# iOS caps GIF cards at image width; a video can fill the available bubble width.
 VIDEO = 'home_banner_video'
 
 TEXT = (

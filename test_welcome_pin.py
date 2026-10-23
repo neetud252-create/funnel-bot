@@ -17,7 +17,7 @@ async def main():
     assert anchor == db._users[uid]['ui_msg_id']
     assert db._users[uid]['welcome_pinned_at']
     assert bot.pins == [(uid, anchor, True)]
-    assert bot.calls[-1]['kind'] == 'animation'
+    assert bot.calls[-1]['kind'] == 'video'
 
     # Buttons still work and menu replacement never deletes the first welcome.
     await mod.home_action(H.FakeCB(uid, 'home:access', anchor), bot, state)
@@ -97,7 +97,7 @@ async def main():
     uid, bot = 73006, H.FakeBot()
     with patch.object(db, 'claim_welcome_message', AsyncMock(side_effect=RuntimeError('database unavailable'))):
         await mod.start(H.FakeMessage(uid, '/start'), bot, state)
-    assert bot.calls[-1]['kind'] == 'animation' and bot.calls[-1]['markup']
+    assert bot.calls[-1]['kind'] == 'video' and bot.calls[-1]['markup']
     assert bot.pins == []
 
     # If anchor lookup fails, cleanup is skipped rather than deleting blindly.

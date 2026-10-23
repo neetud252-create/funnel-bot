@@ -4,7 +4,8 @@ from decimal import Decimal
 import unittest
 from unittest.mock import AsyncMock, patch
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
-from aiogram.methods import EditMessageCaption, EditMessageText
+from aiogram.methods import EditMessageCaption, EditMessageText, EditMessageMedia
+from aiogram.types import InputMediaVideo
 import start_here
 import test_signal_flow as H
 
@@ -107,6 +108,8 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
              patch.object(self.mod.asyncio, 'sleep', AsyncMock()):
             await self.mod._refresh_saved_welcomes(self.bot)
         self.assertEqual([e['message_id'] for e in self.bot.edits], [212, 213, 214])
+        self.assertTrue(all(e['kind'] == 'media' and isinstance(e['media'], InputMediaVideo)
+                            and e['media'].supports_streaming for e in self.bot.edits))
         self.assertEqual(self.bot.edits[1]['reply_markup'].inline_keyboard[0][0].text, '🏠 My Dashboard')
         self.assertEqual(self.bot.calls, [])
         self.assertEqual(self.bot.pins, [])
@@ -115,13 +118,14 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_text_fallback_and_unchanged_retry_persist_hash(self):
         row = self.db._users[self.uid] = dict(self.db._fresh_row(), welcome_message_id=90,
-                                             welcome_pinned_at='previous')
+                                             welcome_pinned_at='previous',
+                                             welcome_content_hash=start_here.MEDIA_VERSION + 'old-copy')
         no_caption = TelegramBadRequest(method=EditMessageCaption(chat_id=self.uid, message_id=90),
                                          message='Bad Request: there is no caption in the message to edit')
         with patch.object(self.bot, 'edit_message_caption', AsyncMock(side_effect=no_caption)):
             self.assertEqual(await self.mod._sync_welcome(self.bot, self.uid), 'updated')
         self.assertEqual(self.bot.edits[-1]['text'], start_here.TEXT)
-        row['welcome_content_hash'] = None
+        row['welcome_content_hash'] = start_here.MEDIA_VERSION + 'old-copy'
         unchanged = TelegramBadRequest(method=EditMessageText(chat_id=self.uid, message_id=90, text='x'),
                                         message='Bad Request: message is not modified')
         with patch.object(self.bot, 'edit_message_caption', AsyncMock(side_effect=no_caption)), \
@@ -145,7 +149,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         row['welcome_content_hash'] = None
         missing = TelegramBadRequest(method=EditMessageCaption(chat_id=self.uid, message_id=anchor),
                                       message='Bad Request: message to edit not found')
-        with patch.object(self.bot, 'edit_message_caption', AsyncMock(side_effect=missing)):
+        with patch.object(self.bot, 'edit_message_media', AsyncMock(side_effect=missing)):
             await self.start()
         self.assertEqual(len(self.bot.pins), 1)
         self.assertEqual(row['welcome_message_id'], anchor)
@@ -153,7 +157,8 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rate_limit_backoff_and_concurrent_refresh(self):
         row = self.db._users[self.uid] = dict(self.db._fresh_row(), welcome_message_id=90,
-                                             welcome_pinned_at='previous')
+                                             welcome_pinned_at='previous',
+                                             welcome_content_hash=start_here.MEDIA_VERSION + 'old-copy')
         limited = TelegramRetryAfter(method=EditMessageCaption(chat_id=self.uid, message_id=90),
                                       message='Too Many Requests', retry_after=2)
         with patch.object(self.bot, 'edit_message_caption', AsyncMock(side_effect=[limited, True])) as edit, \
@@ -177,6 +182,40 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.bot.edits), 2)
         self.assertEqual(self.bot.edits[-1]['message_id'], anchor)
         self.assertEqual(len(self.bot.pins), 1)
+
+    async def test_video_upgrade_retries_expired_cache_without_sending_or_repinning(self):
+        row = self.db._users[self.uid] = dict(self.db._fresh_row(), welcome_message_id=90,
+                                             welcome_pinned_at='previous', welcome_content_hash='legacy-hash')
+        key = self.mod.home_menu.VIDEO
+        digest = self.mod.content_hash(self.mod.asset_path(key, 'mp4'))
+        self.mod._video_cache[key] = ('expired-video-id', digest)
+        rejected = TelegramBadRequest(method=EditMessageMedia(
+            chat_id=self.uid, message_id=90, media=InputMediaVideo(media='expired-video-id')),
+            message='Bad Request: wrong file identifier')
+        with patch.object(self.bot, 'edit_message_media', AsyncMock(side_effect=[rejected, True])) as edit:
+            self.assertEqual(await self.mod._sync_welcome(self.bot, self.uid), 'updated')
+        self.assertEqual(edit.await_count, 2)
+        first, second = [call.kwargs['media'] for call in edit.await_args_list]
+        self.assertEqual(first.media, 'expired-video-id')
+        self.assertEqual(str(second.media.path), 'assets/home_banner_loop.mp4')
+        self.assertEqual((second.width, second.height, second.duration), (1280, 720, 6))
+        self.assertEqual(row['welcome_content_hash'], start_here.signature(row))
+        self.assertEqual(self.bot.calls, [])
+        self.assertEqual(self.bot.pins, [])
+
+    async def test_failed_or_missing_video_is_not_marked_migrated(self):
+        row = self.db._users[self.uid] = dict(self.db._fresh_row(), welcome_message_id=90,
+                                             welcome_pinned_at='previous', welcome_content_hash='legacy-hash')
+        with patch.object(self.bot, 'edit_message_media', AsyncMock(side_effect=RuntimeError('offline'))):
+            self.assertEqual(await self.mod._sync_welcome(self.bot, self.uid), 'unavailable')
+        self.assertEqual(row['welcome_content_hash'], 'legacy-hash')
+        with patch.object(self.mod, 'media_missing', return_value=True):
+            self.assertEqual(await self.mod._sync_welcome(self.bot, self.uid), 'unavailable')
+        self.assertEqual(self.bot.edits[-1]['caption'], start_here.TEXT)
+        self.assertEqual(row['welcome_content_hash'], 'legacy-hash')
+        self.assertEqual(await self.mod._sync_welcome(self.bot, self.uid), 'updated')
+        self.assertEqual(self.bot.edits[-1]['kind'], 'media')
+        self.assertEqual(self.bot.pins, [])
 
 
 if __name__ == '__main__':
