@@ -78,9 +78,15 @@ ELIGIBILITY = ('🌍 <b>Before you continue</b>\n\n'
     'the service is available to you under those rules.\n\n'
     + RISK + '\n\nYour confirmation is a self-declaration, not broker identity verification.')
 REGISTER = ('🔗 <b>Get Pocket IQ Access</b>\n\n'
-    '1. Create a new Pocket Option account using <b>our link below</b>.\n'
-    '2. Return here and send your <b>Pocket Option UID</b> to verify your account.\n\n'
-    '<i>Deposit required for full access. See Access Requirements.</i>')
+    'Ready to explore your charts with Pocket IQ? Get clear, easy-to-follow '
+    'market analysis directly in Telegram.\n\n'
+    '<b>Continue setup in two simple steps:</b>\n'
+    '1. Tap <b>Create New Account</b> and register a new Pocket Option account '
+    'using <b>our link below</b>.\n'
+    '2. Return here and send your <b>Pocket Option UID</b>. We’ll check your '
+    'account and guide you through the next step.\n\n'
+    '👇 <b>Tap Create New Account to get started.</b>\n'
+    '<i>Review Access Requirements before registering.</i>')
 EXISTING = REGISTER
 REFERRAL_HELP = ('🔗 <b>Let’s check your referral options.</b>\n\n'
     'Pocket IQ access requires registration through our referral link. '
