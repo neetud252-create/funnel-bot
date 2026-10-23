@@ -180,6 +180,9 @@ class UserContextMiddleware:
 def localize_method(method, language):
     """Copy outbound models; shared keyboards and cached English stay immutable."""
     updates = {}
+    media = getattr(method, 'media', None)
+    if getattr(media, 'caption', None) is not None:
+        updates['media'] = localize_method(media, language)
     for field in ('text', 'caption'):
         value = getattr(method, field, None)
         if isinstance(value, str):
@@ -212,7 +215,8 @@ def localize_method(method, language):
 class OutboundMiddleware:
     async def __call__(self, make_request, bot, method):
         has_content = any(isinstance(getattr(method, field, None), str)
-                          for field in ('text', 'caption')) or getattr(method, 'reply_markup', None)
+                          for field in ('text', 'caption')) or getattr(method, 'reply_markup', None) or (
+                              isinstance(getattr(getattr(method, 'media', None), 'caption', None), str))
         if not has_content:
             return await make_request(bot, method)
         # Explicit recipient ALWAYS wins, especially in delayed jobs/broadcasts.

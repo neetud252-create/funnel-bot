@@ -4,6 +4,7 @@ import json
 import emoji_theme
 import home_menu
 
+MEDIA_VERSION = 'video-v1:'
 
 TEXT = (
     "📌 <b>POCKET IQ — START HERE</b>\n\n"
@@ -28,4 +29,4 @@ def signature(user):
     # Custom-emoji-only updates must refresh already-saved pins as well.
     content = [TEXT, keyboard(user), user.get('language', 'en'),
                emoji_theme.ICONS, emoji_theme.GLYPHS, emoji_theme.LABELS]
-    return hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    return MEDIA_VERSION + hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
