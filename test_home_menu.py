@@ -14,12 +14,19 @@ async def main():
     import config
 
     rows = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard
-    assert [len(row) for row in rows] == [1] * 8
+    assert [len(row) for row in rows] == [1, 2, 2, 2, 1, 1]
     assert [b.callback_data for row in rows for b in row] == [
-        'home:test', 'home:access', 'flow:how', 'flow:community',
-        'flow:reviews', 'flow:support', 'flow:tools', 'home:language']
+        'home:access', 'flow:how', 'home:test', None, None, None, None,
+        'home:sheet', 'home:language']
     assert [b.style for row in rows for b in row] == [
-        'success', 'primary', 'primary', 'primary', 'danger', 'danger', 'primary', 'danger']
+        'success', 'primary', 'primary', 'danger', 'danger', 'primary', 'primary', 'primary', 'danger']
+    import journey
+    assert [b.url for row in rows[2:4] for b in row] == [
+        config.REVIEWS_URL, journey.support_url(), config.YOUTUBE_URL, config.COMMUNITY_URL]
+    # An unavailable social link keeps a usable help route in the same slot.
+    with patch.object(config, 'YOUTUBE_URL', ''):
+        fallback = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard[3][0]
+        assert fallback.callback_data == 'flow:link_unavailable' and fallback.style == 'primary'
     for verified in (False, True):
         uid = 72000 + int(verified)
         fake_db._users[uid] = dict(fake_db._fresh_row(), verified=verified,
