@@ -49,14 +49,28 @@ ICONS = {
     'pending': '5445164438426507058',
     'currency': '5377336227533969892',
     'timer': '5195352914104694560',
+    'navigation_back': '5976429872644363952',
+    'play': '6015096075935813920',
+    'notifications': '5458603043203327669',
+    'muted': '5244807637157029775',
+    'shuffle': '5129905231785624480',
+    'fire': '5424972470023104089',
+    'green': '5188234920639632382',
+    'red': '5411225014148014586',
+    'up': '5449683594425410231',
+    'down': '6087173448298138241',
+    'attention': '5440660757194744323',
+    'gift': '5203996991054432397',
+    'money': '5224257782013769471',
+    'test': '5411512278740640309',
 }
 GLYPHS = {
     '👋': 'hello', '🤖': 'assistant',
     '📈': 'chart', '📊': 'chart', '⚡️': 'bolt', '⚡': 'bolt',
     '💎': 'access', '📖': 'guide', '🎯': 'signal', '⭐': 'review',
-    '☎️': 'support', '☎': 'support', '▶️': 'youtube',
+    '☎️': 'support', '☎': 'support', '▶️': 'play', '▶': 'play',
     '💡': 'tips', '🌐': 'language', '🌍': 'language',
-    '👇': 'back', '⬅️': 'back',
+    '👇': 'back', '⬅️': 'navigation_back', '⬅': 'navigation_back',
     '📌': 'pin', '📸': 'camera', '🚀': 'rocket', '🏠': 'home',
     '💬': 'chat', '📢': 'community', '🧰': 'tools', '🔓': 'unlocked',
     '👤': 'account', '👑': 'premium', '🏆': 'trophy', '🔑': 'key',
@@ -68,6 +82,10 @@ GLYPHS = {
     '🔲': 'analysis', '💗': 'market', '🪙': 'momentum',
     '🖼️': 'image', '🖼': 'image', '▫️': 'pending', '▫': 'pending',
     '💱': 'currency', '⏱️': 'timer', '⏱': 'timer',
+    '🔙': 'navigation_back', '◀️': 'navigation_back', '◀': 'navigation_back',
+    '🔔': 'notifications', '🔕': 'muted', '🔀': 'shuffle', '🔥': 'fire',
+    '🟢': 'green', '🔴': 'red', '⬆️': 'up', '⬆': 'up', '⬇️': 'down', '⬇': 'down',
+    '‼️': 'attention', '‼': 'attention', '🎁': 'gift', '💰': 'money', '🧪': 'test',
 }
 LABELS = {
     'Get Bot Access': 'access', 'Get access to Go +': 'access',
@@ -75,7 +93,7 @@ LABELS = {
     'Test Signals': 'signal', 'Get a signal': 'signal', 'New Signal': 'signal',
     'Review': 'review', 'Support': 'support', 'YouTube': 'youtube',
     'YouTube channel': 'youtube', 'Forex Tips': 'tips',
-    'Change Language': 'language', 'Back': 'back', 'Back to registration': 'back',
+    'Change Language': 'language', 'Back': 'navigation_back', 'Back to registration': 'navigation_back',
 }
 _glyph = re.compile('|'.join(re.escape(x) for x in sorted(GLYPHS, key=len, reverse=True)))
 _protected = re.compile(
@@ -108,7 +126,12 @@ def button(button):
     # An explicit glyph chooses its supplied artwork. In particular, the new
     # speech-bubble Support icon must not fall back to the old phone artwork.
     name = GLYPHS[leading.group()] if leading else LABELS.get(label)
-    # Keep labels consisting only of an arrow/emoji, since Telegram requires text.
+    if name == 'play' and 'youtube' in label.casefold():
+        name = 'youtube'
+    # Gallery arrows need readable labels when their glyph becomes a native icon.
+    if not label and name in ('navigation_back', 'play'):
+        label = 'Back' if name == 'navigation_back' else 'Next'
+    # Other icon-only buttons retain their label, since Telegram requires text.
     if not name or not label:
         return button
     return button.model_copy(update={'text': label, 'icon_custom_emoji_id': ICONS[name]})

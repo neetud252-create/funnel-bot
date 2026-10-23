@@ -69,6 +69,12 @@ of information, pause, and settings share the same custom artwork.
 Chart-analysis headings, market analysis, momentum, screenshot examples,
 pending results, currency pairs, and timers use the owner's fourth batch.
 Image, pending, and timer glyphs include both presentation variants.
+Navigation, notification preferences, shuffle, fire, direction markers, attention,
+gift, money, and admin-test icons use the owner's fifth batch. Back arrows use
+the blue arrow; tutorials and forward navigation use the green play icon, while
+YouTube-labelled buttons retain their branded icon. Gallery arrows gain Back/Next
+labels with native icons. The supplied warning ID already matches the theme;
+the OTC diamond still awaits a custom ID.
 Text-only fallback welcomes are updated with the text-edit API. Deleted or
 blocked chats are left alone; failed edits never block access to normal menus.
 
