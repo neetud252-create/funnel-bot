@@ -23,8 +23,10 @@ def keyboard(user=None):
     return [
         [('📸 Analyse My Chart' if verified else '🎯 Try Free Analysis', 'cb:home:test', 'success')],
         [('🏠 My Dashboard' if verified else '🚀 Account Setup', 'cb:home:access', 'primary')],
-        [('📖 How It Works', 'cb:flow:how', 'primary'), ('📢 Community', 'cb:flow:community', 'primary')],
-        [('⭐ Reviews', 'cb:flow:reviews', 'danger'), ('💬 Support', 'cb:flow:support', 'danger')],
+        [('📖 How It Works', 'cb:flow:how', 'primary')],
+        [('📢 Community', 'cb:flow:community', 'primary')],
+        [('⭐ Reviews', 'cb:flow:reviews', 'danger')],
+        [('💬 Support', 'cb:flow:support', 'danger')],
     ]
 
 

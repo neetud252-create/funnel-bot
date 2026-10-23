@@ -45,9 +45,10 @@ it. A failed pin never blocks the menu; an unfinished pin is retried on the next
 start, and a deleted pending message can be replaced with the fresh welcome.
 
 The persistent card's caption is the owner's **POCKET IQ — START HERE** copy.
-Try Free Analysis and Account Setup each have a full-width button row.
-Verified accounts see Analyse My Chart and My Dashboard in these two rows.
-How It Works / Community share a blue row; Reviews / Support share a red row.
+Every welcome and Start Here button has its own full-width row.
+Verified accounts see Analyse My Chart and My Dashboard in the first two rows.
+How It Works and Community use separate blue rows; Reviews and Support use
+separate red rows. These four buttons now use the full card width instead of half.
 The approved GIF, caption and buttons stay on one card. The full home menu
 adds full-width Tools & FAQ and Language rows. Telegram controls the actual
 font size and button height; the bot chooses the row layout and native colors.

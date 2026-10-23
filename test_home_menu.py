@@ -14,7 +14,7 @@ async def main():
     import config
 
     rows = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard
-    assert [len(row) for row in rows] == [1, 1, 2, 2, 1, 1]
+    assert [len(row) for row in rows] == [1] * 8
     assert [b.callback_data for row in rows for b in row] == [
         'home:test', 'home:access', 'flow:how', 'flow:community',
         'flow:reviews', 'flow:support', 'flow:tools', 'home:language']
