@@ -69,8 +69,8 @@ def main():
 
     # --- the caption --------------------------------------------------------
     print("[gate] caption text")
-    check("headline reads ONE STEP TO UNLOCK GO+",
-          "ONE STEP TO UNLOCK GO+" in text, repr(text))
+    check("headline reads ONE STEP TO UNLOCK Pocket IQ",
+          "ONE STEP TO UNLOCK Pocket IQ" in text, repr(text))
     check("the padlock sits directly against the headline, no space",
           "</tg-emoji>ONE STEP" in text, repr(text[:120]))
     check("invites the user to join the free channel",

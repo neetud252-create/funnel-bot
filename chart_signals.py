@@ -16,11 +16,11 @@ import chart_progress
 import config
 import localization
 
-INTRO = ('📸 <b>Try Go Plus chart analysis</b>\n\n'
+INTRO = ('📸 <b>Try Pocket IQ chart analysis</b>\n\n'
          'Free analyses remaining: <b>{left} of 2</b>. No deposit is needed to try.\n\n'
          'Upload a clear chart screenshot to see the trend and momentum. '
          'AI predictions can be wrong. Results are not guaranteed.')
-VERIFIED = ('🤖 <b>Go+ AI Chart Analysis</b>\n\n'
+VERIFIED = ('🤖 <b>Pocket IQ AI Chart Analysis</b>\n\n'
             'Your account is verified. Tap Upload Chart to analyse your screenshot.')
 EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
              'You can review access requirements, read the guide, or contact support.')

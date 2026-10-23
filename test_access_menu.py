@@ -14,7 +14,7 @@ copy of the string, so a later edit to either side fails this file.
 Every other button reuses a destination that already existed in the project:
 
     Quick Setup Guide -> the "How to Register" video, also on the welcome menu
-    Review            -> the Go+ reviews channel
+    Review            -> the Pocket IQ reviews channel
     Support           -> SUPPORT_URL, as on the register and menu screens
     YouTube           -> YOUTUBE_URL, as on the menu screen
     Channel           -> CHANNEL_URL

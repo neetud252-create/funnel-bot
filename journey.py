@@ -1,4 +1,4 @@
-"""Trust-first Go Plus screens. Pure builders; account state stays in Postgres."""
+"""Trust-first Pocket IQ screens. Pure builders; account state stays in Postgres."""
 from decimal import Decimal
 from html import escape
 from urllib.parse import urlsplit
@@ -120,23 +120,23 @@ TEXTS = {
         'Assets without connected data remain browsable. The bot does not execute trades. '
         'Analysis uses completed M1 candles; your chosen expiration is shown separately.\n\n' + RISK),
     'reviews': ('⭐ <b>Community reviews</b>\n\n'
-        'Read posts in the existing Go Plus review channel. These are individual experiences, '
+        'Read posts in the existing Pocket IQ review channel. These are individual experiences, '
         'not independently audited proof of typical returns.\n\n' + RISK),
     'results': ('📊 <b>Signal results</b>\n\n'
         'A complete, verified performance record is not currently published here. '
         'We do not infer a win rate from selected screenshots.\n\n'
         'A useful record includes the original signals, timestamps, wins, losses, '
         'skipped setups, payouts, and measurement period.'),
-    'community': '📢 <b>Go Plus community</b>\n\nExplore the channel and tutorials. Joining is optional.',
+    'community': '📢 <b>Pocket IQ community</b>\n\nExplore the channel and tutorials. Joining is optional.',
     'tools': '🧰 <b>Tools & FAQ</b>\n\nLearn the format, download the worksheet, or find an answer.',
-    'support': ('💬 <b>How can we help?</b>\n\nChoose a topic or contact the Go Plus team. '
+    'support': ('💬 <b>How can we help?</b>\n\nChoose a topic or contact the Pocket IQ team. '
         'Never share passwords, OTPs, or full payment details.'),
     'account_help': ('👤 <b>Account help</b>\n\nYour Trader ID is in your Pocket Option profile. '
         'Existing accounts should be checked as they are; do not create a duplicate. '
         'Support can explain referral eligibility and access.'),
     'payment_help': ('💳 <b>Deposit & withdrawal help</b>\n\n'
         'Payment processing, fees, methods, identity checks, and withdrawals are handled by Pocket Option. '
-        'Review the current terms in your broker account. Go Plus checks access; it cannot move your funds.\n\n'
+        'Review the current terms in your broker account. Pocket IQ checks access; it cannot move your funds.\n\n'
         'For a payment problem, contact the broker through its official account interface.'),
     'analysis_help': ('📊 <b>Analysis help</b>\n\n'
         'Choose a market, category, and asset, then select an expiration from M1 to M10. '
@@ -159,16 +159,14 @@ TEXTS = {
     'faq': ('❓ <b>Frequently asked questions</b>\n\n'
         '<b>Do I need a deposit to try it?</b> No. Two free lifetime analyses are available on assets with connected data.\n\n'
         '<b>Does the bot trade for me?</b> No. It analyses market candles and shows a chart.\n\n'
-        '<b>Are returns guaranteed?</b> No. Predictions can lose.\n\n'
-        '<b>How is access checked?</b> Your Trader ID is checked against the referral offer '
-        'and qualifying deposits. Clicking a link is not verification.\n\n'
+        '<b>How do I get started?</b> Tap Try 2 Free Analyses and choose your market, asset, and expiration time.\n\n'
         '<b>When do daily limits reset?</b> Midnight UTC.\n\n'
         '<b>Already registered?</b> Use your existing account and ask support about access.'),
     'risks': 'ℹ️ <b>Risks & referrals</b>\n\n' + RISK + '\n\n' + DISCLOSURE + '\n\n'
         'Only use a service where you are eligible. Read the broker’s payment, withdrawal, '
-        'and bonus terms before depositing. Go Plus does not receive or hold your trading funds.',
+        'and bonus terms before depositing. Pocket IQ does not receive or hold your trading funds.',
     'privacy': ('🔒 <b>Your privacy</b>\n\n'
-        'Go Plus stores your Telegram ID, selected language, setup progress, linked Trader ID, '
+        'Pocket IQ stores your Telegram ID, selected language, setup progress, linked Trader ID, '
         'access checks, button activity, and usage in its database.\n\n'
         'The selected asset, candle data, and generated chart are sent to the configured AI provider for analysis. '
         'Telegram and the provider apply their own policies.\n\n'
@@ -201,8 +199,7 @@ def screen(name, user=None):
         'community': [[url('📢 Telegram Channel', config.COMMUNITY_URL, True)],
                       [url('▶️ YouTube Channel', config.YOUTUBE_URL)], [cb('⭐ Reviews', 'reviews')]],
         'tools': [[button('📊 Money Management Sheet', 'cb:home:sheet')],
-                  [cb('📖 Asset Guide', 'screenshot')], [cb('❓ FAQs', 'faq')],
-                  [cb('ℹ️ Risks & Referral Info', 'risks')]],
+                  [cb('📖 Asset Guide', 'screenshot')], [cb('❓ FAQs', 'faq')]],
         'support': [[cb('👤 Account Help', 'account_help')], [cb('💳 Deposit/Withdrawal Help', 'payment_help')],
                     [cb('📊 Analysis Help', 'analysis_help')], [contact]],
         'account_help': [[cb('🔍 Check My Existing Account', 'existing', True)],

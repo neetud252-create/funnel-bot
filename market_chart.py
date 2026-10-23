@@ -41,11 +41,13 @@ def render(snapshot, *, preview=False):
         ax.set_axisbelow(True)
         ax.axhline(bars[-1].close, color='#7ea9d3', alpha=.55, linestyle='--', linewidth=.8)
         symbol = snapshot.asset.symbol  # Validated identifier, not provider HTML.
-        closed = datetime.fromtimestamp(snapshot.closed_at, timezone.utc).strftime('%d %b %Y %H:%M UTC')
+        closed = datetime.fromtimestamp(snapshot.closed_at, timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
         fig.text(.08, .92, 'POCKET IQ', color='#53baff', fontsize=14, weight='bold')
-        fig.text(.08, .86, f'{symbol}  |  {snapshot.period//60}-minute candles', color='white', fontsize=20, weight='bold')
-        fig.text(.08, .09, f'Last candle closed: {closed}', color='#b8c8dc', fontsize=11)
-        fig.text(.08, .05, f'Source: {snapshot.source}  •  Completed candles only', color='#7d97b3', fontsize=10)
+        # Language-neutral chart annotations; all prose lives in the translated
+        # Telegram caption, which supports every script without missing fonts.
+        fig.text(.08, .86, f'{symbol}  |  M{snapshot.period//60}', color='white', fontsize=20, weight='bold')
+        fig.text(.08, .09, closed, color='#b8c8dc', fontsize=11)
+        fig.text(.08, .05, snapshot.source, color='#7d97b3', fontsize=10)
         if preview:
             fig.text(.5, .47, 'SYNTHETIC PREVIEW', ha='center', color='white', alpha=.25, fontsize=32, rotation=18)
         buffer = io.BytesIO()

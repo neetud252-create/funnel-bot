@@ -212,12 +212,12 @@ def main():
           [b[1] for row in config.SCREENS["how"]["kb"] for b in row]
           == ["cb:go:tech"], str(config.SCREENS["how"]["kb"]))
     check("the how caption is unchanged",
-          "WHY TRADERS CHOOSE GO+" in config.SCREENS["how"]["text"])
+          "WHY TRADERS CHOOSE Pocket IQ" in config.SCREENS["how"]["text"])
     check("the ai screen this leads to is unchanged",
           [b[1] for row in config.SCREENS["ai"]["kb"] for b in row]
           == ["cb:results"], str(config.SCREENS["ai"]["kb"]))
     check("the welcome caption is unchanged",
-          "Welcome to Go+" in config.SCREENS["welcome"]["text"])
+          "Welcome to Pocket IQ" in config.SCREENS["welcome"]["text"])
     check("the gate still has its two buttons, in order",
           [b[1] for row in config.SCREENS["gate"]["kb"] for b in row]
           == ["url:" + config.CHANNEL_URL, "cb:check_sub"],

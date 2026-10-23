@@ -1,4 +1,4 @@
-"""Verification test for the "The technology behind Go+" screen.
+"""Verification test for the "The technology behind Pocket IQ" screen.
 
 This is the screen reached from the tech screen's "See the technology" button:
 a headline, four capability lines, a closing line, and a single "See real
@@ -58,7 +58,7 @@ def check(label, condition, detail=""):
 
 # (name, id, glyph, text that must immediately follow, space after the emoji?)
 CAPTION_EMOJI = [
-    ("gear",  "5341715473882955310", "⚙️", " THE TECHNOLOGY BEHIND GO+", True),
+    ("gear",  "5341715473882955310", "⚙️", " THE TECHNOLOGY BEHIND Pocket IQ", True),
     ("cat",   "5796185041717433060", "\U0001F63A",
      " AI that processes market data in seconds", True),
     ("chart", "5231200819986047254", "\U0001F4CA",
@@ -72,7 +72,7 @@ CAPTION_EMOJI = [
 
 BUTTON_ICON = "5244837092042750681"
 
-EXPECT_PLAIN = ("⚙️ THE TECHNOLOGY BEHIND GO+\n\n"
+EXPECT_PLAIN = ("⚙️ THE TECHNOLOGY BEHIND Pocket IQ\n\n"
                 "\U0001F63A AI that processes market data in seconds\n"
                 "\U0001F4CAHundreds of indicators and price patterns\n"
                 "\U0001F50D Spots setups that are easy to miss\n"
@@ -93,8 +93,8 @@ def main():
     print("[ai] caption content")
     check("rendered caption matches the specified copy exactly",
           plain == EXPECT_PLAIN, repr(plain))
-    check("headline reads THE TECHNOLOGY BEHIND GO+",
-          "THE TECHNOLOGY BEHIND GO+" in plain, repr(plain))
+    check("headline reads THE TECHNOLOGY BEHIND Pocket IQ",
+          "THE TECHNOLOGY BEHIND Pocket IQ" in plain, repr(plain))
     check("no bold markup was introduced", "<b>" not in text, repr(text))
     check("no unfilled placeholder",
           "{" not in text and "}" not in text, repr(text))
@@ -218,9 +218,9 @@ def main():
           == ["cb:go:access", "url:" + config.CHANNEL_URL],
           str(config.SCREENS["results"]["kb"]))
     check("the how caption is unchanged",
-          "WHY TRADERS CHOOSE GO+" in config.SCREENS["how"]["text"])
+          "WHY TRADERS CHOOSE Pocket IQ" in config.SCREENS["how"]["text"])
     check("the welcome caption is unchanged",
-          "Welcome to Go+" in config.SCREENS["welcome"]["text"])
+          "Welcome to Pocket IQ" in config.SCREENS["welcome"]["text"])
     check("the gate still has its two buttons, in order",
           [b[1] for row in config.SCREENS["gate"]["kb"] for b in row]
           == ["url:" + config.CHANNEL_URL, "cb:check_sub"],

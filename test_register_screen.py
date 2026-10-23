@@ -76,7 +76,7 @@ EXPECTED = [
     ("Back", config.E_BACK),
 ]
 
-EXPECT_PLAIN = ("\U0001F510To access Go+, register for a new Pocket Option "
+EXPECT_PLAIN = ("\U0001F510To access Pocket IQ, register for a new Pocket Option "
                 "account using my link:\n\n"
                 "\U0001F517 {ref}\n\n"
                 "➡️Once you register, send your new account ID in the text "
@@ -283,7 +283,7 @@ def main():
     check("the access caption is unchanged",
           "In One Trade." in config.SCREENS["access"]["text"])
     check("the results caption is unchanged",
-          "Real feedback from active Go+ traders." in
+          "Real feedback from active Pocket IQ traders." in
           config.SCREENS["results"]["text"])
     check("the gate still has its two buttons, in order",
           [b[1] for row in config.SCREENS["gate"]["kb"] for b in row]

@@ -29,6 +29,9 @@ def sample(source):
                   asset='GBP/USD OTC', timeframe='M1', reason='visible structure',
                   trend='upward', momentum='buyers active', timer='1 minute', count=2,
                   invalidation='visible support breaks', condition='visible support breaks',
+                  market='OTC', title='Select a currency pair', query='Home Depot &lt;test&gt;',
+                  qualification='Confirmed setup', minutes=1, close='1.2345', closed='2026-10-24 01:00 UTC',
+                  period=1, source='Pocket Option demo',
                   status=config.MSG_PREMIUM_ACTIVE.format(limit=50),
                   ref='https://example.com/Start?click_id=abc_BUY&src=Guide')
     return source.format(**values)
@@ -43,13 +46,11 @@ def check_catalog():
                if name.endswith('_KB') and isinstance(rows, list)
                for row in rows for button in row]
     labels += ['Start Trading', 'I Downloaded My Gift', 'Deposit Now',
-               'Register & Get Gift', 'Open Go+', 'Continue', 'Stop broadcast messages']
+               'Register & Get Gift', 'Open Pocket IQ', 'Continue', 'Stop broadcast messages']
     # Coverage must fail when a new English screen/phrase is added without translations.
-    allowed = re.compile(r'Go Plus|Go\+|Premium|Start|YouTube|OTC|FIN|\b[SM]\d+\b|\b[A-Z]{3}/[A-Z]{3}\b')
-    english_only = set(L.english_flow_sources())
-    english_labels = {button[0] for row in home_menu.keyboard() for button in row}
+    allowed = re.compile(r'Pocket IQ|Go\+|Premium|Start|YouTube|OTC|FIN|\b[SM]\d+\b|\b[A-Z]{3}/[A-Z]{3}\b')
     for text in (*L.message_sources(), *labels):
-        if text in english_only or text in english_labels:
+        if text in L.TEMPLATES:
             continue
         for part in L._protected.split(text)[::2]:
             residue = re.sub(r'\{[^}]+\}', '', L._phrases.sub('', part))
@@ -58,10 +59,7 @@ def check_catalog():
         for source in L.message_sources():
             text = sample(source)
             translated = L.translate_message(text, language)
-            if source in english_only and language != 'en':
-                assert translated == '<i>' + L.ENGLISH_NOTICE[language] + '</i>\n\n' + text
-            else:
-                assert L._protected.findall(text) == L._protected.findall(translated), (language, source)
+            assert L._protected.findall(text) == L._protected.findall(translated), (language, source)
             # Template variables, IDs and cash values cannot disappear or change.
             for value in ('123456789', '$50', 'GBP/USD OTC', 'M1', '00:30'):
                 if value in text:
@@ -147,7 +145,7 @@ async def check_delivery_and_selector():
         InlineKeyboardButton(text='Register & Get Access', url='https://example.com/Start?click_id=abc')]])
     original = SendMessage(chat_id=2, text=home_menu.TEXT, reply_markup=markup, parse_mode='HTML')
     result = await outbound(transport, None, original)
-    assert L.ENGLISH_NOTICE['ru'] in result.text
+    assert result.text != original.text and 'Welcome to Pocket IQ' not in result.text
     assert original.text == home_menu.TEXT and markup.inline_keyboard[0][0].text == '💎 Get Bot Access'
     assert result.reply_markup.inline_keyboard[0][0].callback_data == 'home:access'
     assert result.reply_markup.inline_keyboard[0][0].style == 'success'
@@ -172,7 +170,7 @@ async def check_delivery_and_selector():
         localized = L.localize_method(video, language)
         assert localized.video == 'banner-video-id'
         assert localized.caption == emoji_theme.html(L.translate_message(home_menu.TEXT, language))
-        assert '4942823933909926751' in localized.caption
+        assert '<tg-emoji' in localized.caption
         assert localized.reply_markup.inline_keyboard[0][0].callback_data == 'home:access'
         plain = html.unescape(re.sub('<[^>]+>', '', localized.caption))
         assert len(plain.encode('utf-16-le')) // 2 <= 1024
@@ -263,10 +261,10 @@ async def check_delivery_and_selector():
     # Copied post text is Telegram-owned; translate only its built-in CTA.
     copy = CopyMessage(chat_id=2, from_chat_id=1, message_id=15,
                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                           InlineKeyboardButton(text='Open Go+', callback_data='bc:open:campaign')]]))
+                           InlineKeyboardButton(text='Open Pocket IQ', callback_data='bc:open:campaign')]]))
     result = await outbound(transport, None, copy)
     assert result.from_chat_id == 1 and result.message_id == 15 and result.caption is None
-    assert result.reply_markup.inline_keyboard[0][0].text == 'Go+ খুলুন'
+    assert result.reply_markup.inline_keyboard[0][0].text == 'Pocket IQ খুলুন'
     authored = 'My own broadcast: BUY now! Start tomorrow.'
     assert L.translate_message(authored, 'bn') == authored
     # Confirm aiogram accepts the middleware with its real session manager.

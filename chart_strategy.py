@@ -25,7 +25,7 @@ CHECKS = ('chart_readable', 'closed_candle', 'level_established',
           'level_reaction', 'follow_through', 'conflicting_evidence')
 TENTATIVE_NOTE = 'Tentative bias — confirmation is incomplete or the evidence is mixed.'
 
-INSTRUCTIONS = """You analyse uploaded financial price charts for Go+ using
+INSTRUCTIONS = """You analyse uploaded financial price charts for Pocket IQ using
 the owner's LEVEL REACTION strategy, version level-reaction-v3-chart-types.
 For a readable chart select the better-supported BUY or SELL directional bias.
 Apply the rules below, including the directional selection when a complete entry

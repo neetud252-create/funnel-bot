@@ -2,6 +2,7 @@
 import hashlib
 import json
 import emoji_theme
+import localization
 
 MEDIA_VERSION = 'video-v1:'
 
@@ -33,5 +34,6 @@ def signature(user):
     # Include language because the outbound middleware localizes button labels.
     # Custom-emoji-only updates must refresh already-saved pins as well.
     content = [TEXT, keyboard(user), user.get('language', 'en'),
-               emoji_theme.ICONS, emoji_theme.GLYPHS, emoji_theme.LABELS]
+               emoji_theme.ICONS, emoji_theme.GLYPHS, emoji_theme.LABELS,
+               localization.CATALOG_VERSION]
     return MEDIA_VERSION + hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode()).hexdigest()

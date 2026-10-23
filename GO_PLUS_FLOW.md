@@ -120,9 +120,18 @@ Official reference pages: [broker terms](https://pocketoption.com/en/public-offe
 
 ## Language scope
 
-Existing 12-language translations and saved choices remain. New setup/help copy is English in this release,
-with an explicit notice in the selected language. It is deliberately not partially translated through old phrases.
-Full translations of the new screens remain a separate content task.
+All 12 selected languages cover the welcome, setup/help, market menus, expiration,
+analysis progress, result labels and reminders. `locales/interface.json` contains complete
+templates for the new UI; existing TSV phrase translations remain for legacy screens.
+Translations are bundled with the bot and require no runtime translation service.
+Language changes immediately show the translated home screen and refresh the saved Start Here
+card. Dynamic asset names, URLs, IDs, amounts, BUY/SELL values and AI prose are preserved;
+the AI request separately specifies the user's saved language. Chart annotations use symbols,
+numbers and UTC, with explanatory prose in the localized Telegram caption.
+
+The public name and Telegram profile descriptions are synchronized as Pocket IQ at startup.
+External channel URLs and the existing bot username are identifiers and are not rewritten.
+Tools no longer links to Risks & Referral Info, and the FAQ omits those topics.
 
 ## Release and rollback
 

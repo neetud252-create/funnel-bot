@@ -43,6 +43,25 @@ MESSAGES = {
     'invalid': 'The candle data could not be verified. No analysis was used. Please try again later.',
     'service': 'Market data is temporarily unavailable. Please try again shortly.',
 }
+MARKET_TITLE = '📊 <b>Select market type</b>'
+CATEGORY_TITLE = '📋 <b>Select an asset by category</b>\n{market}'
+PICKER_TITLE = '💱 <b>{title}</b>\n{market} · {count} assets'
+EMPTY_CATEGORY = '📋 <b>{title}</b>\n\nNo assets are listed in this market category yet.'
+EXPIRATION_TITLE = '⏱ <b>Choose the expiration time</b>\n{asset}'
+SEARCH = '\n\nSearch: <b>{query}</b>'
+NO_MATCHES = '\nNo matching assets. Try another name.'
+RESULT = ('📊 <b>{asset}</b>\n\n<b>{direction}</b>\n'
+          '<b>Expiration:</b> M{expiry} · {minutes} min\n<i>{qualification}</i>\n\n'
+          '<b>Trend:</b> {trend}\n<b>Momentum:</b> {momentum}\n\n'
+          '<b>Last close:</b> {close}\n<b>Candle closed:</b> {closed}\n'
+          '<b>Chart candles:</b> M{period}\n'
+          '<i>{source} · AI analysis of completed candles. Predictions can be wrong.</i>')
+ALERTS = ('Open the bot in a private chat.', 'Choose an expiration from M1 to M10.',
+          'Second-based expirations are not available. Choose M1–M10.',
+          'Type an asset name, or use the buttons below.',
+          'Choose a market and category using the buttons below.')
+SOURCES = (*MESSAGES.values(), MARKET_TITLE, CATEGORY_TITLE, PICKER_TITLE,
+           EMPTY_CATEGORY, EXPIRATION_TITLE, SEARCH, NO_MATCHES, RESULT, *ALERTS)
 
 
 class Market(StatesGroup):
@@ -54,16 +73,17 @@ def filtered(assets, query):
     return [a for a in assets if query in catalog.normalized(a.name)]
 
 
-def picker(assets, market='otc', category='forex', page=0, query=''):
+def picker(assets, market='otc', category='forex', page=0, query='', language='en'):
     matches = filtered(assets, query)
     pages = max(1, (len(matches) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(0, min(page, pages-1))
-    title = catalog.category_info(category)[1]
-    text = f'💱 <b>{title}</b>\n{market.upper()} · {len(matches)} assets'
+    tr = lambda text: localization.translate_parts(text, language)
+    title = tr(catalog.category_info(category)[1])
+    text = tr(PICKER_TITLE).format(title=title, market=market.upper(), count=len(matches))
     if query:
-        text += '\n\nSearch: <b>' + html.escape(query) + '</b>'
+        text += tr(SEARCH).format(query=html.escape(query))
     if not matches:
-        text += '\nNo matching assets. Try another name.'
+        text += tr(NO_MATCHES)
     buttons = [(a.name[:50], 'cb:market:a:' + a.key, 'primary')
                for a in matches[page*PAGE_SIZE:(page+1)*PAGE_SIZE]]
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
@@ -131,7 +151,7 @@ async def show_categories(bot, tg_id, state, render, market):
     rows = [[(catalog.category_info(c)[0], f'cb:market:cat:{market}:{c}', 'primary')]
             for c in categories]
     rows.append([('« Back', 'cb:market:open', 'danger')])
-    await render(bot, tg_id, 'asset_category', '📋 <b>Select an asset by category</b>\n' + market.upper(),
+    await render(bot, tg_id, 'asset_category', CATEGORY_TITLE.format(market=market.upper()),
                  rows, screen_key='market_categories')
 
 
@@ -145,9 +165,11 @@ async def show_picker(bot, tg_id, state, render, page=0):
     pages = max(1, (len(filtered(assets, saved.get('market_query', ''))) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = min(max(0, page), pages - 1)
     await state.update_data(market_page=page)
-    text, rows = picker(assets, market, category, page, saved.get('market_query', ''))
+    language = await localization.language_for(tg_id)
+    text, rows = picker(assets, market, category, page, saved.get('market_query', ''), language)
     if not assets:
-        text = f'📋 <b>{catalog.category_info(category)[0]}</b>\n\nNo assets are listed in this market category yet.'
+        text = localization.translate_parts(EMPTY_CATEGORY, language).format(
+            title=localization.translate_parts(catalog.category_info(category)[0], language, button=True))
     await render(bot, tg_id, catalog.category_info(category)[2], text, rows, screen_key='market_assets')
 
 
@@ -167,13 +189,15 @@ async def select_asset(bot, tg_id, state, render, key):
     page = saved.get('market_page', 0) if (saved.get('market_book'), saved.get('market_category')) == (entry.market, entry.category) else 0
     await state.update_data(market_book=entry.market, market_category=entry.category, market_asset=entry.key)
     back = [[('« Back', f'cb:market:list:{entry.market}:{entry.category}:{page}', 'danger')]]
-    text = f'⏱ <b>Choose the expiration time</b>\n{html.escape(entry.name)}'
+    language = await localization.language_for(tg_id)
+    tr = lambda text: localization.translate_parts(text, language)
+    text = tr(EXPIRATION_TITLE).format(asset=html.escape(entry.name))
     if not data.enabled(tg_id):
-        text += '\n\n' + MESSAGES['configuration']
+        text += '\n\n' + tr(MESSAGES['configuration'])
     elif not entry.live:
-        text += '\n\n' + MESSAGES['plan']
+        text += '\n\n' + tr(MESSAGES['plan'])
     elif entry.live.open is False:
-        text += '\n\n' + MESSAGES['closed']
+        text += '\n\n' + tr(MESSAGES['closed'])
     await render(bot, tg_id, 'expiration_time', text, [*expiration_rows(entry.key), *back],
                  screen_key='market_expiration')
 
@@ -197,13 +221,13 @@ async def open_screen(cb, bot, state, render):
 async def open_picker(bot, tg_id, state, render):
     await state.clear()
     await navigate(state, market_period=60, market_query='')
-    await render(bot, tg_id, 'trading_type', '📊 <b>Select market type</b>',
+    await render(bot, tg_id, 'trading_type', MARKET_TITLE,
                  [[('OTC', 'cb:market:book:otc', 'primary')],
                   [('FIN', 'cb:market:book:fin', 'primary')],
                   [('« Back', 'cb:home:back', 'danger')]], screen_key='market_type')
 
 
-def result_text(snapshot, result, expiry=1):
+def result_text(snapshot, result, expiry=1, language='en'):
     # The strategy's validated direction is retained even for a tentative bias.
     # Invalid/unreadable input still fails; never manufacture a direction.
     confirmed = chart_strategy.confirmed_setup(result)
@@ -211,19 +235,15 @@ def result_text(snapshot, result, expiry=1):
     if not chart_strategy.supports_signal(result) or expiry not in EXPIRIES:
         raise api.AnalysisError('response')
     status = '🟢 BUY' if direction == 'BUY' else '🔴 SELL'
-    qualification = 'Confirmed setup' if confirmed else chart_strategy.TENTATIVE_NOTE
+    tr = lambda text: localization.translate_parts(text, language)
+    qualification = tr('Confirmed setup' if confirmed else chart_strategy.TENTATIVE_NOTE)
     safe = lambda value: html.escape(str(value)[:180])
-    closed = datetime.fromtimestamp(snapshot.closed_at, timezone.utc).strftime('%d %b %H:%M UTC')
-    return (f'📊 <b>{html.escape(snapshot.asset.name)}</b>\n\n'
-            f'<b>{status}</b>\n'
-            f'<b>Expiration:</b> M{expiry} · {expiry} min\n'
-            f'<i>{qualification}</i>\n\n'
-            f'<b>Trend:</b> {safe(result.get("trend", ""))}\n'
-            f'<b>Momentum:</b> {safe(result.get("momentum", ""))}\n\n'
-            f'<b>Last close:</b> {snapshot.candles[-1].close:.8g}\n'
-            f'<b>Candle closed:</b> {closed}\n'
-            f'<b>Chart candles:</b> M{snapshot.period//60}\n'
-            f'<i>{html.escape(snapshot.source)} · AI analysis of completed candles. Predictions can be wrong.</i>')
+    closed = datetime.fromtimestamp(snapshot.closed_at, timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    return tr(RESULT).format(asset=html.escape(snapshot.asset.name), direction=status,
+        expiry=expiry, minutes=expiry, qualification=qualification,
+        trend=safe(result.get('trend', '')), momentum=safe(result.get('momentum', '')),
+        close=f'{snapshot.candles[-1].close:.8g}', closed=closed,
+        period=snapshot.period//60, source=html.escape(snapshot.source))
 
 
 async def analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
@@ -319,7 +339,7 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1):
         if not await active():
             return
         snapshot.require_fresh()
-        caption = result_text(snapshot, result, expiry)
+        caption = result_text(snapshot, result, expiry, language)
         if not await trial.consume(db.pool, token):
             raise api.AnalysisError('limit')
         consumed = True

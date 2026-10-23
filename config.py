@@ -89,7 +89,7 @@ CLICK_MAX_BYTES = int(os.getenv("CLICK_MAX_BYTES", "4096"))
 # postback joins back to a user we have a click for. The browser-side pixel and
 # this share event_id so Meta deduplicates them into one event.
 #
-# The dataset is the Go+ pixel. The token is a system-user access token and is
+# The dataset is the Pocket IQ pixel. The token is a system-user access token and is
 # the ONE secret in this feature: it is sent in the request body, never in a
 # URL, and never logged. Empty token means the integration is off - no event is
 # built and nothing is sent - which is the correct default for a deploy that
@@ -243,7 +243,7 @@ E_EXP_DOWN  = "5406745015365943482"
 # as opposed to the button icons further down. These go through pe() into
 # <tg-emoji> entities, so they render only on a message sent with
 # parse_mode="HTML"; render() always does.
-E_MENU_HEADER   = "5188678912883827293"   # the robot on "Go+ main menu"
+E_MENU_HEADER   = "5188678912883827293"   # the robot on "Pocket IQ main menu"
 E_MENU_SIGNALS  = "5429633836684157942"   # the bolt on the "Signals" line
 E_MENU_LEVEL_HD = "5370688996844249600"   # the battery on "Your level:"
 E_LEVEL_START   = "5274026806477857971"   # the star on the Start tier itself
@@ -273,7 +273,7 @@ E_GATE_CHECK = "5260463209562776385"      # Check Subscription button icon
 E_WELCOME_BOT   = "5924946082487341386"   # the robot on the headline
 E_WELCOME_DOWN  = "5305522282695768654"   # the finger pointing at Start
 E_WELCOME_START = "5188481279963715781"   # Start button icon
-# "Why traders choose Go+" screen (SCREENS["how"]) only. All seven are CAPTION
+# "Why traders choose Pocket IQ" screen (SCREENS["how"]) only. All seven are CAPTION
 # entities rendered through pe(); this screen's BUTTON icon is E_QMARK above,
 # which already carries the required id and is used nowhere else.
 #
@@ -306,7 +306,7 @@ E_TECH_N5    = "5778205144680239810"
 E_TECH_GREEN = "5188234920639632382"      # the BUY circle
 E_TECH_RED   = "5411225014148014586"      # the SELL circle
 E_TECH_ROBOT = "5188678912883827293"      # robot on the closing line
-# "The technology behind Go+" screen (SCREENS["ai"]) only. The first six are
+# "The technology behind Pocket IQ" screen (SCREENS["ai"]) only. The first six are
 # CAPTION entities rendered through pe(); E_AI_RESULTS is the BUTTON icon and
 # rides on the 4th tuple element, never inside the label.
 #
@@ -347,7 +347,7 @@ E_RES_LOCK  = "5296369303661067030"       # Get access button icon
 # stickers for the same-looking glyph, so do not merge them.
 E_ACC_SIREN = "5395695537687123235"       # siren on the headline
 E_ACC_MONEY = "5224257782013769471"       # money bag after the headline
-E_ACC_ROBOT = "5188678912883827293"       # robot before "Go Plus"
+E_ACC_ROBOT = "5188678912883827293"       # robot before "Pocket IQ"
 E_ACC_CHECK = "5206607081334906820"       # check mark ending the signal line
 E_ACC_SPOCK = "5364297939478921851"       # raised hand, dream car line
 E_ACC_OK    = "5364237234411160303"       # ok hand, dream car line
@@ -531,7 +531,7 @@ SCREENS = {
         # draws that before the label, so a unicode emoji in the text too would
         # render a second glyph beside it. Styles, URL, callback and order are
         # unchanged from the previous version of this screen.
-        "text": (pe(E_GATE_LOCK, "\U0001F512") + "ONE STEP TO UNLOCK GO+\n\n"
+        "text": (pe(E_GATE_LOCK, "\U0001F512") + "ONE STEP TO UNLOCK Pocket IQ\n\n"
                  "Join our free trading channel to activate the bot:\n\n"
                  + pe(E_GATE_MEGA, "\U0001F4E3") + pe(E_GATE_SOUND, "\U0001F50A")
                  + CHANNEL_MENTION + "\n\n"
@@ -547,7 +547,7 @@ SCREENS = {
         # Telegram draws before the label - a unicode rocket in the text too
         # would render a second glyph beside it. Callback, style and order are
         # unchanged from the previous version of this screen.
-        "text": (pe(E_WELCOME_BOT, "\U0001F916") + " Welcome to Go+\n\n"
+        "text": (pe(E_WELCOME_BOT, "\U0001F916") + " Welcome to Pocket IQ\n\n"
                  "Your personal trading assistant \U00002014 clear, data-driven "
                  "signals without the complex analysis.\n\n"
                  + pe(E_WELCOME_DOWN, "\U0001F447") + " Tap Start to begin"),
@@ -562,7 +562,7 @@ SCREENS = {
         #
         # The button is unchanged: label already plain "How Does It Work" and
         # E_QMARK already carries the required id, so nothing here restyles it.
-        "text": (pe(E_HOW_SPARK, "\U00002728") + " WHY TRADERS CHOOSE GO+\n\n"
+        "text": (pe(E_HOW_SPARK, "\U00002728") + " WHY TRADERS CHOOSE Pocket IQ\n\n"
                  + pe(E_HOW_CHART, "\U0001F4CA") + " 100+ trading assets\n"
                  + pe(E_HOW_GLOBE, "\U0001F310") + "OTC and exchange pairs\n"
                  + pe(E_HOW_TARGET, "\U0001F3AF") + "2 trading modes\n"
@@ -598,7 +598,7 @@ SCREENS = {
         # comes from the 4th tuple element, which build_kb passes as
         # icon_custom_emoji_id. Callback, style and position are unchanged -
         # only the icon is new, since this button carried none before.
-        "text": (pe(E_AI_GEAR, "⚙️") + " THE TECHNOLOGY BEHIND GO+\n\n"
+        "text": (pe(E_AI_GEAR, "⚙️") + " THE TECHNOLOGY BEHIND Pocket IQ\n\n"
                  + pe(E_AI_CAT, "\U0001F63A")
                  + " AI that processes market data in seconds\n"
                  + pe(E_AI_CHART, "\U0001F4CA")
@@ -622,7 +622,7 @@ SCREENS = {
         # First button label is the bare words "Get access to Go +"; its padlock
         # comes from the 4th tuple element. Callback and style are unchanged.
         # The second button is untouched.
-        "text": ("<b>Real feedback from active Go+ traders.</b>\n\n"
+        "text": ("<b>Real feedback from active Pocket IQ traders.</b>\n\n"
                  + pe(E_RES_UP, "\u261d\ufe0f")
                  + " The screenshots above are just a tiny fraction of the results.\n\n"
                  + pe(E_RES_SHAKE, "\U0001F91D")
@@ -635,14 +635,14 @@ SCREENS = {
     "access": {
         "video": "access",
         # Spacing is deliberate and uneven - see the per-emoji notes below.
-        # Only two spans are bold: the headline figure and "Go Plus". Every
+        # Only two spans are bold: the headline figure and "Pocket IQ". Every
         # emoji goes through pe(), so none of them is a bare unicode literal.
         "text": (pe(E_ACC_SIREN, "\U0001F6A8")
                  + " <b>+$18,400 \U00002014 In One Trade.</b> "
                  + pe(E_ACC_MONEY, "\U0001F4B0") + "\n"
                  "No charts. No courses. No stress.\n\n"
                  # robot butts straight against the bold name, no space
-                 + pe(E_ACC_ROBOT, "\U0001F916") + "<b>Go Plus</b>"
+                 + pe(E_ACC_ROBOT, "\U0001F916") + "<b>Pocket IQ</b>"
                  " sends the signal \U00002192 you tap \U00002192 you profit. "
                  + pe(E_ACC_CHECK, "✔️") + "\n\n"
                  # the two hands sit together, then one space
@@ -698,7 +698,7 @@ SCREENS = {
         # Registration, ID submission and return to the welcome screen.
         # Custom button icons use the 4th tuple element.
         "text": (pe(E_REG_LOCK, "\U0001F510")
-                 + "To access Go+, register for a new Pocket Option account "
+                 + "To access Pocket IQ, register for a new Pocket Option account "
                  "using my link:\n\n"
                  + pe(E_REG_LINK, "\U0001F517") + " {ref}\n\n"
                  + pe(E_REG_ARROW, "➡️")
@@ -731,7 +731,7 @@ SCREENS = {
         "photo": "menu",
         # Wording, line breaks and the three {placeholders} are unchanged; only
         # the three leading emoji became <tg-emoji> entities.
-        "text": (T_MENU_HEADER + " <b>Go+ main menu</b>\n\n"
+        "text": (T_MENU_HEADER + " <b>Pocket IQ main menu</b>\n\n"
                  + T_MENU_SIGNALS + " <b>Signals</b>\n"
                  "\U00002014 Available today: {limit} signals\n"
                  "\U00002014 Used: {used}\n"

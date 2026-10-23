@@ -19,6 +19,7 @@ import home_menu
 import start_here
 import journey
 import localization
+import bot_profile
 import chart_signals
 import market_signals
 import market_data
@@ -832,7 +833,7 @@ async def _resume_setup(bot, tg_id, state=None):
 @dp.callback_query(F.data.startswith('flow:'))
 async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     if not cb.message or cb.message.chat.type != 'private':
-        await cb.answer('Open Go Plus in a private chat.', show_alert=True)
+        await cb.answer('Open Pocket IQ in a private chat.', show_alert=True)
         return
     await cb.answer()
     tg_id = cb.from_user.id
@@ -956,6 +957,9 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await _journey(bot, tg_id, journey.notifications(user), key='notifications')
     elif action == 'example':
         await _journey(bot, tg_id, journey.screen('screenshot', user), key='asset_guide')
+    elif action == 'risks':
+        # Retired Tools button on an older message returns to the current menu.
+        await _journey(bot, tg_id, journey.screen('tools', user), key='flow_tools')
     elif action in journey.TEXTS:
         await _journey(bot, tg_id, journey.screen(action, user), key='flow_' + action)
     else:
@@ -1014,15 +1018,19 @@ async def enter_registration_uid(cb: CallbackQuery, bot: Bot, state: FSMContext)
 
 
 @dp.callback_query(F.data.startswith('lang:'))
-async def choose_language(cb: CallbackQuery, bot: Bot):
+async def choose_language(cb: CallbackQuery, bot: Bot, state: FSMContext = None):
     language = cb.data.split(':', 1)[1]
     if language not in localization.CODES:
         await cb.answer('Please choose a language from the list.', show_alert=True)
         return
     await db.set_language(cb.from_user.id, language)
+    if state is not None:
+        # A previous analysis must not replace the newly translated home screen.
+        # Persistent account/setup progress remains in the user's database row.
+        await state.clear()
     await cb.answer('Language saved.')
-    await render(bot, cb.from_user.id, None, localization.SELECTOR_TEXT,
-                 localization.selector_keyboard(language))
+    await _show_home(bot, cb.from_user.id)
+    await _sync_welcome(bot, cb.from_user.id)
 
 @dp.message(Command("unverify"))
 async def unverify_cmd(m: Message):
@@ -1048,7 +1056,7 @@ GIFT_FILE_NAME_KEY = "money_management_gift_file_name"
 
 @dp.message(Command("setgift"))
 async def cmd_setgift(m: Message):
-    """Save an Excel document uploaded to the Go+ bot by an administrator."""
+    """Save an Excel document uploaded to the Pocket IQ bot by an administrator."""
     if not _is_admin(m.from_user.id):
         logging.warning("non-admin %s tried /setgift", m.from_user.id)
         return
@@ -2180,7 +2188,8 @@ async def main():
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
     tasks = [server.serve(), dp.start_polling(bot), broadcast.worker(bot),
-             verification_reminders.worker(bot), _refresh_saved_welcomes(bot), market_data.startup_check()]
+             verification_reminders.worker(bot), _refresh_saved_welcomes(bot), market_data.startup_check(),
+             bot_profile.sync(bot)]
     if config.ENABLE_AUTO_RETRY:
         logging.info("ENABLE_AUTO_RETRY on - background re-check every 30 min")
         tasks.append(retry_worker(bot))

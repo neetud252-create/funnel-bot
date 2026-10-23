@@ -59,7 +59,7 @@ CAPTION_EMOJI = [
 START_ICON = "5188481279963715781"
 
 # The caption with its entities stripped - what the user actually reads.
-EXPECT_PLAIN = ("\U0001F916 Welcome to Go+\n\n"
+EXPECT_PLAIN = ("\U0001F916 Welcome to Pocket IQ\n\n"
                 "Your personal trading assistant \U00002014 clear, data-driven "
                 "signals without the complex analysis.\n\n"
                 "\U0001F447 Tap Start to begin")
@@ -79,8 +79,8 @@ def main():
     check("rendered caption matches the specified copy exactly",
           strip_entities(text) == EXPECT_PLAIN,
           repr(strip_entities(text)))
-    check("headline reads 'Welcome to Go+'",
-          "Welcome to Go+" in text, repr(text))
+    check("headline reads 'Welcome to Pocket IQ'",
+          "Welcome to Pocket IQ" in text, repr(text))
     check("states the one-line positioning",
           "Your personal trading assistant" in text, repr(text))
     check("mentions data-driven signals",
