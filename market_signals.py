@@ -54,7 +54,7 @@ def picker(assets, period, page=0, query=''):
     page = max(0, min(page, pages-1))
     text = ('📊 <b>Choose your asset</b>\n\n'
             f'Pocket Option OTC · <b>{period//60}-minute candles</b>\n'
-            f'{len(matches)} assets available · Page {page+1}/{pages}\n\n'
+            f'{len(matches)} assets on the connected data plan · Page {page+1}/{pages}\n\n'
             'Tap an asset for its candlestick chart and analysis.\n'
             'Type a name or pair to search, e.g. EURUSD or Apple.')
     if query:
@@ -79,11 +79,15 @@ def picker(assets, period, page=0, query=''):
     return text, rows
 
 
-async def allowed(tg_id, bot, render):
+async def allowed(tg_id, bot, render, *, check_allowance=True):
     import db
     if not data.enabled(tg_id):
         await render(bot, tg_id, None, MESSAGES['configuration'], RETRY, screen_key='market_unavailable')
         return False
+    # Browsing the catalogue does not spend an analysis. Enforce the shared
+    # allowance when an asset is selected, not when opening or searching it.
+    if not check_allowance:
+        return True
     verified, left = await trial.status(db.pool, tg_id)
     if not left:
         text = chart_signals.MESSAGES['limit'] if verified else chart_signals.EXHAUSTED
@@ -112,7 +116,7 @@ async def open_screen(cb, bot, state, render):
 
 async def open_picker(bot, tg_id, state, render):
     await state.clear()
-    if not await allowed(tg_id, bot, render):
+    if not await allowed(tg_id, bot, render, check_allowance=False):
         return
     await state.set_state(Market.browsing.state)
     await state.update_data(market_session=secrets.token_hex(12), market_period=60, market_query='')
@@ -268,7 +272,7 @@ def install(dp, render):
         if action == ['market', 'open']:
             return await open_screen(cb, bot, state, render)
         await cb.answer()
-        if not await allowed(cb.from_user.id, bot, render):
+        if not await allowed(cb.from_user.id, bot, render, check_allowance=False):
             return
         await state.set_state(Market.browsing.state)
         await state.update_data(market_session=secrets.token_hex(12))
@@ -287,7 +291,7 @@ def install(dp, render):
             await render(bot, cb.from_user.id, None, MESSAGES.get(str(exc), MESSAGES['service']), RETRY)
 
     async def search(m, bot, state):
-        if m.chat.type != 'private' or not await allowed(m.from_user.id, bot, render):
+        if m.chat.type != 'private' or not await allowed(m.from_user.id, bot, render, check_allowance=False):
             return
         if not m.text or m.text.startswith('/'):
             await m.answer('Type an asset name, or use the buttons below.')
