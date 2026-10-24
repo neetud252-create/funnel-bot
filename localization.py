@@ -89,10 +89,12 @@ def message_sources():
     import start_here
     import market_signals
     import verification_reminders
+    import elena_copy
     result = list(EXTRA_MESSAGES) + [home_menu.TEXT, home_menu.SHEET_CAPTION,
                                        home_menu.SHEET_UNAVAILABLE] + list(home_menu.PENDING.values())
     result.extend(chart_signals.SOURCES)
     result.extend(journey.SOURCES)
+    result.extend(elena_copy.SOURCES)
     result.extend((start_here.TEXT, verification_reminders.TEXT, *market_signals.SOURCES))
     result.extend(journey.notifications({'broadcast_opt_out': value})[0] for value in (False, True))
     result.extend(screen['text'] for screen in config.SCREENS.values())

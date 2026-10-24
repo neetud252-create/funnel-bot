@@ -103,6 +103,8 @@ def button_info(button):
 
 class InboundMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
+        if getattr(getattr(event, 'message', None), 'business_connection_id', None):
+            return await handler(event, data)
         user = getattr(event, 'from_user', None)
         message = getattr(event, 'message', None)
         chat = getattr(event, 'chat', None) or getattr(message, 'chat', None)
@@ -150,6 +152,10 @@ class InboundMiddleware(BaseMiddleware):
 class OutboundMiddleware:
     """Observe successful deliveries and wrap URL buttons before localization."""
     async def __call__(self, make_request, bot, method):
+        # Business message IDs belong to a different chat namespace. Never track
+        # their private conversations or collide with the Pocket IQ UI records.
+        if getattr(method, 'business_connection_id', None):
+            return await make_request(bot, method)
         uid = getattr(method, 'chat_id', None)
         api = method.__api_method__
         if not enabled(uid) or api not in ('sendMessage', 'sendPhoto', 'sendVideo', 'sendAnimation', 'sendDocument'):
