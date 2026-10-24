@@ -32,6 +32,7 @@ const {schema, queries, version} = JSON.parse(source.stdout);
     const claimActivation = id => db.query(queries.claim_activation, [id,version]);
     const activationOpened = id => db.query(queries.activation_opened, [id,version]);
     const pendingActivations = () => db.query(queries.pending_activations, [version]);
+    const dueJobs = (admins=[]) => db.query(queries.due, [admins,version]);
     try {
         // Seed already activated accounts in the PRE-UPDATE schema, then upgrade.
         await db.exec(schema.replace(/ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_version[^;]+;/, ''));
@@ -55,7 +56,7 @@ const {schema, queries, version} = JSON.parse(source.stdout);
             INSERT INTO elena_sessions(tg_id,reason,due_at)
                 SELECT tg_id,'uid',now()-interval '1 minute' FROM users WHERE tg_id IN (101,102,103);
         `);
-        const due = (await db.query(queries.due, [[103]])).rows;
+        const due = (await dueJobs([103])).rows;
         assert.deepEqual(due.map(r=>Number(r.tg_id)).sort(), [101,102]);
         const claim = async (id, revision=1) =>
             (await db.query(queries.claim, [id,revision])).rows;
@@ -82,7 +83,7 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         await db.exec(`UPDATE elena_sessions SET stopped=false,sent_count=1 WHERE tg_id=102;
             INSERT INTO verification_reminder_deliveries(tg_id,status) VALUES(102,'sent');`);
         assert.equal((await claim(102,2)).length, 0, 'Legacy and Elena reminders share the two-message cap');
-        assert.equal((await db.query(queries.due, [[103]])).rows.length, 0);
+        assert.equal((await dueJobs([103])).rows.length, 0);
 
         const row = async () => (await db.query('SELECT * FROM elena_sessions WHERE tg_id=103')).rows[0];
         await db.query(queries.await_chat, [103,0]);
@@ -93,7 +94,7 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         assert.equal(deferred.due_at, null);
         assert.equal(deferred.attempts, 0, 'No Telegram attempt was made');
         assert.equal(deferred.sent_count, 0, 'No delivery consumed');
-        assert.equal((await db.query(queries.due, [[]])).rows.length, 0, 'Deferred jobs must leave the delivery queue');
+        assert.equal((await dueJobs()).rows.length, 0, 'Deferred jobs must leave the delivery queue');
         assert.equal((await claim(103)).length, 0, 'Deferred jobs cannot be claimed');
         await db.query(queries.observe, [103,'uid',60]);
         deferred = await row();
@@ -159,6 +160,34 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         assert.equal(retained.activation_version, version, 'Ordinary redeploy does not reset new activation');
         assert.ok(retained.activation_opened_at instanceof Date);
         assert.deepEqual((await db.query('SELECT * FROM users WHERE tg_id IN (901,902) ORDER BY tg_id')).rows, oldUsers);
+        // Admin accounts may test the customer path after this release activation.
+        await db.exec(`INSERT INTO users(tg_id) VALUES(201),(202),(203);
+            INSERT INTO elena_sessions(tg_id,reason,due_at,activated_at,activation_version)
+            VALUES(201,'uid',now()-interval '1 minute',now(),${version}),
+                  (202,'uid',now()-interval '1 minute',now(),0),
+                  (203,'uid',now()-interval '1 minute',NULL,${version});`);
+        const adminJobs = async () => (await dueJobs([201,202,203])).rows
+            .filter(row=>Number(row.tg_id)>=201 && Number(row.tg_id)<=203);
+        assert.deepEqual((await adminJobs()).map(row=>Number(row.tg_id)), [201]);
+        for (const flag of ['stopped','handoff']) {
+            await db.exec(`UPDATE elena_sessions SET ${flag}=true WHERE tg_id=201`);
+            assert.equal((await adminJobs()).length, 0, `Admin still respects ${flag}`);
+            await db.exec(`UPDATE elena_sessions SET ${flag}=false WHERE tg_id=201`);
+        }
+        for (const flag of ['verified','broadcast_opt_out','broadcast_blocked']) {
+            await db.exec(`UPDATE users SET ${flag}=true WHERE tg_id=201`);
+            assert.equal((await adminJobs()).length, 0, `Admin still respects ${flag}`);
+            await db.exec(`UPDATE users SET ${flag}=false WHERE tg_id=201`);
+        }
+        await db.exec('UPDATE verification_reminder_settings SET enabled=false WHERE id=1');
+        assert.equal((await adminJobs()).length, 0);
+        await db.exec('UPDATE verification_reminder_settings SET enabled=true WHERE id=1');
+        await db.exec('UPDATE elena_sessions SET sent_count=2 WHERE tg_id=201');
+        assert.equal((await adminJobs()).length, 0, 'Admin still respects the unanswered-message cap');
+        await db.exec('UPDATE elena_sessions SET sent_count=0 WHERE tg_id=201');
+        assert.equal((await claim(201)).length, 1, 'Activated admin can claim a due follow-up');
+        assert.equal((await claim(201)).length, 0, 'Admin delivery is also duplicate-safe');
+        console.log('PASS: activated admin follow-ups, old/unactivated admin exclusion and unchanged delivery safeguards.');
         console.log('PASS: all-account activation reset migration, old-job exclusion, new-message reactivation, entitlement preservation, duplicate suppression, durable delivery and restart stability.');
     } finally {
         await db.close();
