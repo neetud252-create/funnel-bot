@@ -697,9 +697,14 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     # command defaults to None so /devstart's start(m, bot, state) still works.
     await _capture_ref(tg_id, command)
     await _clear_nudge(bot, tg_id)
-    # Serialize repeated /start requests so only the first welcome is pinned.
+    # Serialize starts and read access under the lock. Only accounts that have
+    # completed verification go directly to the existing main menu.
     lock = _welcome_locks.setdefault(tg_id, asyncio.Lock())
     async with lock:
+        user = await db.get_user(tg_id)
+        if user and user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
         message = await _show_home(bot, tg_id)
         if getattr(getattr(m, 'chat', None), 'type', None) == 'private':
             await _pin_welcome(bot, tg_id, message)

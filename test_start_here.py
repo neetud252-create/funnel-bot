@@ -86,6 +86,8 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('menu:signal', [b.callback_data for r in dashboard['markup'].inline_keyboard for b in r])
         self.mod = H._load_bot()
         await self.start()
+        self.assertEqual(H.last_screen(self.bot)['asset'], 'assets/menu.png')
+        self.assertEqual(row['welcome_message_id'], anchor)
         self.assertEqual(len(self.bot.edits), 2)  # persisted hash survives restart
         self.assertEqual(len(self.bot.pins), 1)
         await self.db.unverify(self.uid)
