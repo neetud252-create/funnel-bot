@@ -74,7 +74,7 @@ def button(label, *, action=None, url=None):
 
 def keyboard(reason='inactive', *, invitation=False):
     if invitation:
-        rows = [[button('Chat with Elena', url=f'https://t.me/{USERNAME}')],
+        rows = [[button('Chat with Elena', url=activation.chat_url())],
                 [button('Continue Setup', url=link('setup'))]]
     else:
         choices = {
