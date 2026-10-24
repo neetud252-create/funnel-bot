@@ -2,9 +2,9 @@
 import json
 import db
 
-# Release-wide reset: previous contacts/activations have version 0. Never use
+# Release-wide reset: previous contacts/activations have version 0 or 1. Never use
 # deployment time here: ordinary restarts must retain new activations.
-ACTIVATION_VERSION = 1
+ACTIVATION_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS elena_connection (

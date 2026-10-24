@@ -2254,6 +2254,10 @@ async def main():
         await conn.execute(analytics.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
         await conn.execute(chart_signals.trial.SCHEMA)
+    # This fixed, transactional migration runs once, before updates or workers.
+    # It clears all old access; subsequent boots retain newly completed setup.
+    import account_reset
+    await account_reset.apply(db.pool)
     logging.info('Candle chart analysis ready; provider=%s; API configured=%s; model=%s; strategy=%s',
                  chart_signals.api.provider(), chart_signals.api.configured(), chart_signals.api.model(),
                  chart_signals.chart_strategy.VERSION)

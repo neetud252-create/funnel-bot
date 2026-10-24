@@ -23,7 +23,7 @@ async def main():
     inactive = dict(tg_id=uid, last_business_at=None, activated_at=None,
                     activation_opened_at=None, stopped=False, handoff=False)
     legacy = dict(inactive, activated_at=now-timedelta(days=1),
-                  last_business_at=now, activation_opened_at=now, activation_version=0)
+                  last_business_at=now, activation_opened_at=now, activation_version=1)
     accepted = dict(inactive, activated_at=now, last_business_at=now,
                     activation_version=E.store.ACTIVATION_VERSION)
 
