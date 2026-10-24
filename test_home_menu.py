@@ -29,20 +29,38 @@ async def main():
     assert home_menu.keyboard({'verified': True})[:2] == [
         [('📊 Get Signals', 'cb:home:test', 'success')],
         [('🏠 Open My Dashboard', 'cb:home:access', 'primary')]]
-    for verified in (False, True):
-        uid = 72000 + int(verified)
+    for index, (verified, premium) in enumerate(((False, False), (True, False), (True, True), (False, True))):
+        uid = 72000 + index
         fake_db._users[uid] = dict(fake_db._fresh_row(), verified=verified,
-                                   uid='123456789' if verified else None)
+                                   uid='123456789' if verified or premium else None, is_premium=premium,
+                                   signals_used_today=9, last_reset_date=fake_db._today[0])
         bot, state = H.FakeBot(), H.FakeState()
         await bot_mod.start(H.FakeMessage(uid, '/start'), bot, state)
         sends = [c for c in bot.calls if c['kind'] != 'delete']
-        assert len(sends) == 1 and sends[0]['kind'] == 'video'
-        assert sends[0]['asset'] == 'assets/home_banner_loop.mp4'
-        assert sends[0]['body'] == home_menu.TEXT and sends[0]['markup']
+        assert len(sends) == 1 and sends[0]['markup']
+        if verified:
+            limit = config.daily_limit(premium)
+            expected = config.SCREENS['menu']['text'].format(
+                limit=limit, used=9, left=limit-9, level=config.level_label_tg(premium))
+            assert sends[0]['kind'] == 'photo' and sends[0]['asset'] == 'assets/menu.png'
+            assert sends[0]['body'] == expected
+            assert sends[0]['markup'] == bot_mod.build_kb(bot_mod.journey.dashboard_keyboard())
+            assert not bot.pins and fake_db._users[uid]['welcome_message_id'] is None
+            assert fake_db._users[uid]['signals_used_today'] == 9
+            # Repeated starts keep opening the main menu with the same allowance.
+            await bot_mod.start(H.FakeMessage(uid, '/start'), bot, state)
+            assert bot.calls[-1]['body'] == expected and not bot.pins
+        else:
+            assert sends[0]['kind'] == 'video'
+            assert sends[0]['asset'] == 'assets/home_banner_loop.mp4'
+            assert sends[0]['body'] == home_menu.TEXT
         assert state.state is None
         await bot_mod.home_action(H.FakeCB(uid, 'home:access', 1), bot, state)
         if verified:
             assert 'menu:signal' in [b.callback_data for row in bot.calls[-1]['markup'].inline_keyboard for b in row]
+        elif premium:
+            assert bot.calls[-1]['asset'] == 'assets/register_account.png'
+            assert not fake_db._users[uid]['verified']
         else:
             assert 'Do you already have a Pocket Option account?' in bot.calls[-1]['body']
             assert fake_db._users[uid]['setup_stage'] == 'account_question'
@@ -201,7 +219,7 @@ async def main():
     for call in bot.send_video.await_args_list:
         assert (call.kwargs['width'], call.kwargs['height'], call.kwargs['duration']) == (1080, 1920, 99)
         assert str(call.kwargs['cover'].path) == 'assets/guide_opPxk6Af_cover.jpg'
-    print('PASS - single video/caption/menu card, old-layout cleanup, fallbacks, separate media caches, and access routing.')
+    print('PASS - verified starts open the main menu; incomplete accounts keep welcome, pins, fallbacks and access routing.')
 
 
 if __name__ == '__main__':
