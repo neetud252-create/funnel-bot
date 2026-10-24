@@ -849,8 +849,9 @@ SCREENS = {
         "video_options": {"width": 1080, "height": 1920, "duration": 120},
         "video_cover": "guide_opPxk6Af_cover",
         "text": (
-            "‼️ 𝗪𝗔𝗧𝗖𝗛 𝗧𝗛𝗘 𝗙𝗨𝗟𝗟 GO 𝗣𝗟𝗨𝗦 𝗧𝗨𝗧𝗢𝗥𝗜𝗔𝗟\n\n"
-            "📌 Watch the complete video carefully and follow every step correctly."
+            "📖 <b>Pocket IQ — Complete Guide</b>\n\n"
+            "Learn how to access the bot, get signals, and understand each trade reason.\n\n"
+            "▶️ Watch the full 2-minute walkthrough."
         ),
         "kb": [[("⬅️ Back", "cb:home:back", "primary")]],
     },
