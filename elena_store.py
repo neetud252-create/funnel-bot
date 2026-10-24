@@ -153,7 +153,7 @@ async def claim_voice(tg_id, nonce):
 
 
 async def claim(c, job):
-    return await c.fetchrow("""UPDATE elena_sessions e SET status='sending',attempts=attempts+1
+    return await c.fetchrow("""UPDATE elena_sessions e SET status='sending',attempts=e.attempts+1
         FROM users u WHERE e.tg_id=$1 AND e.revision=$2 AND e.status='pending'
         AND e.due_at<=now() AND e.tg_id=u.tg_id AND NOT u.verified
         AND NOT u.broadcast_opt_out AND NOT u.broadcast_blocked

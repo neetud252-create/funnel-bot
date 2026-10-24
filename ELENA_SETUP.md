@@ -87,3 +87,8 @@ test_uid_singleflight.py test_analytics.py`
 
 These suites mock Telegram, customer data and broker verification. They do not
 establish that a real Telegram account connection or live message delivery works.
+
+`node test_elena_sql.cjs` executes the actual queue SQL in an in-memory PostgreSQL
+database with synthetic users. Set `NODE_PATH` to an installed
+`@electric-sql/pglite` package and `PYTHON` to Python 3. This covers claim counters,
+duplicate suppression, revisions, verification, opt-out, Stop and reminder caps.
