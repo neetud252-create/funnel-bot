@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault('DATABASE_URL','postgresql://unused/unused')
-from aiogram.methods import SendMessage, SendVideo, EditMessageMedia
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from aiogram.methods import SendMessage, SendVideo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import analytics as A
 import analytics_reports as R
 
@@ -31,31 +31,6 @@ def callback(uid=12, chat='private'):
 
 
 class AnalyticsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_edited_menu_updates_click_map_and_tracks_links(self):
-        conn, pool = connection()
-        method = EditMessageMedia(chat_id=12, message_id=44,
-            media=InputMediaPhoto(media='cached-photo', caption='Choose your asset'),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text='Back', callback_data='market:open'),
-                InlineKeyboardButton(text='Help', url='https://example.com/help')]]))
-        request = AsyncMock(return_value=True)
-        token = A._screen.set('market_assets')
-        try:
-            with patch.object(A.db,'pool',pool), patch.object(A,'record',AsyncMock()) as record, \
-                    patch.object(A.config,'ANALYTICS_LINK_BASE','https://tracker.example'):
-                await A.OutboundMiddleware()(request,None,method)
-                self.assertEqual(request.await_args.args[1].media.media,'cached-photo')
-                self.assertTrue(request.await_args.args[1].reply_markup.inline_keyboard[0][1].url.startswith(
-                    'https://tracker.example/r/'))
-                save = conn.execute.await_args_list[0].args
-                self.assertIn('DO UPDATE',save[0])
-                self.assertEqual(save[1:4],(12,44,'market_assets'))
-                self.assertEqual(json.loads(save[4])[0]['callback'],'market:open')
-                self.assertEqual(record.await_args.kwargs['message_id'],44)
-                self.assertEqual(record.await_args.kwargs['screen'],'market_assets')
-        finally:
-            A._screen.reset(token)
-
     async def test_callbacks_use_delivered_keyboard_and_replay_key(self):
         conn,pool = connection()
         conn.fetchrow.return_value = {'screen':'home','buttons':json.dumps([

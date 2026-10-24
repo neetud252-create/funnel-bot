@@ -152,14 +152,9 @@ class OutboundMiddleware:
     async def __call__(self, make_request, bot, method):
         uid = getattr(method, 'chat_id', None)
         api = method.__api_method__
-        editing = api in ('editMessageText', 'editMessageCaption', 'editMessageMedia')
-        if not enabled(uid) or (api not in ('sendMessage', 'sendPhoto', 'sendVideo', 'sendAnimation', 'sendDocument')
-                                and not editing):
+        if not enabled(uid) or api not in ('sendMessage', 'sendPhoto', 'sendVideo', 'sendAnimation', 'sendDocument'):
             return await make_request(bot, method)
-        if editing and _screen.get() is None:
-            return await make_request(bot, method)
-        text = (getattr(method, 'text', None) or getattr(method, 'caption', None) or
-                getattr(getattr(method, 'media', None), 'caption', None) or '')
+        text = getattr(method, 'text', None) or getattr(method, 'caption', None) or ''
         markup = getattr(method, 'reply_markup', None)
         screen = screen_name(text)
         if screen == 'other':
@@ -199,19 +194,18 @@ class OutboundMiddleware:
         except Exception:
             await record(uid, 'delivery_error', api, screen=screen)
             raise
-        mid = getattr(result, 'message_id', None) or (getattr(method, 'message_id', None) if editing else None)
+        mid = getattr(result, 'message_id', None)
         if mid:
             try:
                 async with asyncio.timeout(2):
                     async with db.pool.acquire() as conn:
                         async with conn.transaction():
                             await conn.execute('INSERT INTO analytics_messages(tg_id,message_id,screen,buttons) '
-                                'VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(tg_id,message_id) DO UPDATE '
-                                'SET screen=EXCLUDED.screen,buttons=EXCLUDED.buttons', uid, mid, screen, json.dumps(buttons))
+                                'VALUES($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING', uid, mid, screen, json.dumps(buttons))
                             if tokens:
                                 await conn.execute('UPDATE analytics_links SET message_id=$1 WHERE token=ANY($2::text[])', mid, tokens)
                 await record(uid, 'screen_view', screen, screen=screen, message_id=mid,
-                             dedupe_key=f'screen:{uid}:{mid}' + (':' + secrets.token_hex(12) if editing else ''))
+                             dedupe_key=f'screen:{uid}:{mid}')
             except Exception:
                 logging.exception('Screen analytics failed after successful delivery')
         return result
