@@ -17,8 +17,10 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 - Elena only manages the pinned account. Other business connections are ignored.
 - Users are matched by their Telegram identity, never by a supplied Trader ID.
 - Existing broker verification remains authoritative; no trade execution changes.
-- Unopened/expired Elena chats receive a help invitation inside Pocket IQ. Elena
-  can reply on behalf of the account only within Telegram's permitted window.
+- Scheduled help sends directly through Elena's connected account only. No
+  automatic Pocket IQ invitation is sent. Telegram requires an incoming message
+  in Elena's chat within the last 24 hours; unopened/expired chats receive nothing.
+  Ineligible jobs wait for chat activity without consuming a delivery attempt.
 - Buttons offer relevant help, UID guidance, a real status recheck, signal/guide
   links, Later, Stop and human handoff. Stop also disables normal reminders.
 - A human's outgoing message pauses automation for that customer.
@@ -35,7 +37,8 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 5. A tester who has started Pocket IQ opens @elitecsupport and sends a message.
    Check the context buttons, Later/Stop, human takeover and language selection.
 
-`/elena` opens the handoff link. `ELENA_ENABLED=0` disables Elena processing.
+An explicit `/elena` request still opens the handoff link.
+`ELENA_ENABLED=0` disables Elena processing.
 `/remindersoff` pauses scheduled deliveries; `/reminderson` resumes them.
 
 ## AI and voice status
@@ -93,4 +96,5 @@ establish that a real Telegram account connection or live message delivery works
 `node test_elena_sql.cjs` executes the actual queue SQL in an in-memory PostgreSQL
 database with synthetic users. Set `NODE_PATH` to an installed
 `@electric-sql/pglite` package and `PYTHON` to Python 3. This covers claim counters,
-duplicate suppression, revisions, verification, opt-out, Stop and reminder caps.
+duplicate suppression, revisions, verification, opt-out, Stop and reminder caps,
+plus deferring ineligible chats without consuming attempts or sending invitations.

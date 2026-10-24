@@ -13,10 +13,10 @@ def schema(name):
         if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'SCHEMA' for t in n.targets))
 queries = {}
 for fn in tree('elena_store').body:
-    if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish'):
+    if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish', 'await_chat', 'observe', 'incoming'):
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
-            and n.value.startswith(('SELECT ', 'UPDATE ')))
+            and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ')))
 print(json.dumps({'schema': ''.join(schema(n) for n in
     ('db', 'broadcast', 'verification_reminders', 'elena_store')), 'queries': queries}))
 `], {encoding:'utf8'});
@@ -61,7 +61,38 @@ const {schema, queries} = JSON.parse(source.stdout);
             INSERT INTO verification_reminder_deliveries(tg_id,status) VALUES(102,'sent');`);
         assert.equal((await claim(102,2)).length, 0, 'Legacy and Elena reminders share the two-message cap');
         assert.equal((await db.query(queries.due, [[103]])).rows.length, 0);
-        console.log('PASS: Elena PostgreSQL migrations, due jobs, claim counters, duplicate suppression, input revisions, verification, opt-out, Stop and shared reminder limit.');
+
+        const row = async () => (await db.query('SELECT * FROM elena_sessions WHERE tg_id=103')).rows[0];
+        await db.query(queries.await_chat, [103,0]);
+        assert.equal((await row()).status, 'pending', 'Stale checks cannot defer newer input');
+        await db.query(queries.await_chat, [103,1]);
+        let deferred = await row();
+        assert.equal(deferred.status, 'awaiting_chat');
+        assert.equal(deferred.due_at, null);
+        assert.equal(deferred.attempts, 0, 'No Telegram attempt was made');
+        assert.equal(deferred.sent_count, 0, 'No delivery consumed');
+        assert.equal((await db.query(queries.due, [[]])).rows.length, 0, 'Deferred jobs must leave the delivery queue');
+        assert.equal((await claim(103)).length, 0, 'Deferred jobs cannot be claimed');
+        await db.query(queries.observe, [103,'uid',60]);
+        deferred = await row();
+        assert.equal(deferred.status, 'pending', 'New bot activity may schedule a fresh check');
+        assert.ok(deferred.due_at instanceof Date);
+        assert.equal(deferred.attempts, 0);
+        const revision = Number(deferred.revision);
+        await db.query(queries.await_chat, [103,revision]);
+        await db.query(queries.incoming, [103,'business-test',1]);
+        await db.query(queries.await_chat, [103,revision]);
+        deferred = await row();
+        assert.equal(deferred.status, 'paused', 'A new Elena conversation must not be overwritten');
+        assert.equal(deferred.business_connection_id, 'business-test');
+        assert.ok(deferred.last_business_at instanceof Date);
+        await db.exec("UPDATE elena_sessions SET status='awaiting_chat',stopped=true WHERE tg_id=103");
+        await db.query(queries.observe, [103,'uid',60]);
+        assert.equal((await row()).status, 'paused', 'Activity must not override Stop');
+        await db.exec("UPDATE elena_sessions SET status='awaiting_chat',stopped=false,handoff=true WHERE tg_id=103");
+        await db.query(queries.observe, [103,'uid',60]);
+        assert.equal((await row()).status, 'paused', 'Activity must not override human handoff');
+        console.log('PASS: Elena PostgreSQL migrations, due jobs, claim counters, duplicate suppression, input revisions, verification, opt-out, Stop, shared reminder limit and deferred direct chats.');
     } finally {
         await db.close();
     }

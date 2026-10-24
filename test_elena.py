@@ -10,7 +10,7 @@ os.environ.setdefault('DATABASE_URL', 'postgresql://unused')
 import elena as E
 import config
 import localization
-from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
+from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError, TelegramRetryAfter
 from aiogram.methods import SendMessage
 
 NOW = datetime.now(timezone.utc)
@@ -112,17 +112,45 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
             await E.send_job(self.bot, self.conn, session())
         self.bot.send_message.assert_not_awaited()
 
-    async def test_first_contact_is_invitation_inside_pocket_iq_only(self):
-        job = session(last_business_at=None)
+    async def test_ineligible_chats_get_no_dm_or_invitation_and_consume_no_attempt(self):
+        for job in (session(last_business_at=None),
+                    session(last_business_at=NOW-timedelta(hours=24)),
+                    session(business_connection_id='foreign')):
+            with self.subTest(job=job), \
+                 patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
+                 patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+                 patch.object(E.store, 'await_chat', AsyncMock()) as await_chat, \
+                 patch.object(E.store, 'claim', AsyncMock()) as claim, \
+                 patch.object(E.store, 'finish', AsyncMock()) as finish:
+                await E.send_job(self.bot, self.conn, job)
+            await_chat.assert_awaited_once_with(self.conn, job)
+            claim.assert_not_awaited()
+            finish.assert_not_awaited()
+        self.bot.send_message.assert_not_awaited()
+
+    async def test_eligible_chat_receives_direct_message_from_elena(self):
+        job = session()
         with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.store, 'claim', AsyncMock(return_value=job)), \
              patch.object(E.store, 'finish', AsyncMock()) as finish:
             await E.send_job(self.bot, self.conn, job)
-        args = self.bot.send_message.await_args
-        self.assertNotIn('business_connection_id', args.kwargs)
-        self.assertEqual(args.kwargs['reply_markup'].inline_keyboard[0][0].url, 'https://t.me/elitecsupport')
+        self.bot.send_message.assert_awaited_once_with(42, E.copy.prompt(user(), 'uid'),
+            parse_mode='HTML', reply_markup=E.keyboard('uid'), business_connection_id='business-test')
         finish.assert_awaited_once_with(self.conn, job, 'sent')
+
+    async def test_rejected_direct_message_never_falls_back_to_pocket_iq(self):
+        self.bot.send_message.side_effect = TelegramForbiddenError(
+            method=SendMessage(chat_id=42, text='x'), message='forbidden')
+        job = session()
+        with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'claim', AsyncMock(return_value=job)), \
+             patch.object(E.store, 'finish', AsyncMock()) as finish:
+            await E.send_job(self.bot, self.conn, job)
+        self.assertEqual(self.bot.send_message.await_count, 1)
+        self.assertEqual(self.bot.send_message.await_args.kwargs['business_connection_id'], 'business-test')
+        finish.assert_awaited_once_with(self.conn, job, 'blocked')
 
     async def test_eligible_chat_sends_as_elena_and_network_failure_is_not_retried(self):
         self.bot.send_message.side_effect = TelegramNetworkError(

@@ -449,16 +449,16 @@ async def send_job(bot, conn, job):
     if reason != job['reason'] and not (job['reason'] == 'uid' and reason == 'registration'):
         await store.observe(tg_id, reason, wait_seconds(reason))
         return
+    if not business_window(job, connection):
+        # No automatic invitation or normal-bot fallback when Elena cannot DM.
+        await store.await_chat(conn, job)
+        return
     job = await store.claim(conn, job)
     if not job:
         return
     try:
-        if business_window(job, connection):
-            await bot.send_message(tg_id, copy.prompt(user, reason), parse_mode='HTML',
-                reply_markup=keyboard(reason), business_connection_id=connection['connection_id'])
-        else:
-            # A Pocket IQ invitation, never an unsolicited DM from Elena's account.
-            await bot.send_message(tg_id, copy.INVITE, reply_markup=keyboard(invitation=True))
+        await bot.send_message(tg_id, copy.prompt(user, reason), parse_mode='HTML',
+            reply_markup=keyboard(reason), business_connection_id=connection['connection_id'])
         await store.finish(conn, job, 'sent')
     except TelegramRetryAfter as exc:
         await store.finish(conn, job, 'pending' if job['attempts'] < 5 else 'failed',
