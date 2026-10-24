@@ -493,8 +493,9 @@ async def worker(bot):
                     await conn.execute('SELECT pg_advisory_unlock($1::bigint)', LOCK_ID)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logging.warning('Elena queue unavailable; retrying')
+        except Exception as exc:
+            # Error types aid diagnosis without logging customer data or credentials.
+            logging.warning('Elena queue unavailable; retrying (%s)', type(exc).__name__)
             await asyncio.sleep(5)
 
 
