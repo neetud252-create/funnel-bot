@@ -19,14 +19,15 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
   the existing welcome/free analyses/setup flow; verified users get their main
   dashboard. UID/deposit requirements, trial use and quotas remain authoritative.
 - This release resets contact activation for **every account**, including verified
-  customers and existing Elena contacts. Previous contacts/activations have version
-  0; only a new authenticated incoming message records the required version 1.
+  customers and existing Elena contacts. Earlier activations have version 0 or 1;
+  only a new authenticated incoming message records the required version 2.
   No historical contact or activation timestamp bypasses the gate. Old queued menu
   deliveries and feature buttons are blocked until the user activates again.
 - New activation survives restarts and the 24-hour reply window. The required
   version is fixed in code, so a normal redeploy does not reset customers again.
-  Opening the URL alone does not activate access. Verification, quotas, balances,
-  notification choices, AI consent and human handoff records are retained.
+  Opening the URL alone does not activate access. The one-time account reset below
+  also clears previous verification and usage. Notification choices and human
+  handoff records are retained; AI consent must be granted again.
   Old feature callbacks and resume links cannot bypass the gate; opt-outs and
   operator commands remain usable. A new DM is not an OpenAI consent grant.
 - Elena immediately replies “Your Pocket IQ account has been activated successfully!”
@@ -55,6 +56,36 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
   links, Later, Stop and human handoff. Stop also disables normal reminders.
 - A human's outgoing message pauses automation for that customer.
 - Intro/help text is translated into all 12 existing bot languages.
+
+## All-account reset on 2026-10-25
+
+The owner requested a fresh verification journey for every account. Before polling
+or any background worker starts, `account_reset.apply` runs the fixed migration
+`2026-10-25-all-accounts-v1` in one PostgreSQL transaction with an advisory lock.
+It snapshots affected records in the same private database, clears active state,
+and writes a completion marker. Any failure rolls back the entire transaction;
+subsequent restarts skip the completed reset and preserve new progress.
+
+- Clears every saved UID, verification result/timestamp, cached user deposit,
+  Premium tier, setup/eligibility progress, daily signal usage, free trial usage,
+  per-user analysis budget, fictional game tokens, gift progress and attribution.
+- Clears Elena activation, conversation memory, AI/voice consent and counters;
+  preserves Stop/human-handoff choices and incoming-message deduplication IDs.
+- Cancels old pending broadcast deliveries and clears verification reminders.
+  Every account receives a paused Elena record, preventing historical-user
+  reminders from being sent merely because this reset ran.
+- Retains Telegram identities, language/notification preferences, original join
+  dates, existing UI/pin references, historical reporting, bot settings, media
+  cache, the Elena connection and the global provider spending counter.
+- Broker accounts, deposits and postback records are not modified. Users submit
+  their UID again and pass the existing live campaign/deposit checks; a previously
+  qualifying deposit can still qualify when checked again.
+
+Recovery rows are in `account_reset_snapshots`, scoped by the reset ID, and counts
+are in `account_reset_runs`. Conversation/reply text is deliberately excluded from
+recovery records. These records never grant access and are not exposed by the bot.
+Restoring them requires an explicitly requested, separately reviewed database
+operation; reverting the code alone does not restore erased access state.
 
 ## Connect Telegram
 
