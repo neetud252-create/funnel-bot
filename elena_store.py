@@ -39,6 +39,10 @@ ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS reply_nonce TEXT;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS voice_sent BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS local_only BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS memory_since TIMESTAMPTZ;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_opened_at TIMESTAMPTZ;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_retry_at TIMESTAMPTZ;
 """
 
 
@@ -101,6 +105,42 @@ async def incoming(tg_id, connection_id, message_id):
         WHERE tg_id=$1 AND (business_connection_id IS DISTINCT FROM $2
           OR last_message_id IS NULL OR last_message_id<$3) RETURNING *""",
         tg_id, connection_id, message_id)
+
+
+async def activate(tg_id, connection_id, message_id, reason, delay):
+    # Only a just-recorded, authenticated incoming message can activate its own
+    # sender. This never updates users.verified, deposits, trials or quotas.
+    return await one("""UPDATE elena_sessions SET activated_at=now(),
+        activation_retry_at=now(),reason=$4,
+        status=CASE WHEN stopped OR handoff THEN 'paused'
+                    WHEN $4='ready' THEN 'resolved' ELSE 'pending' END,
+        due_at=CASE WHEN stopped OR handoff OR $4='ready' THEN NULL
+                    ELSE now()+$5::double precision*interval '1 second' END,
+        revision=revision+1,updated_at=now()
+        WHERE tg_id=$1 AND business_connection_id=$2 AND last_message_id=$3
+        AND last_business_at IS NOT NULL AND activated_at IS NULL RETURNING *""",
+        tg_id, connection_id, message_id, reason, delay)
+
+
+async def claim_activation(tg_id):
+    return await one("""UPDATE elena_sessions SET
+        activation_attempts=activation_attempts+1,
+        activation_retry_at=now()+interval '3 minutes'
+        WHERE tg_id=$1 AND activated_at IS NOT NULL AND activation_opened_at IS NULL
+        AND activation_attempts<3 AND activation_retry_at<=now() RETURNING tg_id""", tg_id)
+
+
+async def activation_opened(tg_id):
+    await execute("""UPDATE elena_sessions SET activation_opened_at=now(),
+        activation_retry_at=NULL WHERE tg_id=$1 AND activated_at IS NOT NULL
+        AND activation_opened_at IS NULL""", tg_id)
+
+
+async def pending_activations(c):
+    return await c.fetch("""SELECT tg_id FROM elena_sessions
+        WHERE activated_at IS NOT NULL AND activation_opened_at IS NULL
+        AND activation_attempts<3 AND activation_retry_at<=now()
+        ORDER BY activation_retry_at LIMIT 20""")
 
 
 async def pause(tg_id, *, stopped=False, handoff=False):

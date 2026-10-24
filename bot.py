@@ -13,6 +13,7 @@ import db, config, panelbot
 import broadcast
 import verification_reminders
 import elena
+import activation
 import activity_stats
 import analytics
 import analytics_reports
@@ -47,6 +48,8 @@ broadcast.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
 verification_reminders.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
 elena.install(dp, lambda tg_id, uid: _panel_verdict(tg_id, uid),
               lambda tg_id: tg_id in _verify_inflight or tg_id in _premium_checks)
+activation.configure(lambda bot, tg_id: _show_activation_gate(bot, tg_id),
+                     lambda bot, tg_id: _open_from_elena(bot, tg_id))
 
 class Reg(StatesGroup):
     waiting_uid = State()
@@ -112,7 +115,9 @@ def asset_path(key, ext):
         key = home_menu.ANIMATION
     # The photo cache uses the logical "jpg" type; retain the owner's PNG
     # unchanged on disk and upload it with its actual filename.
-    if key == home_menu.PHOTO and ext == 'jpg':
+    if key == activation.PHOTO and ext == 'jpg':
+        ext = 'png'
+    elif key == home_menu.PHOTO and ext == 'jpg':
         ext = home_menu.PHOTO_EXT
     elif key == config.UID_GUIDE_PHOTO and ext == 'jpg':
         ext = 'png'
@@ -314,7 +319,7 @@ def referenced_assets():
     listing. An asset sitting in assets/ that no screen references is never
     uploaded, and adding a screen needs no change here.
     """
-    ref = {(home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
+    ref = {(activation.PHOTO, 'jpg'), (home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
            (config.UID_GUIDE_PHOTO, 'jpg'), (journey.REGISTER_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
@@ -665,6 +670,15 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     await db.touch_user(tg_id, m.from_user.username)
     # Elena links resume an existing feature; they are not advertising attribution.
     resume = getattr(command, 'args', None) if command else None
+    if resume not in ('elena_home', 'elena_setup', 'elena_uid', 'elena_signals', 'elena_guide'):
+        await _capture_ref(tg_id, command)
+    await _clear_nudge(bot, tg_id)
+    if await activation.required(tg_id):
+        await _show_activation_gate(bot, tg_id)
+        return
+    if activation.enabled():
+        # A manual return takes over any pending automatic menu delivery.
+        await elena.store.activation_opened(tg_id)
     if resume in ('elena_home', 'elena_setup', 'elena_uid', 'elena_signals', 'elena_guide'):
         if resume == 'elena_uid':
             user = await db.get_user(tg_id)
@@ -680,11 +694,6 @@ async def start(m: Message, bot: Bot, state: FSMContext,
             user = await db.get_user(tg_id)
             await (_show_menu(bot, tg_id) if user and user.get('verified') else _show_home(bot, tg_id))
         return
-    # Capture attribution for both new and returning users before the home screen.
-    # touch_user above has to run first: save_ref_code updates an existing row.
-    # command defaults to None so /devstart's start(m, bot, state) still works.
-    await _capture_ref(tg_id, command)
-    await _clear_nudge(bot, tg_id)
     # Serialize starts and read access under the lock. Only accounts that have
     # completed verification go directly to the existing main menu.
     lock = _welcome_locks.setdefault(tg_id, asyncio.Lock())
@@ -696,6 +705,45 @@ async def start(m: Message, bot: Bot, state: FSMContext,
         message = await _show_home(bot, tg_id)
         if getattr(getattr(m, 'chat', None), 'type', None) == 'private':
             await _pin_welcome(bot, tg_id, message)
+
+
+async def _show_activation_gate(bot, tg_id):
+    lock = _welcome_locks.setdefault(tg_id, asyncio.Lock())
+    async with lock:
+        if not await activation.required(tg_id):
+            # The DM may arrive while this /start or stale button is waiting.
+            message = await _show_current_interface(bot, tg_id)
+            if message:
+                await elena.store.activation_opened(tg_id)
+            return message
+        try:
+            return await render(bot, tg_id, activation.PHOTO, elena.copy.ACTIVATION,
+                                activation.keyboard(), raise_on_error=True, screen_key='elena_activation')
+        except Exception:
+            # The single activation action stays usable even if artwork fails.
+            return await render(bot, tg_id, None, elena.copy.ACTIVATION,
+                                activation.keyboard(), screen_key='elena_activation')
+
+
+async def _show_current_interface(bot, tg_id):
+    user = await db.get_user(tg_id)
+    if user and user.get('verified'):
+        return await _show_menu(bot, tg_id)
+    message = await _show_home(bot, tg_id)
+    await _pin_welcome(bot, tg_id, message)
+    return message
+
+
+async def _open_from_elena(bot, tg_id):
+    lock = _welcome_locks.setdefault(tg_id, asyncio.Lock())
+    async with lock:
+        session = await elena.store.session(tg_id)
+        if not session or not session.get('activated_at'):
+            return False
+        if session.get('activation_opened_at'):
+            return True
+        await dp.fsm.get_context(bot=bot, chat_id=tg_id, user_id=tg_id).clear()
+        return bool(await _show_current_interface(bot, tg_id))
 
 
 async def _show_home(bot, tg_id):
@@ -1728,7 +1776,7 @@ async def _show_menu(bot, tg_id, test_mode=False):
                             level=config.level_label_tg(premium))
     if test_mode:
         text = config.MSG_TEST_MODE + "\n\n" + text
-    await render(bot, tg_id, s["photo"], text, journey.dashboard_keyboard())
+    return await render(bot, tg_id, s["photo"], text, journey.dashboard_keyboard())
 
 def _with_ref(item, url):
     # Rewrite only the referral URL; ID-entry and Back callbacks pass through.
@@ -2238,6 +2286,10 @@ async def main():
     dp.message.outer_middleware(language_context)
     dp.callback_query.outer_middleware(language_context)
     dp.business_message.outer_middleware(language_context)
+    activation_gate = activation.GateMiddleware()
+    dp.message.outer_middleware(activation_gate)
+    dp.callback_query.outer_middleware(activation_gate)
+    logging.info('Elena activation gate ready; enabled=%s; one-time contact required', activation.enabled())
     bot.session.middleware(localization.OutboundMiddleware())
     logging.info('Localization ready: 12 languages; saved per user')
     if config.TEST_MODE:

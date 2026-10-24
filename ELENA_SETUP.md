@@ -4,7 +4,24 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 
 ## Implemented
 
-- Existing `/start` welcome and verified dashboard are preserved.
+- `/start` first shows a one-time activation card with exactly one button:
+  **Message Elena to Activate**. There are no Help or Language buttons on that card.
+  The button opens @elitecsupport with the draft “Elena, activate my Pocket IQ
+  account access.” The customer must press Send using the same Telegram account.
+- An authenticated incoming business message activates only that sender and
+  automatically sends the existing interface in their Pocket IQ chat. Elena's
+  confirmation links to @goplusaitrader_bot. Telegram does not switch the user's
+  current chat automatically; the link takes them back to their ready menu.
+- Contact activation is separate from broker verification. Unverified users get
+  the existing welcome/free analyses/setup flow; verified users get their main
+  dashboard. UID/deposit requirements, trial use and quotas remain authoritative.
+- Activation survives restarts and the 24-hour reply window. Existing authenticated
+  Elena contacts also pass the gate. Opening the URL alone does not activate access.
+  Old feature callbacks and resume links cannot bypass the gate; opt-outs and
+  operator commands remain usable. A new DM is not an OpenAI consent grant.
+- Duplicate incoming messages cannot repeat activation. Failed normal-bot menu
+  delivery retries up to three times with three-minute leases. `/start` or the
+  return link always opens the current interface after contact is recorded.
 - New private interactions schedule help after thirty minutes of inactivity,
   including an unsubmitted UID or confirmed incomplete qualifying deposit.
   Incorrect-UID help uses a one-minute delay. Each new interaction
@@ -37,8 +54,9 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 5. A tester who has started Pocket IQ opens @elitecsupport and sends a message.
    Check the context buttons, Later/Stop, human takeover and language selection.
 
-An explicit `/elena` request still opens the handoff link.
-`ELENA_ENABLED=0` disables Elena processing.
+An explicit `/elena` request opens the activation card before contact, then the handoff link afterward.
+`ELENA_ENABLED=0` disables Elena processing and the contact gate.
+`ELENA_ACTIVATION_ENABLED=0` disables only the new gate/automatic menu handoff.
 `/remindersoff` pauses scheduled deliveries; `/reminderson` resumes them.
 
 ## AI and voice status
@@ -46,7 +64,9 @@ An explicit `/elena` request still opens the handoff link.
 The owner authorized OpenAI replies and optional voice on 2026-10-25. Each customer
 must also press **Allow AI replies** before any conversation is sent to OpenAI.
 **Use help buttons only** keeps that conversation local; **Stop** revokes consent.
-Elena identifies herself as an AI assistant. The normal Pocket IQ welcome is unchanged.
+Elena uses “Your Pocket IQ personal assistant” in the introduction. Activation
+confirmation discloses automated replies; the separate AI consent and voice labels
+remain explicit. The normal Pocket IQ welcome after activation is unchanged.
 
 OpenAI receives at most six redacted history messages plus the current message,
 language, setup stage, verification result and confirmed qualifying-deposit amount.
@@ -86,7 +106,7 @@ then. If voice fails, text help continues.
 
 ## Offline validation
 
-`scripts/check_offline.py test_elena.py test_elena_ai.py test_home_menu.py test_journey.py
+`scripts/check_offline.py test_activation.py test_elena.py test_elena_ai.py test_home_menu.py test_journey.py
 test_verification_reminders.py test_localization.py test_interface_language.py
 test_uid_singleflight.py test_analytics.py`
 
@@ -98,3 +118,5 @@ database with synthetic users. Set `NODE_PATH` to an installed
 `@electric-sql/pglite` package and `PYTHON` to Python 3. This covers claim counters,
 duplicate suppression, revisions, verification, opt-out, Stop and reminder caps,
 plus deferring ineligible chats without consuming attempts or sending invitations.
+It also checks authenticated activation, unchanged user entitlements, durable menu
+delivery leases, migration idempotency and bounded recovery after failures.

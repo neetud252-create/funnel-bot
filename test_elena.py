@@ -20,7 +20,7 @@ CONNECTION = dict(connection_id='business-test', owner_id=99, enabled=True, can_
 def session(**kwargs):
     return dict(dict(tg_id=42, reason='uid', status='pending', revision=1, attempts=1,
         stopped=False, handoff=False, sent_count=0, business_connection_id='business-test',
-        last_business_at=NOW), **kwargs)
+        last_business_at=NOW, activated_at=NOW, activation_opened_at=NOW), **kwargs)
 
 
 def user(**kwargs):
