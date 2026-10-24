@@ -5,8 +5,10 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 ## Implemented
 
 - Existing `/start` welcome and verified dashboard are preserved.
-- New private interactions schedule help after five minutes of inactivity;
-  a confirmed incomplete deposit requirement schedules help after one hour.
+- New private interactions schedule help after ten minutes of inactivity,
+  including an unsubmitted UID or confirmed incomplete qualifying deposit.
+  Incorrect-UID help retains the agreed five-minute delay. Each new interaction
+  resets the pending delay; completed verification cancels the follow-up.
 - No historical-user blast. Existing 24-hour reminders are suppressed after
   Elena starts helping, pauses or hands off the conversation.
 - Jobs persist in PostgreSQL, recheck access and notification preferences, and
