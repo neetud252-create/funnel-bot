@@ -774,14 +774,17 @@ async def devstart_tests(bot_mod, fake_db, config):
               not _is_admin_gated_start(bot_src),
               "the /start handler grew an ADMIN_IDS check")
 
-        # Verified users see the same home menu and retain access via its button.
+        # Keep the later verified-user /start routing when reverting navigation.
         vip = 7106
         _dirty_user(fake_db, vip)
         menu_bot = FakeBot()
         await bot_mod.start(FakeMessage(vip, "/start"), menu_bot, FakeState())
         body = last_screen(menu_bot)["body"] or ""
-        check("a verified user's /start shows the welcome menu",
-              body == bot_mod.home_menu.TEXT, repr(body[:60]))
+        check("a verified user's /start opens their Premium main menu directly",
+              "\U0001F3C6 Premium" in body and last_screen(menu_bot)["asset"] == 'assets/menu.png'
+              and 'menu:signal' in [button.callback_data
+                  for row in last_screen(menu_bot)['markup'].inline_keyboard for button in row],
+              repr(body[:60]))
         await bot_mod.home_action(FakeCB(vip, 'home:access', 1), menu_bot, FakeState())
         check("Get Bot Access still shows their Premium menu",
               "\U0001F3C6 Premium" in (last_screen(menu_bot)["body"] or ""))
@@ -808,7 +811,7 @@ async def devstart_tests(bot_mod, fake_db, config):
     check("/devstart reuses the shared ADMIN_IDS gate",
           "if not _is_admin(tg_id):" in bot_src
           and "return tg_id in config.ADMIN_IDS" in bot_src)
-    check("/start renders the home menu",
+    check("unverified users retain the welcome renderer",
           'await render(bot, tg_id, home_menu.VIDEO, home_menu.TEXT, home_menu.keyboard(user), is_video=True)' in bot_src)
     check("Get Bot Access opens the registration entry",
           "await _open_registration(bot, tg_id, state)" in bot_src)
