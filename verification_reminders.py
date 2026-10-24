@@ -47,6 +47,9 @@ ELIGIBLE = """
  AND NOT u.broadcast_opt_out AND NOT u.broadcast_blocked
  AND NOT (u.tg_id=ANY($1::bigint[]))
  AND u.created_at <= now()-interval '24 hours'
+ AND NOT EXISTS (SELECT 1 FROM elena_sessions e WHERE e.tg_id=u.tg_id
+                 AND (e.sent_count>0 OR e.stopped OR e.handoff OR e.status IN ('sending','paused')
+                      OR EXISTS(SELECT 1 FROM elena_connection WHERE enabled AND can_reply)))
 """
 DUE = """
  (d.tg_id IS NULL OR (d.status='pending' AND d.next_attempt_at<=now()))

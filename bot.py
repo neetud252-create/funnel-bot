@@ -12,6 +12,7 @@ import uvicorn
 import db, config, panelbot
 import broadcast
 import verification_reminders
+import elena
 import activity_stats
 import analytics
 import analytics_reports
@@ -44,6 +45,8 @@ activity_stats.install(dp)
 analytics_reports.install(dp)
 broadcast.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
 verification_reminders.install(dp, lambda uid: uid in config.ADMIN_IDS, _broadcast_open)
+elena.install(dp, lambda tg_id, uid: _panel_verdict(tg_id, uid),
+              lambda tg_id: tg_id in _verify_inflight or tg_id in _premium_checks)
 
 class Reg(StatesGroup):
     waiting_uid = State()
@@ -660,6 +663,23 @@ async def start(m: Message, bot: Bot, state: FSMContext,
     await state.clear()
     tg_id = m.from_user.id
     await db.touch_user(tg_id, m.from_user.username)
+    # Elena links resume an existing feature; they are not advertising attribution.
+    resume = getattr(command, 'args', None) if command else None
+    if resume in ('elena_home', 'elena_setup', 'elena_uid', 'elena_signals', 'elena_guide'):
+        if resume == 'elena_uid':
+            user = await db.get_user(tg_id)
+            if user and user.get('verified'):
+                await _show_menu(bot, tg_id)
+            else:
+                await _open_uid_entry(bot, tg_id, state)
+        elif resume == 'elena_setup':
+            await _resume_setup(bot, tg_id, state)
+        elif resume == 'elena_guide':
+            await show(bot, tg_id, 'guide')
+        else:
+            user = await db.get_user(tg_id)
+            await (_show_menu(bot, tg_id) if user and user.get('verified') else _show_home(bot, tg_id))
+        return
     # Capture attribution for both new and returning users before the home screen.
     # touch_user above has to run first: save_ref_code updates an existing row.
     # command defaults to None so /devstart's start(m, bot, state) still works.
@@ -2065,6 +2085,9 @@ async def _submit_uid(tg_id, uid, bot, state):
                                "(5\U0000201315 digits). Example: <b>123456789</b>", parse_mode="HTML")
         await state.set_state(Reg.waiting_uid)
         return
+    if elena.checking(tg_id):
+        await bot.send_message(tg_id, config.MSG_UID_IN_FLIGHT.format(uid=uid), parse_mode='HTML')
+        return
     # --- single flight ------------------------------------------------------
     # Deliberately BEFORE the cooldown check. A duplicate of an ID that is
     # already being checked must not be told to wait and resend - that pairing
@@ -2178,6 +2201,7 @@ async def main():
     async with db.pool.acquire() as conn:
         await conn.execute(broadcast.SCHEMA)
         await conn.execute(verification_reminders.SCHEMA)
+        await conn.execute(elena.store.SCHEMA)
         await conn.execute(activity_stats.SCHEMA)
         await conn.execute(analytics.SCHEMA)
         await conn.execute(chart_signals.api.SCHEMA)
@@ -2201,6 +2225,9 @@ async def main():
     activity_middleware = activity_stats.ActivityMiddleware()
     dp.message.outer_middleware(activity_middleware)
     dp.callback_query.outer_middleware(activity_middleware)
+    elena_activity = elena.ActivityMiddleware()
+    dp.message.outer_middleware(elena_activity)
+    dp.callback_query.outer_middleware(elena_activity)
     logging.info('Admin activity statistics ready; /stats enabled')
     logging.info('Broadcast schema ready; admin drafting and delivery queue enabled')
     bot = Bot(os.environ["BOT_TOKEN"])
@@ -2210,6 +2237,7 @@ async def main():
     language_context = localization.UserContextMiddleware()
     dp.message.outer_middleware(language_context)
     dp.callback_query.outer_middleware(language_context)
+    dp.business_message.outer_middleware(language_context)
     bot.session.middleware(localization.OutboundMiddleware())
     logging.info('Localization ready: 12 languages; saved per user')
     if config.TEST_MODE:
@@ -2228,7 +2256,7 @@ async def main():
     uv_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(uv_config)
     tasks = [server.serve(), dp.start_polling(bot), broadcast.worker(bot),
-             verification_reminders.worker(bot), _refresh_saved_welcomes(bot), market_data.startup_check(),
+             verification_reminders.worker(bot), elena.worker(bot), _refresh_saved_welcomes(bot), market_data.startup_check(),
              bot_profile.sync(bot)]
     if config.ENABLE_AUTO_RETRY:
         logging.info("ENABLE_AUTO_RETRY on - background re-check every 30 min")
