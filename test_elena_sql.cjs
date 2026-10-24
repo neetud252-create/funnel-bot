@@ -13,7 +13,8 @@ def schema(name):
         if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'SCHEMA' for t in n.targets))
 queries = {}
 for fn in tree('elena_store').body:
-    if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish', 'await_chat', 'observe', 'incoming'):
+    if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish', 'await_chat', 'observe', 'incoming',
+            'activate', 'claim_activation', 'activation_opened', 'pending_activations'):
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
             and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ')))
@@ -92,7 +93,37 @@ const {schema, queries} = JSON.parse(source.stdout);
         await db.exec("UPDATE elena_sessions SET status='awaiting_chat',stopped=false,handoff=true WHERE tg_id=103");
         await db.query(queries.observe, [103,'uid',60]);
         assert.equal((await row()).status, 'paused', 'Activity must not override human handoff');
-        console.log('PASS: Elena PostgreSQL migrations, due jobs, claim counters, duplicate suppression, input revisions, verification, opt-out, Stop, shared reminder limit and deferred direct chats.');
+        // Activation requires an authenticated incoming message, never a link click.
+        assert.equal((await db.query(queries.activate, [101,'approved',11,'inactive',1800])).rows.length, 0);
+        await db.query(queries.incoming, [101,'approved',11]);
+        assert.equal((await db.query(queries.activate, [101,'foreign',11,'inactive',1800])).rows.length, 0);
+        assert.equal((await db.query(queries.activate, [101,'approved',12,'inactive',1800])).rows.length, 0);
+        const original = (await db.query('SELECT * FROM users WHERE tg_id=101')).rows[0];
+        const activated = (await db.query(queries.activate, [101,'approved',11,'inactive',1800])).rows[0];
+        assert.ok(activated.activated_at instanceof Date);
+        assert.equal(activated.status, 'pending');
+        assert.ok(activated.due_at - activated.activated_at >= 1799000);
+        assert.deepEqual((await db.query('SELECT * FROM users WHERE tg_id=101')).rows[0], original);
+        assert.equal((await db.query(queries.activate, [101,'approved',11,'inactive',1800])).rows.length, 0);
+        assert.equal((await db.query(queries.incoming, [101,'approved',11])).rows.length, 0);
+        assert.equal((await db.query(queries.pending_activations)).rows.length, 1);
+        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 1);
+        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 0, 'Single delivery lease');
+        await db.exec(schema); // Redeploy retains the pending activation and lease.
+        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 0);
+        await db.exec("UPDATE elena_sessions SET activation_retry_at=now()-interval '1 minute' WHERE tg_id=101");
+        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 1, 'Failed delivery can retry');
+        await db.query(queries.activation_opened, [101]);
+        assert.equal((await db.query(queries.pending_activations)).rows.length, 0);
+        await db.exec("UPDATE elena_sessions SET activation_retry_at=now()-interval '1 minute' WHERE tg_id=101");
+        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 0, 'Opened menus never repeat');
+        await db.query(queries.incoming, [103,'approved',12]);
+        const handedOff = (await db.query(queries.activate, [103,'approved',12,'inactive',1800])).rows[0];
+        assert.equal(handedOff.status, 'paused');
+        assert.equal(handedOff.due_at, null, 'Activation does not override human takeover');
+        await db.exec('UPDATE elena_sessions SET activation_attempts=3 WHERE tg_id=103');
+        assert.equal((await db.query(queries.claim_activation, [103])).rows.length, 0, 'Retries are bounded');
+        console.log('PASS: Elena PostgreSQL queue and activation migrations, authenticated contact, entitlement preservation, deduplication, delivery leases, restart recovery, reminder timing and bounded retries.');
     } finally {
         await db.close();
     }

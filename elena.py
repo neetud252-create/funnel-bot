@@ -23,9 +23,9 @@ import localization
 import elena_copy as copy
 import elena_store as store
 import elena_ai as ai
+import activation
+from activation import USERNAME, BOT_USERNAME
 
-USERNAME = 'elitecsupport'
-BOT_USERNAME = 'goplusaitrader_bot'
 LOCK_ID = 8790198820
 _locks = weakref.WeakValueDictionary()
 _check = None
@@ -249,7 +249,8 @@ async def business_message(message, bot):
             connection = await store.connection()
         except Exception:
             return
-    if not connection or message.business_connection_id != connection['connection_id']:
+    if (not connection or not connection['enabled'] or not connection['can_reply']
+            or message.business_connection_id != connection['connection_id']):
         return
     if message.from_user.id == connection['owner_id']:
         # A real operator has taken over this particular customer conversation.
@@ -282,6 +283,22 @@ async def business_message(message, bot):
         session = await store.incoming(tg_id, connection['connection_id'], message.message_id)
         if not session:
             return
+        if activation.enabled() and not session.get('activated_at'):
+            reason = reason_for(user) or 'ready'
+            activated = await store.activate(tg_id, connection['connection_id'],
+                                             message.message_id, reason, wait_seconds(reason))
+            if activated:
+                # No AI call or consent grant is needed for this local confirmation.
+                # A failed Elena reply must not prevent opening the normal bot.
+                try:
+                    if not session['stopped'] and not session['handoff']:
+                        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, user.get('language', 'en')),
+                            InlineKeyboardMarkup(inline_keyboard=[[
+                                button(copy.OPEN_BOT, url=link())]]))
+                except Exception as exc:
+                    logging.warning('Activation confirmation unavailable (%s)', type(exc).__name__)
+                await activation.deliver(bot, tg_id)
+                return
         if session['stopped'] or session['handoff']:
             return
         if not session.get('consent') and not session.get('local_only') and ai.configured():
@@ -486,6 +503,9 @@ async def worker(bot):
                     logging.info('Elena assistant ready; account=@%s; awaiting authorized connection if absent', USERNAME)
                     while True:
                         await conn.execute("UPDATE elena_sessions SET history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,memory_since=NULL,revision=revision+1 WHERE memory_since<now()-interval '1 day'")
+                        if activation.enabled():
+                            for pending in await store.pending_activations(conn):
+                                await activation.deliver(bot, pending['tg_id'])
                         for job in await store.due(conn, config.ADMIN_IDS):
                             lock = _locks.setdefault(job['tg_id'], asyncio.Lock())
                             async with lock:

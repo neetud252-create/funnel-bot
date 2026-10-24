@@ -2,7 +2,20 @@
 import localization
 import journey
 
-INTRO = 'Hi, I’m Elena 👋 Your Pocket IQ AI setup assistant.'
+INTRO = 'Hi, I’m Elena 👋 Your Pocket IQ personal assistant.'
+ACTIVATE_BUTTON = '💬 Message Elena to Activate'
+OPEN_BOT = '🚀 Open Pocket IQ'
+ACTIVATION = (
+    '👋 <b>Welcome to Pocket IQ</b>\n\n'
+    '<b>Activate your bot access</b>\n'
+    'Message Elena, your Pocket IQ personal assistant, to get started.\n\n'
+    'Tap the button below and press <b>Send</b> in Elena’s chat using this same Telegram account.\n\n'
+    'Pocket IQ will automatically show your menu here after you send the message.')
+ACTIVATED = (
+    '✅ <b>Your Pocket IQ bot access is activated!</b>\n\n'
+    'Your menu is opening in @goplusaitrader_bot. Tap the username to return.\n\n'
+    'I’m Elena, your Pocket IQ personal assistant. I can help you with setup.\n'
+    'Replies in this chat are automated. Account verification and signal access requirements still apply.')
 QUESTION = 'What would you like help with? Choose an option below.'
 INVITE = 'Need help finishing your Pocket IQ setup? Chat with Elena or continue here.'
 PAUSED = 'Follow-ups are paused. You can return whenever you are ready.'
@@ -19,7 +32,8 @@ AI_VOICE = 'AI-generated voice · Elena, Pocket IQ'
 VOICE_UNAVAILABLE = 'Voice is unavailable right now. You can read the reply above.'
 REOPEN = 'Send Elena a new message to continue this chat.'
 SOURCES = (INTRO, QUESTION, INVITE, PAUSED, STOPPED, HUMAN, OFFLINE, UID, FALLBACK,
-           CONSENT, AGREE, BUTTONS_ONLY, LISTEN, AI_VOICE, VOICE_UNAVAILABLE, REOPEN)
+           CONSENT, AGREE, BUTTONS_ONLY, LISTEN, AI_VOICE, VOICE_UNAVAILABLE, REOPEN,
+           ACTIVATION, ACTIVATED, ACTIVATE_BUTTON, OPEN_BOT)
 
 
 def text(source, language):

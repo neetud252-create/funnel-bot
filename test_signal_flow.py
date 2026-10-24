@@ -38,6 +38,9 @@ except Exception:
 # --- stub out everything bot.py imports but this test does not exercise ------
 
 def _install_stub_modules():
+    # Legacy UI suites start after the one-time contact gate. Its enabled path
+    # and real routing are exercised separately in test_activation.py.
+    os.environ['ELENA_ACTIVATION_ENABLED'] = '0'
     db = types.ModuleType("db")
     db._users = {}
     # Stand-in for Postgres CURRENT_DATE. Tests advance it to cross midnight.
