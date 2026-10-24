@@ -41,19 +41,19 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(E.reason_for(user(access_check_status=status)), reason)
         self.assertEqual(E.reason_for(user(access_check_status=None, setup_stage='new')), 'inactive')
         self.assertEqual(E.reason_for(user(access_check_status=None, setup_stage='register')), 'registration')
-        self.assertEqual(E.wait_seconds('uid'), 300)
+        self.assertEqual(E.wait_seconds('uid'), 60)
         for reason in ('deposit', 'inactive', 'registration', 'problem', 'temporary'):
-            self.assertEqual(E.wait_seconds(reason), 600)
+            self.assertEqual(E.wait_seconds(reason), 1800)
 
     async def test_bot_activity_schedules_help_without_an_elena_message(self):
         event = types.SimpleNamespace(from_user=types.SimpleNamespace(id=42, is_bot=False),
             chat=types.SimpleNamespace(id=42, type='private'), text='/start')
         cases = [
-            (user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 600),
-            (user(uid=None, access_check_status=None, setup_stage='register'), 'registration', 600),
-            (user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 600),
-            (user(), 'uid', 300),
-            (user(verified=True), None, 600),
+            (user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 1800),
+            (user(uid=None, access_check_status=None, setup_stage='register'), 'registration', 1800),
+            (user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 1800),
+            (user(), 'uid', 60),
+            (user(verified=True), None, 1800),
         ]
         for current, reason, delay in cases:
             with self.subTest(reason=reason), \

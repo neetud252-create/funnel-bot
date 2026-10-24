@@ -5,9 +5,9 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 ## Implemented
 
 - Existing `/start` welcome and verified dashboard are preserved.
-- New private interactions schedule help after ten minutes of inactivity,
+- New private interactions schedule help after thirty minutes of inactivity,
   including an unsubmitted UID or confirmed incomplete qualifying deposit.
-  Incorrect-UID help retains the agreed five-minute delay. Each new interaction
+  Incorrect-UID help uses a one-minute delay. Each new interaction
   resets the pending delay; completed verification cancels the follow-up.
 - No historical-user blast. Existing 24-hour reminders are suppressed after
   Elena starts helping, pauses or hands off the conversation.
