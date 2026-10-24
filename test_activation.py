@@ -43,12 +43,14 @@ async def main():
             assert len(buttons) == 1 and buttons[0].text == E.copy.ACTIVATE_BUTTON
             assert buttons[0].callback_data is None
             url = urlparse(buttons[0].url)
-            assert url.netloc == 't.me' and url.path == '/elitecsupport'
-            assert parse_qs(url.query)['text'] == [A.DRAFT]
+            assert url.scheme == 'tg' and url.netloc == 'resolve' and not url.path
+            assert parse_qs(url.query) == {'domain':['elitecsupport'], 'text':[A.DRAFT]}
             activate.assert_not_awaited()
             assert db._users[uid]['verified'] == verified
             assert db._users[uid]['signals_used_today'] == 9
         assert not bot.pins
+
+    assert E.keyboard(invitation=True).inline_keyboard[0][0].url == 'tg://resolve?domain=elitecsupport'
 
     # Stale feature buttons and typed IDs cannot bypass the contact gate.
     handler, gate = AsyncMock(), AsyncMock()

@@ -20,9 +20,16 @@ def enabled():
                for key in ('ELENA_ENABLED', 'ELENA_ACTIVATION_ENABLED'))
 
 
+def chat_url(*, draft=None):
+    # Open Telegram's chat directly. Only the public username and optional
+    # message draft are included; no redirect or attribution identifiers.
+    url = f'tg://resolve?domain={USERNAME}'
+    return url + f'&text={quote(draft, safe="")}' if draft else url
+
+
 def keyboard():
     return [[(copy.ACTIVATE_BUTTON,
-              f'url:https://t.me/{USERNAME}?text={quote(DRAFT, safe="")}', 'primary')]]
+              'url:' + chat_url(draft=DRAFT), 'primary')]]
 
 
 async def required(tg_id):

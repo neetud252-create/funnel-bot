@@ -6,8 +6,11 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 
 - `/start` first shows a one-time activation card with exactly one button:
   **Message Elena to Activate**. There are no Help or Language buttons on that card.
-  The button opens @elitecsupport with the draft “Elena, activate my Pocket IQ
-  account access.” The customer must press Send using the same Telegram account.
+  The button opens @elitecsupport through Telegram's native `tg://resolve` chat
+  target with the draft “Elena, activate my Pocket IQ account access.” There is no
+  web redirect, tracker or attribution identifier. The customer must press Send
+  using the same Telegram account. Other Elena contact buttons use the same
+  native chat target, without inserting an activation draft.
 - An authenticated incoming business message activates only that sender and
   automatically sends the existing interface in their Pocket IQ chat. Elena's
   confirmation links to @goplusaitrader_bot. Telegram does not switch the user's
@@ -74,9 +77,11 @@ An explicit `/elena` request opens the activation card before contact, then the 
 The owner authorized OpenAI replies and optional voice on 2026-10-25. Each customer
 must also press **Allow AI replies** before any conversation is sent to OpenAI.
 **Use help buttons only** keeps that conversation local; **Stop** revokes consent.
-Elena uses “Your Pocket IQ personal assistant” in the introduction. Activation
-confirmation discloses automated replies; the separate AI consent and voice labels
-remain explicit. The normal Pocket IQ welcome after activation is unchanged.
+Elena uses “Your Pocket IQ personal assistant” in the introduction. The activation
+screen discloses automated replies before customers open Elena's chat. The success
+message contains the requested confirmation, bot username and personal-assistant
+introduction. The separate AI consent and voice labels remain explicit. The normal
+Pocket IQ welcome after activation is unchanged.
 
 OpenAI receives at most six redacted history messages plus the current message,
 language, setup stage, verification result and confirmed qualifying-deposit amount.

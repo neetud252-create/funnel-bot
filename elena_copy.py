@@ -10,12 +10,12 @@ ACTIVATION = (
     '<b>Activate your bot access</b>\n'
     'Message Elena, your Pocket IQ personal assistant, to get started.\n\n'
     'Tap the button below and press <b>Send</b> in Elena’s chat using this same Telegram account.\n\n'
-    'Pocket IQ will automatically show your menu here after you send the message.')
+    'Pocket IQ will automatically show your menu here after you send the message.\n\n'
+    'Replies in Elena’s chat are automated. Account verification and signal access requirements still apply.')
 ACTIVATED = (
     '✅ <b>Your Pocket IQ account has been activated successfully!</b>\n\n'
     'Your menu is opening in @goplusaitrader_bot. Tap the username to return.\n\n'
-    'I’m Elena, your Pocket IQ personal assistant. I can help you with setup.\n'
-    'Replies in this chat are automated. Account verification and signal access requirements still apply.')
+    'I’m Elena, your Pocket IQ personal assistant. I can help you with setup.')
 QUESTION = 'What would you like help with? Choose an option below.'
 INVITE = 'Need help finishing your Pocket IQ setup? Chat with Elena or continue here.'
 PAUSED = 'Follow-ups are paused. You can return whenever you are ready.'
