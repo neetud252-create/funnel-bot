@@ -59,7 +59,9 @@ def reason_for(user):
 
 
 def wait_seconds(reason):
-    return 3600 if reason == 'deposit' else 300
+    # Keep the agreed five-minute incorrect-UID follow-up; incomplete setup,
+    # including a confirmed missing qualifying deposit, gets ten minutes.
+    return 300 if reason == 'uid' else 600
 
 
 def link(action='home'):
@@ -275,7 +277,8 @@ async def business_message(message, bot):
             # Do not import unrelated private contacts into the marketing database.
             return
         if not await store.session(tg_id):
-            await store.observe(tg_id, reason_for(user) or 'ready', 300)
+            reason = reason_for(user) or 'ready'
+            await store.observe(tg_id, reason, wait_seconds(reason))
         session = await store.incoming(tg_id, connection['connection_id'], message.message_id)
         if not session:
             return

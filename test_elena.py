@@ -42,7 +42,32 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(E.reason_for(user(access_check_status=None, setup_stage='new')), 'inactive')
         self.assertEqual(E.reason_for(user(access_check_status=None, setup_stage='register')), 'registration')
         self.assertEqual(E.wait_seconds('uid'), 300)
-        self.assertEqual(E.wait_seconds('deposit'), 3600)
+        for reason in ('deposit', 'inactive', 'registration', 'problem', 'temporary'):
+            self.assertEqual(E.wait_seconds(reason), 600)
+
+    async def test_bot_activity_schedules_help_without_an_elena_message(self):
+        event = types.SimpleNamespace(from_user=types.SimpleNamespace(id=42, is_bot=False),
+            chat=types.SimpleNamespace(id=42, type='private'), text='/start')
+        cases = [
+            (user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 600),
+            (user(uid=None, access_check_status=None, setup_stage='register'), 'registration', 600),
+            (user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 600),
+            (user(), 'uid', 300),
+            (user(verified=True), None, 600),
+        ]
+        for current, reason, delay in cases:
+            with self.subTest(reason=reason), \
+                 patch.object(E, 'enabled', return_value=True), \
+                 patch.object(E.config, 'ADMIN_IDS', []), \
+                 patch.object(E.db, 'get_user', AsyncMock(return_value=current)), \
+                 patch.object(E.store, 'activity', AsyncMock()) as activity, \
+                 patch.object(E.store, 'observe', AsyncMock()) as observe:
+                handler = AsyncMock(return_value='normal bot response')
+                result = await E.ActivityMiddleware()(handler, event, {})
+                self.assertEqual(result, 'normal bot response')
+                activity.assert_awaited_once_with(42)
+                observe.assert_awaited_once_with(42, reason, delay)
+                handler.assert_awaited_once_with(event, {})
 
     def test_business_window_rejects_wrong_connection_expiry_and_revocation(self):
         self.assertTrue(E.business_window(session(), CONNECTION, NOW))
