@@ -237,6 +237,7 @@ async def due(c, admin_ids):
           THEN 1 ELSE 0 END<2
         AND NOT e.stopped AND NOT e.handoff AND NOT u.verified
         AND NOT u.broadcast_opt_out AND NOT u.broadcast_blocked
-        AND NOT (e.tg_id=ANY($1::bigint[]))
+        AND (NOT (e.tg_id=ANY($1::bigint[]))
+             OR (e.activated_at IS NOT NULL AND e.activation_version=$2))
         AND (SELECT enabled FROM verification_reminder_settings WHERE id=1)
-        ORDER BY e.due_at LIMIT 20""", list(admin_ids))
+        ORDER BY e.due_at LIMIT 20""", list(admin_ids), ACTIVATION_VERSION)

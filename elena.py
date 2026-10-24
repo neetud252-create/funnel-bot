@@ -18,6 +18,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, BufferedIn
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 import config
 import db
+import broadcast
 import journey
 import localization
 import elena_copy as copy
@@ -427,8 +428,22 @@ class ActivityMiddleware:
         chat = getattr(message, 'chat', None)
         normal = (enabled() and user and not user.is_bot and chat and chat.type == 'private'
                   and user.id == chat.id and not getattr(message, 'business_connection_id', None)
-                  and not str(getattr(event, 'data', '')).startswith('elena:')
-                  and user.id not in config.ADMIN_IDS)
+                  and not str(getattr(event, 'data', '')).startswith('elena:'))
+        if normal and user.id in config.ADMIN_IDS:
+            # Activated owners can exercise the customer journey. Operator
+            # commands, reports and broadcast drafting must not move its timer.
+            text = (getattr(event, 'text', None) or '').strip()
+            command = text.split(maxsplit=1)[0].split('@')[0].lower() if text else ''
+            normal = (not command.startswith('/') or command == '/start') and not str(
+                getattr(event, 'data', '')).startswith(('an:', 'bc:', 'vr:'))
+            if normal:
+                try:
+                    normal = activation.current(await store.session(user.id))
+                    if normal and text and not command.startswith('/'):
+                        normal = not await broadcast.draft(user.id)
+                except Exception:
+                    normal = False
+                    logging.warning('Elena admin test eligibility unavailable')
         if normal:
             try:
                 await store.activity(user.id)
@@ -451,6 +466,9 @@ class ActivityMiddleware:
                             and not re.fullmatch(r'\d{5,15}', event.text.strip())):
                         reason = 'uid'
                     await store.observe(user.id, reason, wait_seconds(reason))
+                    if user.id in config.ADMIN_IDS:
+                        logging.info('Elena admin test follow-up updated; reason=%s; delay=%ss',
+                                     reason or 'resolved', wait_seconds(reason) if reason else 0)
                 except Exception:
                     logging.warning('Elena follow-up scheduling unavailable')
 
@@ -490,6 +508,8 @@ async def send_job(bot, conn, job):
         await bot.send_message(tg_id, copy.prompt(user, reason), parse_mode='HTML',
             reply_markup=keyboard(reason), business_connection_id=connection['connection_id'])
         await store.finish(conn, job, 'sent')
+        logging.info('Elena follow-up delivered; reason=%s; admin=%s',
+                     reason, tg_id in config.ADMIN_IDS)
     except TelegramRetryAfter as exc:
         await store.finish(conn, job, 'pending' if job['attempts'] < 5 else 'failed',
                            max(1, int(exc.retry_after)) + 1)

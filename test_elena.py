@@ -70,6 +70,72 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
                 observe.assert_awaited_once_with(42, reason, delay)
                 handler.assert_awaited_once_with(event, {})
 
+    async def test_activated_admin_customer_flow_schedules_the_same_reminders(self):
+        sender = types.SimpleNamespace(id=42, is_bot=False)
+        chat = types.SimpleNamespace(id=42, type='private')
+        cases = [
+            (types.SimpleNamespace(from_user=sender, chat=chat, text='123456789'), user(), 'uid', 60),
+            (types.SimpleNamespace(from_user=sender, chat=chat, text='/start@goplusaitrader_bot'),
+             user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 1800),
+            (types.SimpleNamespace(from_user=sender, message=types.SimpleNamespace(chat=chat),
+                                   data='flow:check_access'),
+             user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 1800),
+        ]
+        for event, current, reason, delay in cases:
+            with self.subTest(reason=reason), \
+                 patch.object(E, 'enabled', return_value=True), \
+                 patch.object(E.config, 'ADMIN_IDS', [42]), \
+                 patch.object(E.store, 'session', AsyncMock(return_value=session())), \
+                 patch.object(E.broadcast, 'draft', AsyncMock(return_value=None)), \
+                 patch.object(E.db, 'get_user', AsyncMock(return_value=current)), \
+                 patch.object(E.store, 'activity', AsyncMock()) as activity, \
+                 patch.object(E.store, 'observe', AsyncMock()) as observe:
+                handler = AsyncMock(return_value='customer response')
+                self.assertEqual(await E.ActivityMiddleware()(handler, event, {}), 'customer response')
+                handler.assert_awaited_once_with(event, {})
+                activity.assert_awaited_once_with(42)
+                observe.assert_awaited_once_with(42, reason, delay)
+
+    async def test_admin_operations_and_unactivated_admins_do_not_schedule(self):
+        sender = types.SimpleNamespace(id=42, is_bot=False)
+        chat = types.SimpleNamespace(id=42, type='private')
+        def message(text):
+            return types.SimpleNamespace(from_user=sender, chat=chat, text=text)
+        def callback(value):
+            return types.SimpleNamespace(from_user=sender, message=types.SimpleNamespace(chat=chat), data=value)
+        cases = [(message(text), session(), None) for text in
+                 ('/analytics', '/BROADCAST@goplusaitrader_bot', '/premium 42', '/reminderson')]
+        cases += [(callback(value), session(), None) for value in
+                  ('an:summary:7:0', 'bc:preview:test', 'vr:stop', 'elena:stop')]
+        cases += [(message('123456789'), session(), {'id': 'draft'}),
+                  (message('123456789'), session(activation_version=0), None),
+                  (message('/start'), session(activated_at=None), None),
+                  (message('/start'), None, None)]
+        for event, saved, draft in cases:
+            with self.subTest(event=event, saved=saved), \
+                 patch.object(E, 'enabled', return_value=True), \
+                 patch.object(E.config, 'ADMIN_IDS', [42]), \
+                 patch.object(E.store, 'session', AsyncMock(return_value=saved)), \
+                 patch.object(E.broadcast, 'draft', AsyncMock(return_value=draft)), \
+                 patch.object(E.store, 'activity', AsyncMock()) as activity, \
+                 patch.object(E.store, 'observe', AsyncMock()) as observe:
+                handler = AsyncMock(return_value='handled')
+                self.assertEqual(await E.ActivityMiddleware()(handler, event, {}), 'handled')
+                handler.assert_awaited_once_with(event, {})
+                activity.assert_not_awaited()
+                observe.assert_not_awaited()
+
+    async def test_admin_eligibility_failure_does_not_break_uid_handler(self):
+        event = types.SimpleNamespace(from_user=types.SimpleNamespace(id=42, is_bot=False),
+            chat=types.SimpleNamespace(id=42, type='private'), text='123456789')
+        with patch.object(E, 'enabled', return_value=True), \
+             patch.object(E.config, 'ADMIN_IDS', [42]), \
+             patch.object(E.store, 'session', AsyncMock(side_effect=RuntimeError)), \
+             patch.object(E.store, 'observe', AsyncMock()) as observe:
+            handler = AsyncMock(return_value='verified')
+            self.assertEqual(await E.ActivityMiddleware()(handler, event, {}), 'verified')
+            observe.assert_not_awaited()
+
     def test_business_window_rejects_wrong_connection_expiry_and_revocation(self):
         self.assertTrue(E.business_window(session(), CONNECTION, NOW))
         self.assertFalse(E.business_window(session(last_business_at=NOW-timedelta(hours=24)), CONNECTION, NOW))
