@@ -87,9 +87,9 @@ async def observe(tg_id, reason, delay):
         FROM users WHERE tg_id=$1
         ON CONFLICT(tg_id) DO UPDATE SET reason=$2,revision=elena_sessions.revision+1,
         status=CASE WHEN elena_sessions.stopped OR elena_sessions.handoff THEN 'paused'
-          WHEN elena_sessions.reason<>$2 OR elena_sessions.status='pending' THEN 'pending'
+          WHEN elena_sessions.reason<>$2 OR elena_sessions.status IN ('pending','awaiting_chat') THEN 'pending'
           ELSE elena_sessions.status END,
-        due_at=CASE WHEN elena_sessions.reason<>$2 OR elena_sessions.status='pending'
+        due_at=CASE WHEN elena_sessions.reason<>$2 OR elena_sessions.status IN ('pending','awaiting_chat')
           THEN now()+$3::double precision*interval '1 second' ELSE elena_sessions.due_at END,
         updated_at=now()""", tg_id, reason, delay)
 
@@ -150,6 +150,13 @@ async def claim_voice(tg_id, nonce):
         WHERE tg_id=$1 AND reply_nonce=$2 AND reply_text IS NOT NULL AND consent
         AND NOT stopped AND NOT handoff AND NOT voice_sent
         AND (ai_day IS DISTINCT FROM CURRENT_DATE OR voice_count<5) RETURNING *""", tg_id, nonce)
+
+
+async def await_chat(c, job):
+    # No send was attempted. Keep counters unchanged and honor newer input.
+    await c.execute("""UPDATE elena_sessions SET status='awaiting_chat',due_at=NULL,
+        updated_at=now() WHERE tg_id=$1 AND revision=$2 AND status='pending'""",
+        job['tg_id'], job['revision'])
 
 
 async def claim(c, job):
