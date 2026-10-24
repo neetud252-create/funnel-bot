@@ -15,10 +15,20 @@ Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 - Contact activation is separate from broker verification. Unverified users get
   the existing welcome/free analyses/setup flow; verified users get their main
   dashboard. UID/deposit requirements, trial use and quotas remain authoritative.
-- Activation survives restarts and the 24-hour reply window. Existing authenticated
-  Elena contacts also pass the gate. Opening the URL alone does not activate access.
+- This release resets contact activation for **every account**, including verified
+  customers and existing Elena contacts. Previous contacts/activations have version
+  0; only a new authenticated incoming message records the required version 1.
+  No historical contact or activation timestamp bypasses the gate. Old queued menu
+  deliveries and feature buttons are blocked until the user activates again.
+- New activation survives restarts and the 24-hour reply window. The required
+  version is fixed in code, so a normal redeploy does not reset customers again.
+  Opening the URL alone does not activate access. Verification, quotas, balances,
+  notification choices, AI consent and human handoff records are retained.
   Old feature callbacks and resume links cannot bypass the gate; opt-outs and
   operator commands remain usable. A new DM is not an OpenAI consent grant.
+- Elena immediately replies “Your Pocket IQ account has been activated successfully!”
+  with the bot link. The confirmation and normal-bot menu are sent concurrently,
+  without an intentional delay or an AI request. Telegram delivery latency still applies.
 - Duplicate incoming messages cannot repeat activation. Failed normal-bot menu
   delivery retries up to three times with three-minute leases. `/start` or the
   return link always opens the current interface after contact is recorded.

@@ -738,7 +738,7 @@ async def _open_from_elena(bot, tg_id):
     lock = _welcome_locks.setdefault(tg_id, asyncio.Lock())
     async with lock:
         session = await elena.store.session(tg_id)
-        if not session or not session.get('activated_at'):
+        if not activation.current(session):
             return False
         if session.get('activation_opened_at'):
             return True
@@ -2289,7 +2289,8 @@ async def main():
     activation_gate = activation.GateMiddleware()
     dp.message.outer_middleware(activation_gate)
     dp.callback_query.outer_middleware(activation_gate)
-    logging.info('Elena activation gate ready; enabled=%s; one-time contact required', activation.enabled())
+    logging.info('Elena activation gate ready; enabled=%s; required version=%s; all earlier access requires reactivation',
+                 activation.enabled(), elena.store.ACTIVATION_VERSION)
     bot.session.middleware(localization.OutboundMiddleware())
     logging.info('Localization ready: 12 languages; saved per user')
     if config.TEST_MODE:

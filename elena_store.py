@@ -2,6 +2,10 @@
 import json
 import db
 
+# Release-wide reset: previous contacts/activations have version 0. Never use
+# deployment time here: ordinary restarts must retain new activations.
+ACTIVATION_VERSION = 1
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS elena_connection (
  id INTEGER PRIMARY KEY CHECK(id=1),
@@ -43,6 +47,7 @@ ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_opened_at TIMESTAMPTZ;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_retry_at TIMESTAMPTZ;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_version INTEGER NOT NULL DEFAULT 0;
 """
 
 
@@ -110,16 +115,16 @@ async def incoming(tg_id, connection_id, message_id):
 async def activate(tg_id, connection_id, message_id, reason, delay):
     # Only a just-recorded, authenticated incoming message can activate its own
     # sender. This never updates users.verified, deposits, trials or quotas.
-    return await one("""UPDATE elena_sessions SET activated_at=now(),
-        activation_retry_at=now(),reason=$4,
+    return await one("""UPDATE elena_sessions SET activated_at=now(),activation_version=$6,
+        activation_opened_at=NULL,activation_attempts=0,activation_retry_at=now(),reason=$4,
         status=CASE WHEN stopped OR handoff THEN 'paused'
                     WHEN $4='ready' THEN 'resolved' ELSE 'pending' END,
         due_at=CASE WHEN stopped OR handoff OR $4='ready' THEN NULL
                     ELSE now()+$5::double precision*interval '1 second' END,
         revision=revision+1,updated_at=now()
         WHERE tg_id=$1 AND business_connection_id=$2 AND last_message_id=$3
-        AND last_business_at IS NOT NULL AND activated_at IS NULL RETURNING *""",
-        tg_id, connection_id, message_id, reason, delay)
+        AND last_business_at IS NOT NULL AND (activated_at IS NULL OR activation_version<>$6)
+        RETURNING *""", tg_id, connection_id, message_id, reason, delay, ACTIVATION_VERSION)
 
 
 async def claim_activation(tg_id):
@@ -127,20 +132,21 @@ async def claim_activation(tg_id):
         activation_attempts=activation_attempts+1,
         activation_retry_at=now()+interval '3 minutes'
         WHERE tg_id=$1 AND activated_at IS NOT NULL AND activation_opened_at IS NULL
-        AND activation_attempts<3 AND activation_retry_at<=now() RETURNING tg_id""", tg_id)
+        AND activation_version=$2 AND activation_attempts<3 AND activation_retry_at<=now()
+        RETURNING tg_id""", tg_id, ACTIVATION_VERSION)
 
 
 async def activation_opened(tg_id):
     await execute("""UPDATE elena_sessions SET activation_opened_at=now(),
         activation_retry_at=NULL WHERE tg_id=$1 AND activated_at IS NOT NULL
-        AND activation_opened_at IS NULL""", tg_id)
+        AND activation_opened_at IS NULL AND activation_version=$2""", tg_id, ACTIVATION_VERSION)
 
 
 async def pending_activations(c):
     return await c.fetch("""SELECT tg_id FROM elena_sessions
         WHERE activated_at IS NOT NULL AND activation_opened_at IS NULL
-        AND activation_attempts<3 AND activation_retry_at<=now()
-        ORDER BY activation_retry_at LIMIT 20""")
+        AND activation_version=$1 AND activation_attempts<3 AND activation_retry_at<=now()
+        ORDER BY activation_retry_at LIMIT 20""", ACTIVATION_VERSION)
 
 
 async def pause(tg_id, *, stopped=False, handoff=False):

@@ -18,21 +18,42 @@ for fn in tree('elena_store').body:
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
             and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ')))
+version = next(ast.literal_eval(n.value) for n in tree('elena_store').body
+    if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'ACTIVATION_VERSION' for t in n.targets))
 print(json.dumps({'schema': ''.join(schema(n) for n in
-    ('db', 'broadcast', 'verification_reminders', 'elena_store')), 'queries': queries}))
+    ('db', 'broadcast', 'verification_reminders', 'elena_store')), 'queries': queries, 'version':version}))
 `], {encoding:'utf8'});
 if (source.status !== 0) throw Error(source.stderr || 'Python SQL extraction failed');
-const {schema, queries} = JSON.parse(source.stdout);
+const {schema, queries, version} = JSON.parse(source.stdout);
 
 (async () => {
     const db = new PGlite();
+    const activate = (...args) => db.query(queries.activate, [...args,version]);
+    const claimActivation = id => db.query(queries.claim_activation, [id,version]);
+    const activationOpened = id => db.query(queries.activation_opened, [id,version]);
+    const pendingActivations = () => db.query(queries.pending_activations, [version]);
     try {
+        // Seed already activated accounts in the PRE-UPDATE schema, then upgrade.
+        await db.exec(schema.replace(/ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_version[^;]+;/, ''));
+        await db.exec(`INSERT INTO users(tg_id,verified,verified_at,signals_used_today) VALUES(901,true,now(),9),(902,true,now(),7);
+            INSERT INTO elena_sessions(tg_id,reason,status,activated_at,activation_opened_at,
+                activation_attempts,activation_retry_at,last_business_at,business_connection_id,last_message_id)
+            VALUES(901,'ready','resolved',now(),now(),3,now(),now(),'approved',10),
+                  (902,'ready','resolved',now(),NULL,0,now(),now(),'approved',10);`);
+        const oldUsers = (await db.query('SELECT * FROM users ORDER BY tg_id')).rows;
         await db.exec(schema);
         await db.exec(schema);
+        const oldSessions = (await db.query('SELECT * FROM elena_sessions ORDER BY tg_id')).rows;
+        assert.ok(oldSessions.every(row=>row.activation_version===0), 'Every old account requires this release activation');
+        assert.deepEqual((await db.query('SELECT * FROM users ORDER BY tg_id')).rows, oldUsers);
+        assert.equal((await pendingActivations()).rows.length, 0, 'Old pending menus cannot bypass reset');
+        assert.equal((await claimActivation(902)).rows.length, 0);
+        await activationOpened(902);
+        assert.equal((await db.query('SELECT activation_opened_at FROM elena_sessions WHERE tg_id=902')).rows[0].activation_opened_at, null);
         await db.exec(`
             INSERT INTO users(tg_id,attempts) VALUES (101,77),(102,88),(103,99);
             INSERT INTO elena_sessions(tg_id,reason,due_at)
-                SELECT tg_id,'uid',now()-interval '1 minute' FROM users;
+                SELECT tg_id,'uid',now()-interval '1 minute' FROM users WHERE tg_id IN (101,102,103);
         `);
         const due = (await db.query(queries.due, [[103]])).rows;
         assert.deepEqual(due.map(r=>Number(r.tg_id)).sort(), [101,102]);
@@ -94,36 +115,51 @@ const {schema, queries} = JSON.parse(source.stdout);
         await db.query(queries.observe, [103,'uid',60]);
         assert.equal((await row()).status, 'paused', 'Activity must not override human handoff');
         // Activation requires an authenticated incoming message, never a link click.
-        assert.equal((await db.query(queries.activate, [101,'approved',11,'inactive',1800])).rows.length, 0);
+        assert.equal((await activate(101,'approved',11,'inactive',1800)).rows.length, 0);
         await db.query(queries.incoming, [101,'approved',11]);
-        assert.equal((await db.query(queries.activate, [101,'foreign',11,'inactive',1800])).rows.length, 0);
-        assert.equal((await db.query(queries.activate, [101,'approved',12,'inactive',1800])).rows.length, 0);
+        assert.equal((await activate(101,'foreign',11,'inactive',1800)).rows.length, 0);
+        assert.equal((await activate(101,'approved',12,'inactive',1800)).rows.length, 0);
         const original = (await db.query('SELECT * FROM users WHERE tg_id=101')).rows[0];
-        const activated = (await db.query(queries.activate, [101,'approved',11,'inactive',1800])).rows[0];
+        const activated = (await activate(101,'approved',11,'inactive',1800)).rows[0];
         assert.ok(activated.activated_at instanceof Date);
         assert.equal(activated.status, 'pending');
         assert.ok(activated.due_at - activated.activated_at >= 1799000);
         assert.deepEqual((await db.query('SELECT * FROM users WHERE tg_id=101')).rows[0], original);
-        assert.equal((await db.query(queries.activate, [101,'approved',11,'inactive',1800])).rows.length, 0);
+        assert.equal((await activate(101,'approved',11,'inactive',1800)).rows.length, 0);
         assert.equal((await db.query(queries.incoming, [101,'approved',11])).rows.length, 0);
-        assert.equal((await db.query(queries.pending_activations)).rows.length, 1);
-        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 1);
-        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 0, 'Single delivery lease');
+        assert.equal((await pendingActivations()).rows.length, 1);
+        assert.equal((await claimActivation(101)).rows.length, 1);
+        assert.equal((await claimActivation(101)).rows.length, 0, 'Single delivery lease');
         await db.exec(schema); // Redeploy retains the pending activation and lease.
-        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 0);
+        assert.equal((await claimActivation(101)).rows.length, 0);
         await db.exec("UPDATE elena_sessions SET activation_retry_at=now()-interval '1 minute' WHERE tg_id=101");
-        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 1, 'Failed delivery can retry');
-        await db.query(queries.activation_opened, [101]);
-        assert.equal((await db.query(queries.pending_activations)).rows.length, 0);
+        assert.equal((await claimActivation(101)).rows.length, 1, 'Failed delivery can retry');
+        await activationOpened(101);
+        assert.equal((await pendingActivations()).rows.length, 0);
         await db.exec("UPDATE elena_sessions SET activation_retry_at=now()-interval '1 minute' WHERE tg_id=101");
-        assert.equal((await db.query(queries.claim_activation, [101])).rows.length, 0, 'Opened menus never repeat');
+        assert.equal((await claimActivation(101)).rows.length, 0, 'Opened menus never repeat');
         await db.query(queries.incoming, [103,'approved',12]);
-        const handedOff = (await db.query(queries.activate, [103,'approved',12,'inactive',1800])).rows[0];
+        const handedOff = (await activate(103,'approved',12,'inactive',1800)).rows[0];
         assert.equal(handedOff.status, 'paused');
         assert.equal(handedOff.due_at, null, 'Activation does not override human takeover');
         await db.exec('UPDATE elena_sessions SET activation_attempts=3 WHERE tg_id=103');
-        assert.equal((await db.query(queries.claim_activation, [103])).rows.length, 0, 'Retries are bounded');
-        console.log('PASS: Elena PostgreSQL queue and activation migrations, authenticated contact, entitlement preservation, deduplication, delivery leases, restart recovery, reminder timing and bounded retries.');
+        assert.equal((await claimActivation(103)).rows.length, 0, 'Retries are bounded');
+
+        // Old activation cannot suppress the new confirmation/menu delivery.
+        assert.equal((await db.query(queries.incoming, [901,'approved',10])).rows.length, 0, 'Replayed old message is ignored');
+        await db.query(queries.incoming, [901,'approved',11]);
+        const reactivated = (await activate(901,'approved',11,'ready',1800)).rows[0];
+        assert.equal(reactivated.activation_version, version);
+        assert.equal(reactivated.activation_opened_at, null);
+        assert.equal(reactivated.activation_attempts, 0);
+        assert.equal((await claimActivation(901)).rows.length, 1);
+        await activationOpened(901);
+        await db.exec(schema);
+        const retained = (await db.query('SELECT * FROM elena_sessions WHERE tg_id=901')).rows[0];
+        assert.equal(retained.activation_version, version, 'Ordinary redeploy does not reset new activation');
+        assert.ok(retained.activation_opened_at instanceof Date);
+        assert.deepEqual((await db.query('SELECT * FROM users WHERE tg_id IN (901,902) ORDER BY tg_id')).rows, oldUsers);
+        console.log('PASS: all-account activation reset migration, old-job exclusion, new-message reactivation, entitlement preservation, duplicate suppression, durable delivery and restart stability.');
     } finally {
         await db.close();
     }
