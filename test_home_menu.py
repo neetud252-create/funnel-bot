@@ -205,7 +205,7 @@ async def main():
         await bot_mod.warm_media_cache(bot)
     warm_options = dict(bot.send_video.await_args.kwargs)
     assert str(warm_options.pop('cover').path) == 'assets/guide_opPxk6Af_cover.jpg'
-    assert warm_options == {'width': 1080, 'height': 1920, 'duration': 99}
+    assert warm_options == {'width': 1080, 'height': 1920, 'duration': 120}
     assert bot_mod.cached_id(guide_key, 'mp4') == 'portrait-guide-id'
     bot.send_video.reset_mock()
     await bot_mod.send_media(bot, 72011, guide_key, True, config.SCREENS['guide']['text'], None)
@@ -217,7 +217,7 @@ async def main():
     assert bot.send_video.await_args_list[0].args[1] == 'portrait-guide-id'
     assert str(bot.send_video.await_args_list[1].args[1].path) == 'assets/guide_opPxk6Af.mp4'
     for call in bot.send_video.await_args_list:
-        assert (call.kwargs['width'], call.kwargs['height'], call.kwargs['duration']) == (1080, 1920, 99)
+        assert (call.kwargs['width'], call.kwargs['height'], call.kwargs['duration']) == (1080, 1920, 120)
         assert str(call.kwargs['cover'].path) == 'assets/guide_opPxk6Af_cover.jpg'
     print('PASS - verified starts open the main menu; incomplete accounts keep welcome, pins, fallbacks and access routing.')
 
