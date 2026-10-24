@@ -59,9 +59,9 @@ def reason_for(user):
 
 
 def wait_seconds(reason):
-    # Keep the agreed five-minute incorrect-UID follow-up; incomplete setup,
-    # including a confirmed missing qualifying deposit, gets ten minutes.
-    return 300 if reason == 'uid' else 600
+    # Follow up on incorrect IDs after one minute; other incomplete setup
+    # (including a confirmed missing qualifying deposit) gets thirty minutes.
+    return 60 if reason == 'uid' else 1800
 
 
 def link(action='home'):
