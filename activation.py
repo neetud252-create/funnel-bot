@@ -29,9 +29,14 @@ async def required(tg_id):
     if not enabled():
         return False
     saved = await store.session(tg_id)
-    # Existing authenticated incoming messages also satisfy this one-time step.
-    # Contact remains valid after Telegram's separate 24-hour reply window ends.
-    return not (saved and (saved.get('activated_at') or saved.get('last_business_at')))
+    return not current(saved)
+
+
+def current(saved):
+    # Only activation in this release counts, including for verified users and
+    # earlier Elena contacts. Historical messages never bypass the new gate.
+    return bool(saved and saved.get('activated_at')
+                and saved.get('activation_version') == store.ACTIVATION_VERSION)
 
 
 def configure(show_gate, open_interface):

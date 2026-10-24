@@ -22,7 +22,10 @@ async def main():
     connection = dict(connection_id='approved', owner_id=99001, enabled=True, can_reply=True)
     inactive = dict(tg_id=uid, last_business_at=None, activated_at=None,
                     activation_opened_at=None, stopped=False, handoff=False)
-    accepted = dict(inactive, activated_at=now, last_business_at=now)
+    legacy = dict(inactive, activated_at=now-timedelta(days=1),
+                  last_business_at=now, activation_opened_at=now, activation_version=0)
+    accepted = dict(inactive, activated_at=now, last_business_at=now,
+                    activation_version=E.store.ACTIVATION_VERSION)
 
     # /start, verified users and all resume deep links get exactly one URL button
     # until contact is proven. URL clicks cannot update activation or verification.
@@ -30,7 +33,7 @@ async def main():
         db._users[uid] = dict(db._fresh_row(), verified=verified, signals_used_today=9,
                              last_reset_date=db._today[0], uid='123456789' if verified else None)
         for resume in (None, 'elena_home', 'elena_setup', 'elena_uid', 'elena_signals', 'elena_guide'):
-            with patch.object(E.store, 'session', AsyncMock(return_value=inactive)), \
+            with patch.object(E.store, 'session', AsyncMock(return_value=legacy)), \
                  patch.object(E.store, 'activate', AsyncMock()) as activate:
                 await B.start(H.FakeMessage(uid, '/start'), bot, state,
                               types.SimpleNamespace(args=resume))
@@ -95,7 +98,7 @@ async def main():
         # The session returned to the opener already contains the durable activation.
         with patch.object(E.store, 'connection', AsyncMock(return_value=connection)), \
              patch.object(E.store, 'session', AsyncMock(return_value=accepted)), \
-             patch.object(E.store, 'incoming', AsyncMock(return_value=inactive)) as incoming, \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=legacy)) as incoming, \
              patch.object(E.store, 'activate', AsyncMock(return_value=accepted)) as activate, \
              patch.object(E.store, 'claim_activation', AsyncMock(return_value={'tg_id':uid})), \
              patch.object(E.store, 'activation_opened', AsyncMock()) as opened, \
@@ -133,14 +136,64 @@ async def main():
             incoming.assert_not_awaited()
             activate.assert_not_awaited()
 
-    # Contact proof survives the 24-hour business reply window and deployments.
-    for saved in (accepted, dict(inactive, last_business_at=now-timedelta(days=10))):
+    # Only NEW activation survives the business window and deployments. All old
+    # contacts/activated accounts, including admins, must activate this release.
+    for saved in (accepted, dict(accepted, last_business_at=now-timedelta(days=10))):
         with patch.object(E.store, 'session', AsyncMock(return_value=saved)):
             assert not await A.required(uid)
-    with patch.object(E.store, 'session', AsyncMock(return_value=inactive)):
-        assert await A.required(uid)
-        with patch.object(B.config, 'ADMIN_IDS', [uid]):
-            assert await A.required(uid), 'Admin /start previews the same activation screen'
+    for saved in (inactive, legacy, dict(inactive, last_business_at=now-timedelta(days=10)),
+                  dict(accepted, activation_version=0)):
+        with patch.object(E.store, 'session', AsyncMock(return_value=saved)):
+            assert await A.required(uid)
+            with patch.object(B.config, 'ADMIN_IDS', [uid]):
+                assert await A.required(uid), 'Admin /start previews the same activation screen'
+
+    # Old queued handoffs cannot automatically reopen access after the reset.
+    with patch.object(E.store, 'session', AsyncMock(return_value=legacy)), \
+         patch.object(B, '_show_current_interface', AsyncMock()) as show:
+        assert not await B._open_from_elena(bot, uid)
+        show.assert_not_awaited()
+    with patch.object(E.store, 'await_chat', AsyncMock()) as defer, \
+         patch.object(E, 'active_connection', AsyncMock()) as connection_lookup:
+        await E.send_job(bot, object(), legacy)
+        defer.assert_awaited_once()
+        connection_lookup.assert_not_awaited()
+    cb.answers.clear()
+    with patch.object(E, 'active_connection', AsyncMock(return_value=connection)), \
+         patch.object(E.store, 'session', AsyncMock(return_value=legacy)), \
+         patch.object(E.localization, 'language_for', AsyncMock(return_value='en')), \
+         patch.object(E.store, 'consent', AsyncMock()) as consent:
+        await E.callback(cb, bot)
+        assert cb.answers == [(E.copy.REOPEN, True)]
+        consent.assert_not_awaited()
+
+    # Slow Elena delivery cannot delay the menu being triggered in Pocket IQ.
+    confirmation_started, release_confirmation, menu_opened = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    async def slow_confirmation(*args):
+        confirmation_started.set()
+        await release_confirmation.wait()
+    async def instant_menu(*args):
+        menu_opened.set()
+    with patch.object(E.store, 'connection', AsyncMock(return_value=connection)), \
+         patch.object(E.store, 'session', AsyncMock(return_value=legacy)), \
+         patch.object(E.store, 'incoming', AsyncMock(return_value=legacy)), \
+         patch.object(E.store, 'activate', AsyncMock(return_value=accepted)), \
+         patch.object(E, 'confirm_activation', slow_confirmation), \
+         patch.object(A, 'deliver', instant_menu):
+        task = asyncio.create_task(E.business_message(m, bot))
+        try:
+            await asyncio.wait_for(confirmation_started.wait(), 1)
+            await asyncio.wait_for(menu_opened.wait(), 1)
+            assert not task.done()
+        finally:
+            release_confirmation.set()
+            await task
+
+    # A new activation confirmation is transactional; it preserves earlier
+    # opt-out/handoff preferences instead of silently resuming follow-ups.
+    with patch.object(E, 'send_business', AsyncMock()) as send:
+        await E.confirm_activation(bot, uid, {'language':'en'})
+        assert 'activated successfully' in send.await_args.args[2]
 
     # Durable claim controls retries. Failures never pretend the menu was sent.
     with patch.object(E.store, 'claim_activation', AsyncMock(return_value={'tg_id':uid})) as claim, \

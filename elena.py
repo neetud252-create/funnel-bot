@@ -283,21 +283,14 @@ async def business_message(message, bot):
         session = await store.incoming(tg_id, connection['connection_id'], message.message_id)
         if not session:
             return
-        if activation.enabled() and not session.get('activated_at'):
+        if activation.enabled() and not activation.current(session):
             reason = reason_for(user) or 'ready'
             activated = await store.activate(tg_id, connection['connection_id'],
                                              message.message_id, reason, wait_seconds(reason))
             if activated:
-                # No AI call or consent grant is needed for this local confirmation.
-                # A failed Elena reply must not prevent opening the normal bot.
-                try:
-                    if not session['stopped'] and not session['handoff']:
-                        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, user.get('language', 'en')),
-                            InlineKeyboardMarkup(inline_keyboard=[[
-                                button(copy.OPEN_BOT, url=link())]]))
-                except Exception as exc:
-                    logging.warning('Activation confirmation unavailable (%s)', type(exc).__name__)
-                await activation.deliver(bot, tg_id)
+                # Both chats update immediately; neither waits for AI or a timer.
+                await asyncio.gather(confirm_activation(bot, tg_id, user),
+                                     activation.deliver(bot, tg_id))
                 return
         if session['stopped'] or session['handoff']:
             return
@@ -312,6 +305,16 @@ async def business_message(message, bot):
             await ai_answer(bot, tg_id, user, value)
         else:
             await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason))
+
+
+async def confirm_activation(bot, tg_id, user):
+    # This response to the new activation message does not resume marketing
+    # reminders, revoke human handoff, or grant OpenAI consent.
+    try:
+        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, user.get('language', 'en')),
+            InlineKeyboardMarkup(inline_keyboard=[[button(copy.OPEN_BOT, url=link())]]))
+    except Exception as exc:
+        logging.warning('Activation confirmation unavailable (%s)', type(exc).__name__)
 
 
 async def callback(cb, bot):
@@ -329,6 +332,11 @@ async def callback(cb, bot):
         connection = await active_connection(bot)
         if not connection or business_id != connection['connection_id']:
             await cb.answer()
+            return
+        if (action not in ('stop', 'human', 'later') and activation.enabled()
+                and not activation.current(await store.session(tg_id))):
+            language = await localization.language_for(tg_id)
+            await cb.answer(copy.text(copy.REOPEN, language), show_alert=True)
             return
         if action not in ('stop', 'human', 'later') and not business_window(await store.session(tg_id), connection):
             language = await localization.language_for(tg_id)
@@ -449,6 +457,11 @@ class ActivityMiddleware:
 
 async def send_job(bot, conn, job):
     tg_id = job['tg_id']
+    if activation.enabled() and not activation.current(job):
+        # Pre-update reminders cannot present old feature controls before the
+        # customer has completed the newly required activation.
+        await store.await_chat(conn, job)
+        return
     connection = await active_connection(bot)
     if not connection or _busy(tg_id):
         return
