@@ -68,6 +68,10 @@ def translate_parts(text, language, *, button=False):
         return text
     if text in TEMPLATES:
         return TEMPLATES[text][language]
+    # Exact built-in phrases can contain commands (e.g. /privacy). Translate
+    # the whole known phrase before splitting opaque user-supplied content.
+    if text in _catalog and (text != 'Start' or button):
+        return _catalog[text][language]
     def replacement(match):
         key = match.group()
         # Start/Premium are tier names; Start is a verb only on a button.

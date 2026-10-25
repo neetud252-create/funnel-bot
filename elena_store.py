@@ -50,6 +50,7 @@ ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_retry_at TIMESTAM
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_version INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS pending_question TEXT;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS pending_question_at TIMESTAMPTZ;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS consent_prompted_at TIMESTAMPTZ;
 """
 
 
@@ -156,6 +157,7 @@ async def pause(tg_id, *, stopped=False, handoff=False):
         stopped=stopped OR $2,handoff=handoff OR $3,revision=revision+1,
         history=CASE WHEN $2 OR $3 THEN '[]'::jsonb ELSE history END,
         consent=CASE WHEN $2 THEN FALSE ELSE consent END,
+        consent_prompted_at=CASE WHEN $2 THEN NULL ELSE consent_prompted_at END,
         pending_question=CASE WHEN $2 OR $3 THEN NULL ELSE pending_question END,
         pending_question_at=CASE WHEN $2 OR $3 THEN NULL ELSE pending_question_at END,
         reply_text=NULL,reply_nonce=NULL,updated_at=now()
@@ -163,9 +165,9 @@ async def pause(tg_id, *, stopped=False, handoff=False):
 
 
 async def consent(tg_id):
-    await execute("""UPDATE elena_sessions SET consent=TRUE,stopped=FALSE,
-        handoff=FALSE,local_only=FALSE,status='paused',history='[]'::jsonb,revision=revision+1,
-        updated_at=now() WHERE tg_id=$1""", tg_id)
+    return await one("""UPDATE elena_sessions SET consent=TRUE,
+        local_only=FALSE,status='paused',history='[]'::jsonb,revision=revision+1,
+        updated_at=now() WHERE tg_id=$1 AND NOT stopped AND NOT handoff RETURNING tg_id""", tg_id)
 
 
 async def resume(tg_id, revision):
@@ -188,6 +190,14 @@ async def save_question(tg_id, revision, value):
     await execute("""UPDATE elena_sessions SET pending_question=$3,pending_question_at=now()
         WHERE tg_id=$1 AND revision=$2 AND NOT consent AND NOT local_only
         AND NOT stopped AND NOT handoff""", tg_id, revision, value[:1200])
+
+
+async def offer_consent(tg_id, revision, *, explicit=False):
+    # Persisted across messages/restarts. /ai can explicitly reopen the choice.
+    return await one("""UPDATE elena_sessions SET consent_prompted_at=now()
+        WHERE tg_id=$1 AND revision=$2 AND NOT consent AND NOT stopped AND NOT handoff
+        AND ($3::boolean OR (NOT local_only AND consent_prompted_at IS NULL))
+        RETURNING tg_id""", tg_id, revision, explicit)
 
 
 async def take_question(tg_id):

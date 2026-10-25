@@ -15,7 +15,7 @@ queries = {}
 for fn in tree('elena_store').body:
     if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish', 'await_chat', 'observe', 'incoming',
             'activate', 'claim_activation', 'activation_opened', 'pending_activations',
-            'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai', 'resume'):
+            'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai', 'resume', 'offer_consent'):
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
             and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ', 'WITH ')))
@@ -192,6 +192,10 @@ const {schema, queries, version} = JSON.parse(source.stdout);
             INSERT INTO elena_sessions(tg_id,reason) VALUES(301,'registration');`);
         await db.query(queries.save_question, [301,1,'My registration form fails.']);
         assert.equal((await db.query(queries.take_question, [301])).rows.length, 0, 'No question is sent before consent');
+        assert.equal((await db.query(queries.offer_consent,[301,1,false])).rows.length,1);
+        await db.exec(schema); // Restart/migration must retain the one-time offer.
+        assert.equal((await db.query(queries.offer_consent,[301,1,false])).rows.length,0);
+        assert.equal((await db.query(queries.offer_consent,[301,1,true])).rows.length,1,'Explicit /ai may reopen the choice');
         await db.query(queries.consent, [301]);
         assert.equal((await db.query(queries.take_question, [301])).rows[0].pending_question, 'My registration form fails.');
         assert.equal((await db.query(queries.take_question, [301])).rows.length, 0, 'Consent double-taps cannot repeat the question');
@@ -211,6 +215,8 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         assert.equal((await db.query(queries.take_question, [301])).rows.length, 0, 'Expired questions never leave local storage');
         // A greeting must not clear Stop; explicit resume preserves AI and notification choices.
         await db.query(queries.pause, [301,true,true]);
+        assert.equal((await db.query(queries.consent,[301])).rows.length,0,'Concurrent Stop/handoff wins over consent');
+        assert.equal((await db.query(queries.offer_consent,[301,1,true])).rows.length,0,'Explicit prompt cannot bypass Stop');
         await db.exec('UPDATE users SET broadcast_opt_out=true WHERE tg_id=301');
         let paused = (await db.query('SELECT * FROM elena_sessions WHERE tg_id=301')).rows[0];
         assert.equal((await db.query(queries.resume,[301,Number(paused.revision)-1])).rows.length,0,

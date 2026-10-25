@@ -51,7 +51,7 @@ def check_catalog():
     # Coverage must fail when a new English screen/phrase is added without translations.
     allowed = re.compile(r'Pocket IQ|Go\+|Premium|Start|YouTube|OTC|FIN|\b[SM]\d+\b|\b[A-Z]{3}/[A-Z]{3}\b')
     for text in (*L.message_sources(), *labels):
-        if text in L.TEMPLATES:
+        if text in L.TEMPLATES or text in L._catalog:
             continue
         for part in L._protected.split(text)[::2]:
             residue = re.sub(r'\{[^}]+\}', '', L._phrases.sub('', part))
@@ -66,7 +66,8 @@ def check_catalog():
                 if value in text:
                     assert value in translated, (language, source, value)
             assert not re.search(r'\{[a-z_]+\}', translated)
-            if language != 'en' and any(L._phrases.search(p) for p in L._protected.split(text)[::2]):
+            if language != 'en' and (text in L._catalog or any(
+                    L._phrases.search(p) for p in L._protected.split(text)[::2])):
                 assert translated != text, (language, source)
         for screen in config.SCREENS.values():
             text = L.translate_message(sample(screen['text']), language)

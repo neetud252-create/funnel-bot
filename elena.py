@@ -114,29 +114,84 @@ def business_window(session, connection, now=None):
         and session.get('last_business_at') and timedelta(0) <= now - session['last_business_at'] < timedelta(hours=24))
 
 
-def consent_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [button(copy.AGREE, action='consent')],
-        [button(copy.BUTTONS_ONLY, action='local')],
-        [button('Talk to a person', action='human'), button('Stop reminders', action='stop')]])
+def chat_text(user, body, action='none', *, generated=False):
+    language = user.get('language', 'en')
+    text = escape(body) if generated else copy.text(body, language)
+    def add_link(label, url):
+        nonlocal text
+        text += '\n\n<a href="' + escape(url, quote=True) + '">' + copy.text(label, language) + '</a>'
+    if action == 'register':
+        if url := registration_url(user):
+            add_link('🔗 Registration Link', url)
+            text += '\n' + copy.text(journey.DISCLOSURE, language)
+        add_link('Open Pocket IQ', link('uid'))
+    elif action != 'none':
+        target = {'uid': 'uid', 'guide': 'guide', 'signals': 'signals',
+                  'setup': 'setup', 'deposit': 'setup', 'recheck': 'setup'}.get(action)
+        if target:
+            add_link('Open Pocket IQ', link(target))
+    return text
 
 
-def resume_keyboard(language='en'):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [button(copy.text(copy.RESUME, language), action='resume')]])
+def basic_answer(user, value):
+    """Useful local help before consent or during provider failure; no model call."""
+    value = (value or '').strip().casefold()
+    if re.fullmatch(r'(hi|hey|hello|hii+|hola|привет|नमस्ते|مرحبا|oi|হাই|سلام|xin chào)(\s+el[ei]na)?[!?. 👋]*', value):
+        return chat_text(user, copy.HELLO)
+    if re.fullmatch(r'(thanks|thank you|ty|gracias|спасибо|धन्यवाद|شکریہ|obrigad[oa])[!?. ]*', value):
+        return chat_text(user, copy.THANKS)
+    if re.search(r'regist|sign.?up|create.{0,12}account|account.{0,12}(create|ban)|रजिस|পঞ্জ|নিবন্ধ|رجس|đăng ký|daftar|kayıt|регистр|реєстр|تسجيل', value):
+        existing = user.get('account_kind') == 'existing' or bool(re.search(r'already|existing|second account|duplicate', value))
+        return chat_text(user, copy.CHAT_EXISTING if existing else copy.CHAT_REGISTER,
+                         'uid' if existing else 'register')
+    if re.search(r'\b(uid|id|trader)\b|wrong|rejected|गलत|पहचान|شناخت', value):
+        return chat_text(user, copy.CHAT_UID, 'uid')
+    if re.search(r'signal|analysis|trade|trading|сигнал|सिग्नल|সিগন্যাল|اشار|tín hiệu|sinyal|señal|إشار', value):
+        return chat_text(user, copy.CHAT_SIGNALS, 'signals')
+    if re.search(r'deposit|withdraw|payment|deposite|जमा|جمع|ডিপোজিট|nạp|çekim|плат|депозит|إيداع|سحب', value):
+        return chat_text(user, copy.CHAT_PAYMENT, 'deposit')
+    if re.search(r'guide|tutorial|video|गाइड|руковод|hướng dẫn|panduan|guía|دليل', value):
+        return chat_text(user, copy.CHAT_SIGNALS, 'guide')
+    return chat_text(user, copy.CHAT_HELP)
+
+
+async def ask_consent(bot, tg_id, user, session, *, explicit=False):
+    if await store.offer_consent(tg_id, session['revision'], explicit=explicit):
+        await send_business(bot, tg_id, copy.text(copy.CHAT_ASK, user.get('language', 'en')))
+
+
+async def allow_ai(bot, tg_id, user):
+    if not await store.consent(tg_id):
+        return  # A concurrent Stop/operator takeover must not be undone by consent.
+    pending = await store.take_question(tg_id)
+    if pending and ai.configured():
+        await ai_answer(bot, tg_id, user, pending['pending_question'])
+    else:
+        await send_business(bot, tg_id, copy.text(copy.HELLO, user.get('language', 'en')))
+
+
+async def resume_chat(bot, tg_id, user, session):
+    if session['stopped'] or session['handoff']:
+        session = await store.resume(tg_id, session['revision'])
+        if not session:
+            return
+        logging.info('Elena automatic replies resumed by customer')
+    if not session.get('consent') and not session.get('local_only') and ai.configured():
+        await ask_consent(bot, tg_id, user, session, explicit=True)
+    else:
+        await send_business(bot, tg_id, copy.text(copy.HELLO, user.get('language', 'en')))
 
 
 async def paused_reply(bot, tg_id, language):
-    await send_business(bot, tg_id, copy.text(copy.REPLIES_PAUSED, language), resume_keyboard(language))
+    await send_business(bot, tg_id, copy.text(copy.CHAT_PAUSED, language))
     logging.info('Elena reply paused; explicit resume offered')
 
 
 async def ai_answer(bot, tg_id, user, value):
     claimed = await store.claim_ai(tg_id)
-    reason = reason_for(user) or 'ready'
     language = user.get('language', 'en')
     if not claimed:
-        await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
+        await send_business(bot, tg_id, copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + basic_answer(user, value))
         return
     history = claimed['history']
     if isinstance(history, str):
@@ -146,7 +201,7 @@ async def ai_answer(bot, tg_id, user, value):
     if not latest or latest['revision'] != claimed['revision'] or latest['stopped'] or latest['handoff'] or not latest['consent']:
         return
     if not result:
-        await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
+        await send_business(bot, tg_id, copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + basic_answer(user, value))
         return
     action = result['action']
     if action in ('stop', 'later', 'support'):
@@ -154,36 +209,15 @@ async def ai_answer(bot, tg_id, user, value):
         if action == 'stop':
             await db.set_notifications(tg_id, False)
         suffix = {'stop': copy.STOPPED, 'later': copy.PAUSED, 'support': copy.HUMAN}[action]
-        await send_business(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language),
-                            resume_keyboard(language) if action in ('stop', 'support') else None)
+        await send_business(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language)
+                            + ('\n\n' + copy.text(copy.CHAT_PAUSED, language) if action in ('stop', 'support') else ''))
         return
     nonce = secrets.token_hex(4)
     history += [{'role': 'user', 'content': ai.private_text(user, value)},
                 {'role': 'assistant', 'content': ai.private_text(user, result['reply'])}]
     if not await store.remember(tg_id, claimed['revision'], history, result['reply'], nonce):
         return
-    rows = []
-    text = escape(result['reply'])
-    if action == 'register':
-        rows = [[registration_button(user)],
-                [button('✅ I Created an Account — Check ID', url=link('uid'))]]
-        if url := registration_url(user):
-            text += '\n\n<a href="' + escape(url, quote=True) + '">' + copy.text('🔗 Registration Link', language) + '</a>'
-            text += '\n' + copy.text(journey.DISCLOSURE, language)
-    else:
-        targets = {'setup': ('Continue Setup', link('setup')),
-                   'uid': ('📍 Where Is My Trader ID?', link('uid')),
-                   'guide': ('📖 Guide', link('guide')),
-                   'signals': ('📊 Get Signals', link('signals')),
-                   'deposit': ('📖 Deposit Help', link('setup'))}
-        if action in targets:
-            label, url = targets[action]
-            rows.append([button(label, url=url)])
-        elif action == 'recheck':
-            rows.append([button('🔄 Check Again', action='recheck')])
-    rows += [[button(copy.LISTEN, action='voice:' + nonce)],
-             [button('Talk to a person', action='human'), button('Stop reminders', action='stop')]]
-    if await send_business(bot, tg_id, text, InlineKeyboardMarkup(inline_keyboard=rows)):
+    if await send_business(bot, tg_id, chat_text(user, result['reply'], action, generated=True)):
         logging.info('Elena AI reply delivered; action=%s', action)
 
 
@@ -314,7 +348,8 @@ async def business_message(message, bot):
         if stop:
             await db.set_notifications(tg_id, False)
         language = user.get('language', 'en')
-        await send_business(bot, tg_id, copy.text(copy.STOPPED if stop else copy.HUMAN, language), resume_keyboard(language))
+        await send_business(bot, tg_id, copy.text(copy.STOPPED if stop else copy.HUMAN, language)
+                            + '\n\n' + copy.text(copy.CHAT_PAUSED, language))
         return
     lock = _locks.setdefault(tg_id, asyncio.Lock())
     async with lock:
@@ -339,17 +374,51 @@ async def business_message(message, bot):
                 if not value or value == activation.DRAFT:
                     return
                 session = activated
+        language = user.get('language', 'en')
+        command = value.casefold().strip(' .!?')
+        if command == '/privacy':
+            await send_business(bot, tg_id, copy.text(copy.CHAT_PRIVACY, language))
+            return
+        if command in ('/resume', 'resume'):
+            await resume_chat(bot, tg_id, user, session)
+            return
         if session['stopped'] or session['handoff']:
             if value:
                 # A new greeting is not permission to undo Stop or interrupt a
                 # human operator. Explain the pause and provide an explicit exit.
                 await paused_reply(bot, tg_id, user.get('language', 'en'))
             return
+        if command == '/ai':
+            if session.get('consent'):
+                await send_business(bot, tg_id, copy.text(copy.HELLO, language))
+            elif ai.configured():
+                await ask_consent(bot, tg_id, user, session, explicit=True)
+            else:
+                await send_business(bot, tg_id, copy.text(copy.CHAT_UNAVAILABLE, language))
+            return
+        if not session.get('consent') and session.get('consent_prompted_at'):
+            if command in ('yes', 'allow ai', 'да', 'так', 'हाँ', 'हां', 'হ্যাঁ', 'جی', 'ہاں', 'có', 'ya', 'evet', 'sí', 'si', 'نعم', 'sim'):
+                await allow_ai(bot, tg_id, user)
+                return
+            if command in ('no', 'нет', 'ні', 'नहीं', 'না', 'نہیں', 'không', 'tidak', 'hayır', 'لا', 'não'):
+                await store.local_only(tg_id)
+                await send_business(bot, tg_id, copy.text(copy.CHAT_BASIC, language))
+                return
+        if command == '/voice':
+            if session.get('consent') and session.get('reply_nonce'):
+                await voice_reply(bot, tg_id, session['reply_nonce'], language)
+            else:
+                await send_business(bot, tg_id, copy.text(copy.CHAT_VOICE, language))
+            return
         if not session.get('consent') and not session.get('local_only') and ai.configured():
             if value:
                 await store.save_question(tg_id, session['revision'], ai.private_text(user, value))
-            await send_business(bot, tg_id, copy.text(copy.CONSENT, user.get('language', 'en')), consent_keyboard())
-            logging.info('Elena reply awaiting customer AI permission')
+            # Answer basic questions immediately. The short AI offer is shown
+            # once, not replayed instead of an answer on every incoming message.
+            text = basic_answer(user, value)
+            if await store.offer_consent(tg_id, session['revision']):
+                text += '\n\n' + copy.text(copy.CHAT_ASK, language)
+            await send_business(bot, tg_id, text)
             return
         reason = reason_for(user) or 'ready'
         if reason == 'deposit':
@@ -358,15 +427,14 @@ async def business_message(message, bot):
         if value and session.get('consent') and ai.configured():
             await ai_answer(bot, tg_id, user, value)
         else:
-            await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
+            await send_business(bot, tg_id, basic_answer(user, value))
 
 
 async def confirm_activation(bot, tg_id, user):
     # This response to the new activation message does not resume marketing
     # reminders, revoke human handoff, or grant OpenAI consent.
     try:
-        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, user.get('language', 'en')),
-            InlineKeyboardMarkup(inline_keyboard=[[button(copy.OPEN_BOT, url=link())]]))
+        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, user.get('language', 'en')))
     except Exception as exc:
         logging.warning('Activation confirmation unavailable (%s)', type(exc).__name__)
 
@@ -407,7 +475,8 @@ async def callback(cb, bot):
             await db.set_notifications(tg_id, False)
         text = copy.text({'stop': copy.STOPPED, 'human': copy.HUMAN, 'later': copy.PAUSED}[action], language)
         if business_id:
-            await send_business(bot, tg_id, text, resume_keyboard(language) if action in ('stop', 'human') else None)
+            await send_business(bot, tg_id, text + ('\n\n' + copy.text(copy.CHAT_PAUSED, language)
+                                                   if action in ('stop', 'human') else ''))
         else:
             await bot.send_message(tg_id, text)
         return
@@ -418,16 +487,7 @@ async def callback(cb, bot):
             return
         language = user.get('language', 'en')
         if action == 'resume':
-            if session['stopped'] or session['handoff']:
-                session = await store.resume(tg_id, session['revision'])
-                if not session:
-                    return  # A newer Stop or operator takeover wins the race.
-                logging.info('Elena automatic replies resumed by customer')
-            if not session.get('consent') and not session.get('local_only') and ai.configured():
-                await send_business(bot, tg_id, copy.text(copy.CONSENT, language), consent_keyboard())
-            else:
-                reason = reason_for(user) or 'ready'
-                await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
+            await resume_chat(bot, tg_id, user, session)
             return
         if session['stopped'] or session['handoff']:
             await paused_reply(bot, tg_id, language)
@@ -437,40 +497,31 @@ async def callback(cb, bot):
             return
         await store.pause(tg_id)
         if action == 'consent':
-            await store.consent(tg_id)
-            pending = await store.take_question(tg_id)
-            if pending and ai.configured():
-                await ai_answer(bot, tg_id, user, pending['pending_question'])
-                return
-            text, markup = copy.prompt(user, reason_for(user) or 'ready'), keyboard(reason_for(user) or 'ready', user=user)
+            await allow_ai(bot, tg_id, user)
+            return
         elif action == 'local':
             await store.local_only(tg_id)
-            text, markup = copy.prompt(user, reason_for(user) or 'ready'), keyboard(reason_for(user) or 'ready', user=user)
+            text = copy.text(copy.CHAT_BASIC, language)
         elif action == 'recheck':
             user = await refresh(tg_id)
             reason = reason_for(user) or 'ready'
-            text, markup = copy.prompt(user, reason), keyboard(reason, user=user)
+            source = {'ready': journey.READY, 'temporary': journey.PENDING,
+                      'uid': copy.CHAT_UID, 'deposit': copy.CHAT_PAYMENT}.get(reason, copy.CHAT_HELP)
+            text = chat_text(user, source, 'signals' if reason == 'ready' else 'setup')
         else:
             if action == 'account' and session.get('consent') and ai.configured():
                 await ai_answer(bot, tg_id, user, 'Help me set up my account. Explain the registration steps and how to submit my Trader ID.')
                 return
-            sources = {'uid': copy.UID, 'account': journey.ACCOUNT_QUESTION,
-                       'deposit': journey.TEXTS['payment_help'],
-                       'guide': journey.TEXTS['how'], 'signals': journey.TEXTS['analysis_help']}
+            sources = {'uid': copy.CHAT_UID, 'account': copy.CHAT_REGISTER,
+                       'deposit': copy.CHAT_PAYMENT,
+                       'guide': copy.CHAT_SIGNALS, 'signals': copy.CHAT_SIGNALS}
             if action not in sources:
                 return
-            text = localization.translate_message(sources[action], language)
-            target = {'uid': 'uid', 'account': 'setup', 'deposit': 'setup',
-                      'guide': 'guide', 'signals': 'signals'}[action]
-            markup = InlineKeyboardMarkup(inline_keyboard=[
-                [button('Open Pocket IQ', url=link(target))],
-                [button('Talk to a person', action='human'), button('⏸ Later', action='later')]])
-            if action in ('account', 'uid'):
-                markup.inline_keyboard.insert(0, [registration_button(user)])
+            text = basic_answer(user, 'how do I register') if action == 'account' else chat_text(user, sources[action], action)
         if business_id:
-            await send_business(bot, tg_id, text, markup)
+            await send_business(bot, tg_id, text)
         else:
-            await bot.send_message(tg_id, text, reply_markup=markup)
+            await bot.send_message(tg_id, text)
 
 
 async def open_elena(message, bot):
@@ -490,7 +541,7 @@ async def status_command(message):
         + ('connected' if ready else 'not connected')
         + '\nContextual help and timers: installed'
         + '\nAI replies: ' + ('configured; customer opt-in required' if ai.configured() else 'OPENAI_API_KEY missing')
-        + '\nVoice: optional Listen button; AI-generated'
+        + '\nVoice: optional /voice command; AI-generated'
         + '\nConnect Pocket IQ in Elena’s Telegram Settings > Chat Automation.'
         + '\nUsers must message Elena before she can reply from that account.'
         + '\n/remindersoff pauses scheduled reminders; /reminderson resumes them.')
@@ -580,8 +631,10 @@ async def send_job(bot, conn, job):
     if not job:
         return
     try:
-        await bot.send_message(tg_id, copy.prompt(user, reason), parse_mode='HTML',
-            reply_markup=keyboard(reason, user=user), business_connection_id=connection['connection_id'])
+        source = {'uid': copy.CHAT_UID, 'deposit': copy.CHAT_PAYMENT,
+                  'registration': copy.CHAT_HELP}.get(reason, copy.CHAT_HELP)
+        await bot.send_message(tg_id, chat_text(user, source, 'uid' if reason == 'uid' else 'setup'), parse_mode='HTML',
+            business_connection_id=connection['connection_id'])
         await store.finish(conn, job, 'sent')
         logging.info('Elena follow-up delivered; reason=%s; admin=%s',
                      reason, tg_id in config.ADMIN_IDS)
