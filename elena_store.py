@@ -168,6 +168,15 @@ async def consent(tg_id):
         updated_at=now() WHERE tg_id=$1""", tg_id)
 
 
+async def resume(tg_id, revision):
+    # Explicit customer request only. Do not grant AI consent, re-enable
+    # notifications, or schedule reminders when restoring conversation replies.
+    return await one("""UPDATE elena_sessions SET stopped=FALSE,handoff=FALSE,
+        status='paused',due_at=NULL,revision=revision+1,updated_at=now()
+        WHERE tg_id=$1 AND revision=$2 AND (stopped OR handoff) RETURNING *""",
+        tg_id, revision)
+
+
 async def local_only(tg_id):
     await execute("""UPDATE elena_sessions SET local_only=TRUE,consent=FALSE,
         history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,pending_question=NULL,

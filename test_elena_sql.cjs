@@ -15,7 +15,7 @@ queries = {}
 for fn in tree('elena_store').body:
     if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish', 'await_chat', 'observe', 'incoming',
             'activate', 'claim_activation', 'activation_opened', 'pending_activations',
-            'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai'):
+            'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai', 'resume'):
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
             and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ', 'WITH ')))
@@ -209,6 +209,21 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         await db.exec(`UPDATE elena_sessions SET pending_question='expired',pending_question_at=now()-interval '2 days',
             consent=true,stopped=false,handoff=false WHERE tg_id=301`);
         assert.equal((await db.query(queries.take_question, [301])).rows.length, 0, 'Expired questions never leave local storage');
+        // A greeting must not clear Stop; explicit resume preserves AI and notification choices.
+        await db.query(queries.pause, [301,true,true]);
+        await db.exec('UPDATE users SET broadcast_opt_out=true WHERE tg_id=301');
+        let paused = (await db.query('SELECT * FROM elena_sessions WHERE tg_id=301')).rows[0];
+        assert.equal((await db.query(queries.resume,[301,Number(paused.revision)-1])).rows.length,0,
+            'A stale resume cannot override newer customer/operator input');
+        const resumed = (await db.query(queries.resume,[301,paused.revision])).rows[0];
+        assert.equal(resumed.handoff,false);
+        assert.equal(resumed.stopped,false);
+        assert.equal(resumed.consent,false,'Resume does not grant AI consent');
+        assert.equal(resumed.status,'paused');
+        assert.equal(resumed.due_at,null,'Resume does not schedule outreach');
+        assert.equal((await db.query('SELECT broadcast_opt_out FROM users WHERE tg_id=301')).rows[0].broadcast_opt_out,true);
+        assert.equal((await db.query(queries.resume,[301,resumed.revision])).rows.length,0,'Resume is idempotent');
+        console.log('PASS: explicit resume, stale race rejection, preserved AI consent and reminder preferences.');
         console.log('PASS: pending question consent, single consumption, fast follow-ups, daily cap and privacy controls.');
         console.log('PASS: activated admin follow-ups, old/unactivated admin exclusion and unchanged delivery safeguards.');
         console.log('PASS: all-account activation reset migration, old-job exclusion, new-message reactivation, entitlement preservation, duplicate suppression, durable delivery and restart stability.');

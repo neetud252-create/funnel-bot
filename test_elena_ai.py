@@ -139,6 +139,75 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         consent.assert_awaited_once_with(42)
         self.assertEqual(answer.await_args.args[-1], 'Registration fails.')
 
+    async def test_hi_during_handoff_or_stop_gets_resume_without_ai_or_state_change(self):
+        for flag in ('handoff', 'stopped'):
+            row = session(consent=False, **{flag: True})
+            message = self.message()
+            message.text = 'hi'
+            with self.subTest(flag=flag), \
+                 patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+                 patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+                 patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+                 patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+                 patch.object(E.store, 'resume', AsyncMock()) as resume, \
+                 patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+                 patch.object(E, 'send_business', AsyncMock()) as send:
+                await E.business_message(message, object())
+            resume.assert_not_awaited()
+            answer.assert_not_awaited()
+            self.assertEqual(send.await_args.args[2], E.copy.REPLIES_PAUSED)
+            self.assertEqual(send.await_args.args[3].inline_keyboard[0][0].callback_data, 'elena:resume')
+
+    async def test_resume_is_reachable_after_handoff_but_does_not_grant_ai_permission(self):
+        row = session(handoff=True, consent=False)
+        cb = types.SimpleNamespace(message=types.SimpleNamespace(
+                chat=types.SimpleNamespace(id=42, type='private'), business_connection_id='business-test'),
+            from_user=types.SimpleNamespace(id=42), data='elena:resume', answer=AsyncMock())
+        with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'resume', AsyncMock(return_value=session(consent=False))) as resume, \
+             patch.object(E.store, 'consent', AsyncMock()) as consent, \
+             patch.object(E.db, 'set_notifications', AsyncMock()) as notify, \
+             patch.object(E.ai, 'configured', return_value=True), \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.callback(cb, object())
+        resume.assert_awaited_once_with(42, row['revision'])
+        consent.assert_not_awaited()
+        notify.assert_not_awaited()
+        answer.assert_not_awaited()
+        self.assertEqual(send.await_args.args[2], E.copy.CONSENT)
+
+    async def test_old_consent_button_cannot_override_human_takeover(self):
+        row = session(handoff=True, consent=False)
+        cb = types.SimpleNamespace(message=types.SimpleNamespace(
+                chat=types.SimpleNamespace(id=42, type='private'), business_connection_id='business-test'),
+            from_user=types.SimpleNamespace(id=42), data='elena:consent', answer=AsyncMock())
+        with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'resume', AsyncMock()) as resume, \
+             patch.object(E.store, 'consent', AsyncMock()) as consent, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.callback(cb, object())
+        resume.assert_not_awaited()
+        consent.assert_not_awaited()
+        self.assertEqual(send.await_args.args[2], E.copy.REPLIES_PAUSED)
+
+    async def test_new_stop_wins_over_a_concurrent_resume(self):
+        row = session(handoff=True, consent=True)
+        cb = types.SimpleNamespace(message=types.SimpleNamespace(
+                chat=types.SimpleNamespace(id=42, type='private'), business_connection_id='business-test'),
+            from_user=types.SimpleNamespace(id=42), data='elena:resume', answer=AsyncMock())
+        with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'resume', AsyncMock(return_value=None)), \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.callback(cb, object())
+        send.assert_not_awaited()
+
     async def test_each_consented_message_reaches_ai_with_current_user_context(self):
         row = session(consent=True)
         current = user(language='hi')
