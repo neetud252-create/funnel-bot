@@ -111,7 +111,7 @@ async def main():
             await E.business_message(m, bot)
             activate.assert_awaited_once_with(uid, 'approved', 11,
                 'ready' if verified else 'inactive', 1800)
-            assert send.await_args.args[2] == E.copy.ACTIVATED
+            assert send.await_args.args[2] == E.copy.ACTIVATED + '\n\n' + E.copy.CHAT_NOTICE
             assert len(send.await_args.args) == 3  # Return via the username in the message, no menu.
             opened.assert_awaited_once_with(uid)
             ai_reply.assert_not_awaited()
