@@ -33,9 +33,25 @@ VOICE_UNAVAILABLE = 'Voice is unavailable right now. You can read the reply abov
 REOPEN = 'Send Elena a new message to continue this chat.'
 RESUME = 'Resume replies'
 REPLIES_PAUSED = 'Automatic replies are paused in this chat. Tap Resume replies to chat with Elena again. Your reminder preferences will stay unchanged.'
+HELLO = 'Hi 👋 How can I help you?'
+THANKS = 'You’re welcome!'
+CHAT_HELP = 'Tell me what is going wrong with your setup, and I’ll help with the next step.'
+CHAT_REGISTER = 'Open the registration link and complete your details and account confirmation. Then copy your Trader ID from your Pocket Option profile and submit it in Pocket IQ under Setup My Account.'
+CHAT_EXISTING = 'If you already have a Pocket Option account, sign in and copy your Trader ID from your profile. Submit it in Pocket IQ to check access. Please do not create a second account.'
+CHAT_UID = 'Copy the numeric Trader ID from your Pocket Option profile, then send it in Pocket IQ under Setup My Account. If it was rejected, check for a typo and try again.'
+CHAT_SIGNALS = 'In Pocket IQ, choose Get Signals, then select your market, category, asset and expiration. You’ll get a chart, BUY or SELL and a short reason when live data is available.'
+CHAT_PAYMENT = 'Payments and withdrawals are handled inside your Pocket Option account. If a payment is missing, recheck your status in Pocket IQ or contact the broker’s support before depositing again.'
+CHAT_ASK = 'May I use OpenAI for personalised replies with your message, recent redacted chat and setup, verification and qualifying-deposit details? Reply YES or NO. /privacy explains more.'
+CHAT_PRIVACY = 'Elena’s replies are automated. With your permission, OpenAI receives your messages and limited setup details. Identifiers are redacted; local chat memory expires after 24 hours. Never send passwords, login codes or payment details. /voice sends the last reply text to OpenAI for an AI voice. /stop revokes consent and clears memory; /human requests the team.'
+CHAT_BASIC = 'Sure, I can still help with basic setup here. Send your question. You can type /ai later for personalised replies.'
+CHAT_PAUSED = 'Automatic replies are paused for this chat. Send /resume to continue. Your reminder preferences will stay unchanged.'
+CHAT_VOICE = 'To hear an AI voice version, allow AI replies with /ai first, then ask a question and send /voice.'
+CHAT_UNAVAILABLE = 'Personalised AI replies are unavailable right now. I can still help with basic setup.'
 SOURCES = (INTRO, QUESTION, INVITE, PAUSED, STOPPED, HUMAN, OFFLINE, UID, FALLBACK,
            CONSENT, AGREE, BUTTONS_ONLY, LISTEN, AI_VOICE, VOICE_UNAVAILABLE, REOPEN,
-           ACTIVATION, ACTIVATED, ACTIVATE_BUTTON, OPEN_BOT, RESUME, REPLIES_PAUSED)
+           ACTIVATION, ACTIVATED, ACTIVATE_BUTTON, OPEN_BOT, RESUME, REPLIES_PAUSED,
+           HELLO, THANKS, CHAT_HELP, CHAT_REGISTER, CHAT_EXISTING, CHAT_UID, CHAT_SIGNALS,
+           CHAT_PAYMENT, CHAT_ASK, CHAT_PRIVACY, CHAT_BASIC, CHAT_PAUSED, CHAT_VOICE, CHAT_UNAVAILABLE)
 
 
 def text(source, language):

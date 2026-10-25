@@ -112,7 +112,7 @@ async def main():
             activate.assert_awaited_once_with(uid, 'approved', 11,
                 'ready' if verified else 'inactive', 1800)
             assert send.await_args.args[2] == E.copy.ACTIVATED
-            assert send.await_args.args[3].inline_keyboard[0][0].url == E.link()
+            assert len(send.await_args.args) == 3  # Return via the username in the message, no menu.
             opened.assert_awaited_once_with(uid)
             ai_reply.assert_not_awaited()
             assert bot.calls[-1]['asset'] == ('assets/menu.png' if verified else 'assets/home_banner_loop.mp4')

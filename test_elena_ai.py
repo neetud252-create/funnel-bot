@@ -107,6 +107,102 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
             from_user=types.SimpleNamespace(id=42), business_connection_id='business-test',
             sender_business_bot=None, via_bot=None, is_from_offline=False, message_id=7, text='help')
 
+    async def test_greeting_then_registration_answers_each_question_and_offers_ai_once(self):
+        row = session(consent=False, consent_prompted_at=None)
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user(account_kind='new'))), \
+             patch.object(E.ai, 'configured', return_value=True), \
+             patch.object(E.ai, 'reply', AsyncMock()) as model, \
+             patch.object(E.store, 'offer_consent', AsyncMock(side_effect=[{'tg_id':42}, None])), \
+             patch.object(E.store, 'save_question', AsyncMock()), \
+             patch.object(E.config, 'REF_LINK', 'https://pocketoption.com/?a=test'), \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            message = self.message()
+            message.text = 'hi'
+            await E.business_message(message, object())
+            self.assertTrue(send.await_args.args[2].startswith(E.copy.HELLO))
+            self.assertIn(E.copy.CHAT_ASK, send.await_args.args[2])
+            message.text = 'how i register in the bot'
+            await E.business_message(message, object())
+        model.assert_not_awaited()
+        answer = send.await_args.args[2]
+        self.assertIn(E.copy.CHAT_REGISTER, answer)
+        self.assertIn('https://pocketoption.com', answer)
+        self.assertNotIn(E.copy.CHAT_ASK, answer)
+        self.assertNotIn(E.copy.CONSENT, answer)
+        self.assertLess(len(answer.split()), 85)
+        self.assertTrue(all(len(call.args) == 3 for call in send.await_args_list))
+
+    async def test_typed_yes_requires_previous_offer_and_answers_the_saved_question(self):
+        for prompted in (None, E.datetime.now(E.timezone.utc)):
+            row = session(consent=False, consent_prompted_at=prompted)
+            message = self.message()
+            message.text = 'YES'
+            with self.subTest(prompted=bool(prompted)), \
+                 patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+                 patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+                 patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+                 patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+                 patch.object(E.ai, 'configured', return_value=True), \
+                 patch.object(E.store, 'offer_consent', AsyncMock(return_value={'tg_id':42})), \
+                 patch.object(E.store, 'save_question', AsyncMock()), \
+                 patch.object(E.store, 'consent', AsyncMock(return_value={'tg_id':42})) as consent, \
+                 patch.object(E.store, 'take_question', AsyncMock(return_value={'pending_question':'How do I register?'})), \
+                 patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+                 patch.object(E, 'send_business', AsyncMock()):
+                await E.business_message(message, object())
+            if prompted:
+                consent.assert_awaited_once_with(42)
+                self.assertEqual(answer.await_args.args[-1], 'How do I register?')
+            else:
+                consent.assert_not_awaited()
+                answer.assert_not_awaited()
+
+    async def test_typed_no_declines_ai_without_losing_basic_help(self):
+        row = session(consent=False, consent_prompted_at=E.datetime.now(E.timezone.utc))
+        message = self.message()
+        message.text = 'NO'
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'local_only', AsyncMock()) as local, \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.business_message(message, object())
+        local.assert_awaited_once_with(42)
+        answer.assert_not_awaited()
+        self.assertEqual(send.await_args.args[2], E.copy.CHAT_BASIC)
+
+    async def test_voice_command_uses_latest_reply_without_button(self):
+        row = session(consent=True, reply_nonce='latest')
+        message = self.message()
+        message.text = '/voice'
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E, 'voice_reply', AsyncMock()) as voice:
+            await E.business_message(message, object())
+        self.assertEqual(voice.await_args.args[1:], (42, 'latest', 'en'))
+
+    async def test_concurrent_stop_cannot_be_overridden_by_allow_ai(self):
+        with patch.object(E.store, 'consent', AsyncMock(return_value=None)), \
+             patch.object(E.store, 'take_question', AsyncMock()) as take, \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.allow_ai(object(), 42, user())
+        take.assert_not_awaited()
+        answer.assert_not_awaited()
+        send.assert_not_awaited()
+
+    def test_existing_accounts_do_not_receive_duplicate_registration_instructions(self):
+        text = E.basic_answer(user(account_kind='existing'), 'How do I register?')
+        self.assertIn(E.copy.CHAT_EXISTING, text)
+        self.assertNotIn('Registration Link', text)
+
     async def test_first_message_requests_customer_consent_without_model_call(self):
         row = session(consent=False)
         with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
@@ -115,11 +211,14 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.ai, 'configured', return_value=True), \
              patch.object(E.ai, 'reply', AsyncMock()) as reply, \
+             patch.object(E.store, 'offer_consent', AsyncMock(return_value={'tg_id':42})), \
              patch.object(E.store, 'save_question', AsyncMock()) as save, \
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.business_message(self.message(), object())
         reply.assert_not_awaited()
-        self.assertEqual(send.await_args.args[2], E.copy.CONSENT)
+        self.assertIn(E.copy.CHAT_HELP, send.await_args.args[2])
+        self.assertIn(E.copy.CHAT_ASK, send.await_args.args[2])
+        self.assertEqual(len(send.await_args.args), 3)
         save.assert_awaited_once_with(42, row['revision'], 'help')
 
     async def test_allow_ai_answers_saved_question_without_retyping(self):
@@ -155,8 +254,8 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
                 await E.business_message(message, object())
             resume.assert_not_awaited()
             answer.assert_not_awaited()
-            self.assertEqual(send.await_args.args[2], E.copy.REPLIES_PAUSED)
-            self.assertEqual(send.await_args.args[3].inline_keyboard[0][0].callback_data, 'elena:resume')
+            self.assertEqual(send.await_args.args[2], E.copy.CHAT_PAUSED)
+            self.assertEqual(len(send.await_args.args), 3)
 
     async def test_resume_is_reachable_after_handoff_but_does_not_grant_ai_permission(self):
         row = session(handoff=True, consent=False)
@@ -167,6 +266,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E.store, 'session', AsyncMock(return_value=row)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.store, 'resume', AsyncMock(return_value=session(consent=False))) as resume, \
+             patch.object(E.store, 'offer_consent', AsyncMock(return_value={'tg_id':42})), \
              patch.object(E.store, 'consent', AsyncMock()) as consent, \
              patch.object(E.db, 'set_notifications', AsyncMock()) as notify, \
              patch.object(E.ai, 'configured', return_value=True), \
@@ -177,7 +277,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         consent.assert_not_awaited()
         notify.assert_not_awaited()
         answer.assert_not_awaited()
-        self.assertEqual(send.await_args.args[2], E.copy.CONSENT)
+        self.assertEqual(send.await_args.args[2], E.copy.CHAT_ASK)
 
     async def test_old_consent_button_cannot_override_human_takeover(self):
         row = session(handoff=True, consent=False)
@@ -193,7 +293,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
             await E.callback(cb, object())
         resume.assert_not_awaited()
         consent.assert_not_awaited()
-        self.assertEqual(send.await_args.args[2], E.copy.REPLIES_PAUSED)
+        self.assertEqual(send.await_args.args[2], E.copy.CHAT_PAUSED)
 
     async def test_new_stop_wins_over_a_concurrent_resume(self):
         row = session(handoff=True, consent=True)
@@ -233,6 +333,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E.store, 'session', AsyncMock(return_value=old)), \
              patch.object(E.store, 'incoming', AsyncMock(return_value=old)), \
              patch.object(E.store, 'activate', AsyncMock(return_value=activated)), \
+             patch.object(E.store, 'offer_consent', AsyncMock(return_value={'tg_id':42})), \
              patch.object(E.store, 'save_question', AsyncMock()) as save, \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E, 'confirm_activation', AsyncMock()) as confirm, \
@@ -244,7 +345,8 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         confirm.assert_awaited_once()
         answer.assert_not_awaited()
         self.assertNotIn('123456789', save.await_args.args[-1])
-        self.assertEqual(send.await_args.args[2], E.copy.CONSENT)
+        self.assertIn(E.copy.CHAT_REGISTER, send.await_args.args[2])
+        self.assertIn(E.copy.CHAT_ASK, send.await_args.args[2])
 
     async def test_registration_reply_includes_authoritative_link_and_next_step(self):
         row = session(consent=True, history=[])
@@ -257,12 +359,13 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.ai_answer(object(), 42, data, 'Send the registration link')
             url = E.registration_url(data)
-        text, markup = send.await_args.args[2:]
+        text = send.await_args.args[2]
         self.assertIn('Here are the registration steps.', text)
         self.assertIn('saved-source', text)
         self.assertIn(E.journey.DISCLOSURE, text)
-        self.assertEqual(markup.inline_keyboard[0][0].url, url)
-        self.assertEqual(markup.inline_keyboard[1][0].url, E.link('uid'))
+        self.assertIn(E.escape(url, quote=True), text)
+        self.assertIn(E.link('uid'), text)
+        self.assertEqual(len(send.await_args.args), 3)
 
     async def test_small_talk_reply_does_not_force_setup_menu(self):
         row = session(consent=True, history=[])
@@ -272,9 +375,9 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E.ai, 'reply', AsyncMock(return_value={'reply': 'You’re welcome!', 'action': 'none'})), \
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.ai_answer(object(), 42, user(), 'Thanks')
-        text, markup = send.await_args.args[2:]
+        text = send.await_args.args[2]
         self.assertEqual(text, 'You’re welcome!')
-        self.assertFalse(any(b.url for row in markup.inline_keyboard for b in row))
+        self.assertEqual(len(send.await_args.args), 3)
 
     async def test_help_only_choice_does_not_keep_asking_for_ai(self):
         row = session(consent=False, local_only=True)
@@ -287,7 +390,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.business_message(self.message(), object())
         reply.assert_not_awaited()
-        self.assertNotEqual(send.await_args.args[2], E.copy.CONSENT)
+        self.assertNotIn(E.copy.CHAT_ASK, send.await_args.args[2])
 
     async def test_stop_during_model_request_discards_reply(self):
         row = session(consent=True, history=[])
@@ -316,8 +419,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.ai_answer(object(), 42, user(), 'help')
         speech.assert_not_awaited()
-        markup = send.await_args.args[3]
-        self.assertTrue(any((b.callback_data or '').startswith('elena:voice:') for row in markup.inline_keyboard for b in row))
+        self.assertEqual(len(send.await_args.args), 3, 'Voice is requested with /voice, never a routine button')
 
     async def test_duplicate_voice_or_old_reply_never_calls_provider(self):
         with patch.object(E.store, 'claim_voice', AsyncMock(return_value=None)), \
