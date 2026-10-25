@@ -214,6 +214,26 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(E.copy.CHAT_EXISTING, text)
         self.assertNotIn('Registration Link', text)
 
+    def test_registration_and_bot_link_questions_include_required_link_and_disclosure(self):
+        with patch.object(E.config, 'REF_LINK', 'https://pocketoption.com/?a=test'):
+            for value in ('How do I register?', 'Must I use your bot link?', 'Send the referral link'):
+                with self.subTest(value=value):
+                    text = E.basic_answer(user(account_kind='new'), value)
+                    self.assertIn(E.copy.CHAT_REGISTER, text)
+                    self.assertIn(E.escape(E.registration_url(user(account_kind='new')), quote=True), text)
+                    self.assertIn(E.journey.DISCLOSURE, text)
+                    self.assertIn('Registration alone does not unlock full access.', text)
+
+    def test_existing_account_explanation_keeps_link_requirement_without_duplicate_signup(self):
+        for current, value in ((user(account_kind='existing'), 'Must I use the bot link?'),
+                               (user(account_kind='new'), 'I already have an account')):
+            with self.subTest(value=value):
+                text = E.basic_answer(current, value)
+                self.assertIn(E.copy.CHAT_EXISTING, text)
+                self.assertIn('contact Pocket Option support', text)
+                self.assertNotIn('Registration Link', text)
+        self.assertEqual(E.basic_answer(user(account_kind='existing'), 'hi'), E.copy.HELLO)
+
     async def test_first_message_goes_directly_to_ai_without_permission_prompt(self):
         row = session(consent=False)
         with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \

@@ -141,7 +141,7 @@ def basic_answer(user, value):
         return chat_text(user, copy.HELLO)
     if re.fullmatch(r'(thanks|thank you|ty|gracias|спасибо|धन्यवाद|شکریہ|obrigad[oa])[!?. ]*', value):
         return chat_text(user, copy.THANKS)
-    if re.search(r'regist|sign.?up|create.{0,12}account|account.{0,12}(create|ban)|रजिस|পঞ্জ|নিবন্ধ|رجس|đăng ký|daftar|kayıt|регистр|реєстр|تسجيل', value):
+    if re.search(r'regist|sign.?up|create.{0,12}account|account.{0,12}(create|ban)|(?:bot|referral).{0,16}link|already.{0,16}account|existing.{0,8}account|रजिस|পঞ্জ|নিবন্ধ|رجس|đăng ký|daftar|kayıt|регистр|реєстр|تسجيل', value):
         existing = user.get('account_kind') == 'existing' or bool(re.search(r'already|existing|second account|duplicate', value))
         return chat_text(user, copy.CHAT_EXISTING if existing else copy.CHAT_REGISTER,
                          'uid' if existing else 'register')
