@@ -177,7 +177,7 @@ async def resume_chat(bot, tg_id, user, session):
 
 async def paused_reply(bot, tg_id, language):
     await send_business(bot, tg_id, copy.text(copy.CHAT_PAUSED, language))
-    logging.info('Elena reply paused; explicit resume offered')
+    logging.info('Elena stale help button; a new message can continue the chat')
 
 
 async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True, requires_ai=False):
@@ -422,11 +422,15 @@ async def business_message(message, bot):
             await resume_chat(bot, tg_id, user, session)
             return
         if session['stopped'] or session['handoff']:
-            if value:
-                # A new greeting is not permission to undo Stop or interrupt a
-                # human operator. Explain the pause and provide an explicit exit.
-                await paused_reply(bot, tg_id, user.get('language', 'en'))
-            return
+            if not value:
+                return
+            # A fresh customer message reopens conversation and is itself the
+            # question to answer. Do not require a command or send a placeholder.
+            # A newer Stop/operator event still wins through the revision check.
+            session = await store.resume(tg_id, session['revision'])
+            if not session:
+                return
+            logging.info('Elena conversation reopened by a new customer message')
         if command == '/ai':
             if ai.configured():
                 await allow_ai(bot, tg_id, user)

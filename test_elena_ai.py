@@ -248,24 +248,80 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         consent.assert_awaited_once_with(42)
         self.assertEqual(answer.await_args.args[-1], 'Registration fails.')
 
-    async def test_hi_during_handoff_or_stop_gets_resume_without_ai_or_state_change(self):
+    async def test_new_question_reopens_paused_chat_and_answers_without_resume_or_approval(self):
         for flag in ('handoff', 'stopped'):
-            row = session(consent=False, **{flag: True})
-            message = self.message()
-            message.text = 'hi'
-            with self.subTest(flag=flag), \
-                 patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
-                 patch.object(E.store, 'session', AsyncMock(return_value=row)), \
-                 patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
-                 patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
-                 patch.object(E.store, 'resume', AsyncMock()) as resume, \
-                 patch.object(E, 'ai_answer', AsyncMock()) as answer, \
-                 patch.object(E, 'send_business', AsyncMock()) as send:
-                await E.business_message(message, object())
-            resume.assert_not_awaited()
-            answer.assert_not_awaited()
-            self.assertEqual(send.await_args.args[2], E.copy.CHAT_PAUSED)
-            self.assertEqual(len(send.await_args.args), 3)
+            for value in ('hi', 'How do I register?'):
+                row = session(consent=False, **{flag: True})
+                current = user()
+                message = self.message()
+                message.text = value
+                with self.subTest(flag=flag, value=value), \
+                     patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+                     patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+                     patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+                     patch.object(E.db, 'get_user', AsyncMock(return_value=current)), \
+                     patch.object(E.store, 'resume', AsyncMock(return_value=session(consent=False, revision=2))) as resume, \
+                     patch.object(E.store, 'consent', AsyncMock()) as consent, \
+                     patch.object(E.store, 'offer_consent', AsyncMock()) as offer, \
+                     patch.object(E.db, 'set_notifications', AsyncMock()) as notify, \
+                     patch.object(E.ai, 'configured', return_value=True), \
+                     patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+                     patch.object(E, 'send_business', AsyncMock()) as send:
+                    await E.business_message(message, object())
+                resume.assert_awaited_once_with(42, row['revision'])
+                self.assertEqual(answer.await_args.args[-2:], (current, value))
+                consent.assert_not_awaited()
+                offer.assert_not_awaited()
+                notify.assert_not_awaited()
+                send.assert_not_awaited()
+
+    async def test_reopened_local_only_chat_answers_without_enabling_ai(self):
+        row = session(stopped=True, local_only=True)
+        message = self.message()
+        message.text = 'hi'
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'resume', AsyncMock(return_value=session(local_only=True, revision=2))), \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_chat_reply', AsyncMock()) as send:
+            await E.business_message(message, object())
+        answer.assert_not_awaited()
+        self.assertEqual(send.await_args.args[2], E.copy.HELLO)
+        self.assertEqual(send.await_args.kwargs['revision'], 2)
+
+    async def test_new_stop_or_operator_event_wins_over_automatic_reopening(self):
+        row = session(handoff=True)
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'resume', AsyncMock(return_value=None)) as resume, \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.business_message(self.message(), object())
+        resume.assert_awaited_once_with(42, row['revision'])
+        answer.assert_not_awaited()
+        send.assert_not_awaited()
+
+    async def test_stop_message_is_acknowledged_without_reopening_or_resume_instructions(self):
+        message = self.message()
+        message.text = 'stop'
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'pause', AsyncMock()) as pause, \
+             patch.object(E.store, 'resume', AsyncMock()) as resume, \
+             patch.object(E.db, 'set_notifications', AsyncMock()) as notify, \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.business_message(message, object())
+        pause.assert_awaited_once_with(42, stopped=True, handoff=False)
+        notify.assert_awaited_once_with(42, False)
+        resume.assert_not_awaited()
+        answer.assert_not_awaited()
+        self.assertNotIn('/resume', send.await_args.args[2])
+        self.assertIn(E.copy.REOPEN, send.await_args.args[2])
 
     async def test_resume_returns_greeting_without_permission_step_or_fabricated_consent(self):
         row = session(handoff=True, consent=False)
