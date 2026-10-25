@@ -210,20 +210,22 @@ async def take_question(tg_id):
 
 
 async def claim_ai(tg_id):
+    # Direct replies are owner-enabled. Keep historical consent unchanged and
+    # respect explicit local-only, Stop and human-handoff preferences.
     return await one("""UPDATE elena_sessions SET
         ai_count=CASE WHEN ai_day=CURRENT_DATE THEN ai_count+1 ELSE 1 END,
         voice_count=CASE WHEN ai_day=CURRENT_DATE THEN voice_count ELSE 0 END,
         history=CASE WHEN memory_since IS NULL OR memory_since<now()-interval '1 day' THEN '[]'::jsonb ELSE history END,
         memory_since=CASE WHEN memory_since IS NULL OR memory_since<now()-interval '1 day' THEN now() ELSE memory_since END,
         ai_day=CURRENT_DATE,last_ai_at=now()
-        WHERE tg_id=$1 AND consent AND NOT stopped AND NOT handoff
+        WHERE tg_id=$1 AND NOT local_only AND NOT stopped AND NOT handoff
         AND (ai_day IS DISTINCT FROM CURRENT_DATE OR ai_count<40) RETURNING *""", tg_id)
 
 
 async def remember(tg_id, revision, history, reply, nonce):
     return await one("""UPDATE elena_sessions SET history=$3::jsonb,reply_text=$4,
         reply_nonce=$5,voice_sent=FALSE,updated_at=now()
-        WHERE tg_id=$1 AND revision=$2 AND consent AND NOT stopped AND NOT handoff
+        WHERE tg_id=$1 AND revision=$2 AND NOT local_only AND NOT stopped AND NOT handoff
         RETURNING tg_id""", tg_id, revision, json.dumps(history[-8:], ensure_ascii=False), reply, nonce)
 
 
@@ -232,7 +234,7 @@ async def claim_voice(tg_id, nonce):
     return await one("""UPDATE elena_sessions SET voice_sent=TRUE,voice=TRUE,
         voice_count=CASE WHEN ai_day=CURRENT_DATE THEN voice_count+1 ELSE 1 END,
         ai_count=CASE WHEN ai_day=CURRENT_DATE THEN ai_count ELSE 0 END,ai_day=CURRENT_DATE
-        WHERE tg_id=$1 AND reply_nonce=$2 AND reply_text IS NOT NULL AND consent
+        WHERE tg_id=$1 AND reply_nonce=$2 AND reply_text IS NOT NULL AND NOT local_only
         AND NOT stopped AND NOT handoff AND NOT voice_sent
         AND (ai_day IS DISTINCT FROM CURRENT_DATE OR voice_count<5) RETURNING *""", tg_id, nonce)
 

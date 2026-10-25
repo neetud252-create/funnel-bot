@@ -1,4 +1,4 @@
-"""Model, consent and voice boundaries, entirely offline."""
+"""Direct replies, opt-outs, legacy consent and voice boundaries, entirely offline."""
 import json
 import os
 import types
@@ -16,14 +16,14 @@ def response(reply='You can check your account using the button below.', action=
 
 
 class AIClientTests(unittest.IsolatedAsyncioTestCase):
-    async def test_no_request_before_consent_or_without_key(self):
+    async def test_no_request_without_caller_authorization_or_key(self):
         calls = []
         transport = httpx.MockTransport(lambda request: calls.append(request))
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test'}):
             self.assertIsNone(await E.ai.reply(user(), 'hello', [], transport=transport))
             self.assertIsNone(await E.ai.speech('hello', transport=transport))
         with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
-            self.assertIsNone(await E.ai.reply(user(), 'hello', [], consented=True, transport=transport))
+            self.assertIsNone(await E.ai.reply(user(), 'hello', [], authorized=True, transport=transport))
         self.assertEqual(calls, [])
 
     async def test_request_is_bounded_redacted_and_has_no_identity_fields(self):
@@ -35,7 +35,7 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test'}):
             result = await E.ai.reply(data, 'My ID 123456789, Telegram 42, @privatecustomer, email me a@b.com',
                 [{'role': 'user', 'content': 'Old id 123 456 789'}] * 30,
-                consented=True, transport=httpx.MockTransport(handler))
+                authorized=True, transport=httpx.MockTransport(handler))
         self.assertEqual(result['action'], 'recheck')
         payload = requests[0]
         self.assertFalse(payload['store'])
@@ -56,7 +56,7 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
         for data in (response(action='grant_access'), response(reply='Go https://evil.example'),
                      response(reply='<b>Deposit</b>'), {'status': 'incomplete', 'output': []}):
             with patch.dict(os.environ, {'OPENAI_API_KEY': 'test'}):
-                actual = await E.ai.reply(user(), 'help', [], consented=True,
+                actual = await E.ai.reply(user(), 'help', [], authorized=True,
                     transport=httpx.MockTransport(lambda request: httpx.Response(200, json=data)))
             self.assertIsNone(actual)
 
@@ -73,7 +73,7 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
                 result = await E.ai.reply(user(ref_code='private-attribution'), 'How do I register?',
                     [{'role': 'assistant', 'content': 'Do you already have an account?'},
                      {'role': 'user', 'content': 'No, this is my first account.'}],
-                    consented=True, transport=httpx.MockTransport(handler))
+                    authorized=True, transport=httpx.MockTransport(handler))
             self.assertEqual(result, {'reply': answer, 'action': action})
         facts = json.loads(requests[-1]['instructions'].split('Verified context:\n')[1])
         self.assertTrue(facts['registration_link_available'])
@@ -84,7 +84,7 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_model_failure_uses_no_raw_response(self):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test'}):
-            actual = await E.ai.reply(user(), 'help', [], consented=True,
+            actual = await E.ai.reply(user(), 'help', [], authorized=True,
                 transport=httpx.MockTransport(lambda request: httpx.Response(429, text='secret failed')))
         self.assertIsNone(actual)
 
@@ -94,7 +94,7 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
             calls.append((str(request.url), json.loads(request.content)))
             return httpx.Response(200, content=b'mocked-audio', headers={'content-type': 'audio/mpeg'})
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test'}):
-            data = await E.ai.speech('Hello', consented=True, transport=httpx.MockTransport(handler))
+            data = await E.ai.speech('Hello', authorized=True, transport=httpx.MockTransport(handler))
         self.assertEqual(data, b'mocked-audio')
         self.assertEqual(calls[0][0], 'https://api.openai.com/v1/audio/speech')
         self.assertEqual(calls[0][1]['input'], 'Hello')
@@ -107,35 +107,40 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
             from_user=types.SimpleNamespace(id=42), business_connection_id='business-test',
             sender_business_bot=None, via_bot=None, is_from_offline=False, message_id=7, text='help')
 
-    async def test_greeting_then_registration_answers_each_question_and_offers_ai_once(self):
-        row = session(consent=False, consent_prompted_at=None)
+    async def test_greeting_then_registration_calls_ai_directly_without_approval(self):
+        row = session(consent=False, consent_prompted_at=None, history=[])
         with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.store, 'session', AsyncMock(return_value=row)), \
              patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user(account_kind='new'))), \
              patch.object(E.ai, 'configured', return_value=True), \
-             patch.object(E.ai, 'reply', AsyncMock()) as model, \
-             patch.object(E.store, 'offer_consent', AsyncMock(side_effect=[{'tg_id':42}, None])), \
-             patch.object(E.store, 'save_question', AsyncMock()), \
+             patch.object(E.ai, 'reply', AsyncMock(side_effect=[
+                 {'reply': 'Hi! How can I help you?', 'action': 'none'},
+                 {'reply': 'Open the registration link, complete the form, then submit your Trader ID in Pocket IQ.', 'action': 'register'}])) as model, \
+             patch.object(E.store, 'claim_ai', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'remember', AsyncMock(return_value={'tg_id':42})), \
+             patch.object(E.store, 'offer_consent', AsyncMock()) as offer, \
+             patch.object(E.store, 'consent', AsyncMock()) as consent, \
              patch.object(E.config, 'REF_LINK', 'https://pocketoption.com/?a=test'), \
              patch.object(E, 'send_business', AsyncMock()) as send:
             message = self.message()
             message.text = 'hi'
             await E.business_message(message, object())
-            self.assertTrue(send.await_args.args[2].startswith(E.copy.HELLO))
-            self.assertIn(E.copy.CHAT_ASK, send.await_args.args[2])
+            self.assertEqual(send.await_args.args[2], 'Hi! How can I help you?')
             message.text = 'how i register in the bot'
             await E.business_message(message, object())
-        model.assert_not_awaited()
+        self.assertEqual(model.await_count, 2)
+        offer.assert_not_awaited()
+        consent.assert_not_awaited()  # Do not fabricate historical user approval.
         answer = send.await_args.args[2]
-        self.assertIn(E.copy.CHAT_REGISTER, answer)
+        self.assertIn('complete the form', answer)
         self.assertIn('https://pocketoption.com', answer)
         self.assertNotIn(E.copy.CHAT_ASK, answer)
         self.assertNotIn(E.copy.CONSENT, answer)
         self.assertLess(len(answer.split()), 85)
         self.assertTrue(all(len(call.args) == 3 for call in send.await_args_list))
 
-    async def test_typed_yes_requires_previous_offer_and_answers_the_saved_question(self):
+    async def test_legacy_yes_answers_saved_question_but_new_yes_is_conversation(self):
         for prompted in (None, E.datetime.now(E.timezone.utc)):
             row = session(consent=False, consent_prompted_at=prompted)
             message = self.message()
@@ -158,7 +163,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(answer.await_args.args[-1], 'How do I register?')
             else:
                 consent.assert_not_awaited()
-                answer.assert_not_awaited()
+                self.assertEqual(answer.await_args.args[-1], 'YES')
 
     async def test_typed_no_declines_ai_without_losing_basic_help(self):
         row = session(consent=False, consent_prompted_at=E.datetime.now(E.timezone.utc))
@@ -176,8 +181,8 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         answer.assert_not_awaited()
         self.assertEqual(send.await_args.args[2], E.copy.CHAT_BASIC)
 
-    async def test_voice_command_uses_latest_reply_without_button(self):
-        row = session(consent=True, reply_nonce='latest')
+    async def test_voice_command_uses_latest_reply_without_approval_or_button(self):
+        row = session(consent=False, reply_nonce='latest')
         message = self.message()
         message.text = '/voice'
         with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
@@ -203,23 +208,22 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(E.copy.CHAT_EXISTING, text)
         self.assertNotIn('Registration Link', text)
 
-    async def test_first_message_requests_customer_consent_without_model_call(self):
+    async def test_first_message_goes_directly_to_ai_without_permission_prompt(self):
         row = session(consent=False)
         with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.store, 'session', AsyncMock(return_value=row)), \
              patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.ai, 'configured', return_value=True), \
-             patch.object(E.ai, 'reply', AsyncMock()) as reply, \
-             patch.object(E.store, 'offer_consent', AsyncMock(return_value={'tg_id':42})), \
+             patch.object(E, 'ai_answer', AsyncMock()) as reply, \
+             patch.object(E.store, 'offer_consent', AsyncMock()) as offer, \
              patch.object(E.store, 'save_question', AsyncMock()) as save, \
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.business_message(self.message(), object())
-        reply.assert_not_awaited()
-        self.assertIn(E.copy.CHAT_HELP, send.await_args.args[2])
-        self.assertIn(E.copy.CHAT_ASK, send.await_args.args[2])
-        self.assertEqual(len(send.await_args.args), 3)
-        save.assert_awaited_once_with(42, row['revision'], 'help')
+        self.assertEqual(reply.await_args.args[-1], 'help')
+        offer.assert_not_awaited()
+        save.assert_not_awaited()
+        send.assert_not_awaited()
 
     async def test_allow_ai_answers_saved_question_without_retyping(self):
         row = session(consent=False)
@@ -257,7 +261,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(send.await_args.args[2], E.copy.CHAT_PAUSED)
             self.assertEqual(len(send.await_args.args), 3)
 
-    async def test_resume_is_reachable_after_handoff_but_does_not_grant_ai_permission(self):
+    async def test_resume_returns_greeting_without_permission_step_or_fabricated_consent(self):
         row = session(handoff=True, consent=False)
         cb = types.SimpleNamespace(message=types.SimpleNamespace(
                 chat=types.SimpleNamespace(id=42, type='private'), business_connection_id='business-test'),
@@ -277,7 +281,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         consent.assert_not_awaited()
         notify.assert_not_awaited()
         answer.assert_not_awaited()
-        self.assertEqual(send.await_args.args[2], E.copy.CHAT_ASK)
+        self.assertEqual(send.await_args.args[2], E.copy.HELLO)
 
     async def test_old_consent_button_cannot_override_human_takeover(self):
         row = session(handoff=True, consent=False)
@@ -308,8 +312,8 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
             await E.callback(cb, object())
         send.assert_not_awaited()
 
-    async def test_each_consented_message_reaches_ai_with_current_user_context(self):
-        row = session(consent=True)
+    async def test_each_message_reaches_ai_with_current_user_context_without_approval(self):
+        row = session(consent=False)
         current = user(language='hi')
         with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.store, 'session', AsyncMock(return_value=row)), \
@@ -324,7 +328,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(answer.await_args.args[-2:], (current, value))
         self.assertEqual(answer.await_count, 4)
 
-    async def test_question_sent_during_activation_survives_until_consent(self):
+    async def test_question_during_activation_is_answered_immediately(self):
         old = session(activated_at=None, consent=False)
         activated = session(consent=False)
         message = self.message()
@@ -343,10 +347,9 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.business_message(message, object())
         confirm.assert_awaited_once()
-        answer.assert_not_awaited()
-        self.assertNotIn('123456789', save.await_args.args[-1])
-        self.assertIn(E.copy.CHAT_REGISTER, send.await_args.args[2])
-        self.assertIn(E.copy.CHAT_ASK, send.await_args.args[2])
+        self.assertEqual(answer.await_args.args[-1], message.text)
+        save.assert_not_awaited()
+        send.assert_not_awaited()
 
     async def test_registration_reply_includes_authoritative_link_and_next_step(self):
         row = session(consent=True, history=[])
@@ -397,6 +400,31 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(E.store, 'claim_ai', AsyncMock(return_value=row)), \
              patch.object(E.store, 'session', AsyncMock(return_value=dict(row, stopped=True, revision=2))), \
              patch.object(E.ai, 'reply', AsyncMock(return_value={'reply': 'hello', 'action': 'uid'})), \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.ai_answer(object(), 42, user(), 'help')
+        send.assert_not_awaited()
+
+    async def test_basic_command_opts_out_without_a_confirmation_step(self):
+        row = session(consent=False)
+        message = self.message()
+        message.text = '/basic'
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'local_only', AsyncMock()) as local, \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.business_message(message, object())
+        local.assert_awaited_once_with(42)
+        answer.assert_not_awaited()
+        self.assertEqual(send.await_args.args[2], E.copy.CHAT_BASIC)
+
+    async def test_local_only_during_model_request_discards_reply(self):
+        row = session(consent=False, history=[])
+        with patch.object(E.store, 'claim_ai', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=dict(row, local_only=True))), \
+             patch.object(E.ai, 'reply', AsyncMock(return_value={'reply': 'hello', 'action': 'none'})), \
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.ai_answer(object(), 42, user(), 'help')
         send.assert_not_awaited()

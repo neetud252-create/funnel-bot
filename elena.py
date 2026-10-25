@@ -1,7 +1,7 @@
 """Pocket IQ -> Elena Business connection, contextual help and durable reminders.
 
 Only @elitecsupport may attach. A different chat/account cannot select another
-customer by UID. AI conversation requires explicit customer opt-in.
+customer by UID. Owner-enabled AI conversation respects customer opt-outs.
 """
 import asyncio
 import logging
@@ -134,7 +134,7 @@ def chat_text(user, body, action='none', *, generated=False):
 
 
 def basic_answer(user, value):
-    """Useful local help before consent or during provider failure; no model call."""
+    """Local help for opted-out chats or provider failure; no model call."""
     value = (value or '').strip().casefold()
     if re.fullmatch(r'(hi|hey|hello|hii+|hola|привет|नमस्ते|مرحبا|oi|হাই|سلام|xin chào)(\s+el[ei]na)?[!?. 👋]*', value):
         return chat_text(user, copy.HELLO)
@@ -155,11 +155,6 @@ def basic_answer(user, value):
     return chat_text(user, copy.CHAT_HELP)
 
 
-async def ask_consent(bot, tg_id, user, session, *, explicit=False):
-    if await store.offer_consent(tg_id, session['revision'], explicit=explicit):
-        await send_business(bot, tg_id, copy.text(copy.CHAT_ASK, user.get('language', 'en')))
-
-
 async def allow_ai(bot, tg_id, user):
     if not await store.consent(tg_id):
         return  # A concurrent Stop/operator takeover must not be undone by consent.
@@ -176,10 +171,7 @@ async def resume_chat(bot, tg_id, user, session):
         if not session:
             return
         logging.info('Elena automatic replies resumed by customer')
-    if not session.get('consent') and not session.get('local_only') and ai.configured():
-        await ask_consent(bot, tg_id, user, session, explicit=True)
-    else:
-        await send_business(bot, tg_id, copy.text(copy.HELLO, user.get('language', 'en')))
+    await send_business(bot, tg_id, copy.text(copy.HELLO, user.get('language', 'en')))
 
 
 async def paused_reply(bot, tg_id, language):
@@ -196,9 +188,9 @@ async def ai_answer(bot, tg_id, user, value):
     history = claimed['history']
     if isinstance(history, str):
         history = json.loads(history)
-    result = await ai.reply(user, value, history, consented=True)
+    result = await ai.reply(user, value, history, authorized=True)
     latest = await store.session(tg_id)
-    if not latest or latest['revision'] != claimed['revision'] or latest['stopped'] or latest['handoff'] or not latest['consent']:
+    if not latest or latest['revision'] != claimed['revision'] or latest['stopped'] or latest['handoff'] or latest.get('local_only'):
         return
     if not result:
         await send_business(bot, tg_id, copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + basic_answer(user, value))
@@ -225,10 +217,10 @@ async def voice_reply(bot, tg_id, nonce, language):
     claimed = await store.claim_voice(tg_id, nonce)
     if not claimed:
         return
-    audio = await ai.speech(claimed['reply_text'], consented=True)
+    audio = await ai.speech(claimed['reply_text'], authorized=True)
     latest = await store.session(tg_id)
     connection = await active_connection(bot)
-    if not latest or latest['stopped'] or latest['handoff'] or not latest['consent'] or latest['reply_nonce'] != nonce:
+    if not latest or latest['stopped'] or latest['handoff'] or latest.get('local_only') or latest['reply_nonce'] != nonce:
         return
     if not business_window(latest, connection):
         return
@@ -389,13 +381,17 @@ async def business_message(message, bot):
                 await paused_reply(bot, tg_id, user.get('language', 'en'))
             return
         if command == '/ai':
-            if session.get('consent'):
-                await send_business(bot, tg_id, copy.text(copy.HELLO, language))
-            elif ai.configured():
-                await ask_consent(bot, tg_id, user, session, explicit=True)
+            if ai.configured():
+                await allow_ai(bot, tg_id, user)
             else:
                 await send_business(bot, tg_id, copy.text(copy.CHAT_UNAVAILABLE, language))
             return
+        if command == '/basic':
+            await store.local_only(tg_id)
+            await send_business(bot, tg_id, copy.text(copy.CHAT_BASIC, language))
+            return
+        # Honor answers to permission offers sent by the previous release.
+        # New conversations never send an offer or require YES/NO.
         if not session.get('consent') and session.get('consent_prompted_at'):
             if command in ('yes', 'allow ai', 'да', 'так', 'हाँ', 'हां', 'হ্যাঁ', 'جی', 'ہاں', 'có', 'ya', 'evet', 'sí', 'si', 'نعم', 'sim'):
                 await allow_ai(bot, tg_id, user)
@@ -405,26 +401,16 @@ async def business_message(message, bot):
                 await send_business(bot, tg_id, copy.text(copy.CHAT_BASIC, language))
                 return
         if command == '/voice':
-            if session.get('consent') and session.get('reply_nonce'):
+            if not session.get('local_only') and session.get('reply_nonce'):
                 await voice_reply(bot, tg_id, session['reply_nonce'], language)
             else:
                 await send_business(bot, tg_id, copy.text(copy.CHAT_VOICE, language))
-            return
-        if not session.get('consent') and not session.get('local_only') and ai.configured():
-            if value:
-                await store.save_question(tg_id, session['revision'], ai.private_text(user, value))
-            # Answer basic questions immediately. The short AI offer is shown
-            # once, not replayed instead of an answer on every incoming message.
-            text = basic_answer(user, value)
-            if await store.offer_consent(tg_id, session['revision']):
-                text += '\n\n' + copy.text(copy.CHAT_ASK, language)
-            await send_business(bot, tg_id, text)
             return
         reason = reason_for(user) or 'ready'
         if reason == 'deposit':
             user = await refresh(tg_id)
             reason = reason_for(user) or 'ready'
-        if value and session.get('consent') and ai.configured():
+        if value and not session.get('local_only') and ai.configured():
             await ai_answer(bot, tg_id, user, value)
         else:
             await send_business(bot, tg_id, basic_answer(user, value))
@@ -434,7 +420,9 @@ async def confirm_activation(bot, tg_id, user):
     # This response to the new activation message does not resume marketing
     # reminders, revoke human handoff, or grant OpenAI consent.
     try:
-        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, user.get('language', 'en')))
+        language = user.get('language', 'en')
+        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, language)
+                            + '\n\n' + copy.text(copy.CHAT_NOTICE, language))
     except Exception as exc:
         logging.warning('Activation confirmation unavailable (%s)', type(exc).__name__)
 
@@ -509,7 +497,7 @@ async def callback(cb, bot):
                       'uid': copy.CHAT_UID, 'deposit': copy.CHAT_PAYMENT}.get(reason, copy.CHAT_HELP)
             text = chat_text(user, source, 'signals' if reason == 'ready' else 'setup')
         else:
-            if action == 'account' and session.get('consent') and ai.configured():
+            if action == 'account' and not session.get('local_only') and ai.configured():
                 await ai_answer(bot, tg_id, user, 'Help me set up my account. Explain the registration steps and how to submit my Trader ID.')
                 return
             sources = {'uid': copy.CHAT_UID, 'account': copy.CHAT_REGISTER,
@@ -540,7 +528,7 @@ async def status_command(message):
     await message.answer('Elena account: @' + USERNAME + '\nTelegram connection: '
         + ('connected' if ready else 'not connected')
         + '\nContextual help and timers: installed'
-        + '\nAI replies: ' + ('configured; customer opt-in required' if ai.configured() else 'OPENAI_API_KEY missing')
+        + '\nAI replies: ' + ('configured; direct replies enabled' if ai.configured() else 'OPENAI_API_KEY missing')
         + '\nVoice: optional /voice command; AI-generated'
         + '\nConnect Pocket IQ in Elena’s Telegram Settings > Chat Automation.'
         + '\nUsers must message Elena before she can reply from that account.'

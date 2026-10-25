@@ -1,4 +1,4 @@
-"""Owner-authorized OpenAI support. Every call also requires customer opt-in."""
+"""Owner-authorized OpenAI support; callers enforce customer opt-outs."""
 import asyncio
 import json
 import logging
@@ -20,6 +20,7 @@ INSTRUCTIONS = """You are Elena, Pocket IQ's personal assistant, powered by AI.
 Write like a thoughtful support conversation: warm, natural and specific. Never
 claim to be human or invent personal experiences. Do not repeat your introduction,
 an AI disclaimer, or a menu on every reply; answer honestly if asked who you are.
+The chat is already enabled. Never ask for YES/NO approval to answer a question.
 Read the recent conversation, answer the latest question directly, and do not ask
 for details already supplied. For greetings, thanks and short follow-ups, respond
 naturally and choose action none when no link is needed. Do not treat every
@@ -123,8 +124,8 @@ def private_text(user, value):
     return redact(value)
 
 
-async def reply(user, text, history, *, consented=False, transport=None):
-    if not consented or not configured():
+async def reply(user, text, history, *, authorized=False, transport=None):
+    if not authorized or not configured():
         return None
     messages = [{'role': m['role'], 'content': private_text(user, m['content'])}
                 for m in history[-6:] if m.get('role') in ('user', 'assistant')]
@@ -158,8 +159,8 @@ async def reply(user, text, history, *, consented=False, transport=None):
         return None  # No raw messages, responses or credential-bearing errors in logs.
 
 
-async def speech(text, *, consented=False, transport=None):
-    if not consented or not configured() or not text:
+async def speech(text, *, authorized=False, transport=None):
+    if not authorized or not configured() or not text:
         return None
     try:
         async with asyncio.timeout(25), LIMIT:
