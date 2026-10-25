@@ -26,6 +26,7 @@ import elena_store as store
 import elena_ai as ai
 import activation
 from activation import USERNAME, BOT_USERNAME
+from elena_timing import ReplyTiming
 
 LOCK_ID = 8790198820
 _locks = weakref.WeakValueDictionary()
@@ -179,21 +180,64 @@ async def paused_reply(bot, tg_id, language):
     logging.info('Elena reply paused; explicit resume offered')
 
 
-async def ai_answer(bot, tg_id, user, value):
-    claimed = await store.claim_ai(tg_id)
-    language = user.get('language', 'en')
-    if not claimed:
-        await send_business(bot, tg_id, copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + basic_answer(user, value))
+async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True, requires_ai=False):
+    """Pace ordinary conversation; recheck Stop/takeover after the wait."""
+    try:
+        remaining = timing.remaining()
+        if remaining <= 0:
+            return False
+        async with asyncio.timeout(remaining):
+            await timing.wait()
+            if guard:
+                latest = await store.session(tg_id)
+                if (not latest or latest['stopped'] or latest['handoff']
+                        or (revision is not None and latest['revision'] != revision)
+                        or (requires_ai and latest.get('local_only'))):
+                    return False
+            # Includes Telegram permission checks and delivery. Never retry an
+            # uncertain send, which could produce a duplicate customer message.
+            return await send_business(bot, tg_id, text)
+    except TimeoutError:
+        logging.warning('Elena chat reply deadline reached; no duplicate retry')
+        return False
+
+
+async def ai_answer(bot, tg_id, user, value, *, timing=None):
+    timing = timing or ReplyTiming.start()
+    remaining = timing.remaining()
+    if remaining <= 0:
         return
-    history = claimed['history']
-    if isinstance(history, str):
-        history = json.loads(history)
-    result = await ai.reply(user, value, history, authorized=True)
+    try:
+        async with asyncio.timeout(remaining):
+            await _ai_answer(bot, tg_id, user, value, timing)
+    except TimeoutError:
+        logging.warning('Elena chat reply deadline reached; no duplicate retry')
+
+
+async def _ai_answer(bot, tg_id, user, value, timing):
+    claimed, result, history = None, None, []
+    language = user.get('language', 'en')
+    processing = timing.processing_remaining()
+    if processing > 0:
+        try:
+            async with asyncio.timeout(processing):
+                claimed = await store.claim_ai(tg_id)
+                if claimed:
+                    history = claimed['history']
+                    if isinstance(history, str):
+                        history = json.loads(history)
+                    # Also bounds time waiting for the shared model semaphore.
+                    result = await ai.reply(user, value, history, authorized=True)
+        except TimeoutError:
+            logging.info('Elena AI time budget reached; using local help')
     latest = await store.session(tg_id)
-    if not latest or latest['revision'] != claimed['revision'] or latest['stopped'] or latest['handoff'] or latest.get('local_only'):
+    if (not latest or (claimed and latest['revision'] != claimed['revision'])
+            or latest['stopped'] or latest['handoff'] or latest.get('local_only')):
         return
     if not result:
-        await send_business(bot, tg_id, copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + basic_answer(user, value))
+        await send_chat_reply(bot, tg_id,
+            copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + basic_answer(user, value),
+            timing, revision=latest['revision'], requires_ai=True)
         return
     action = result['action']
     if action in ('stop', 'later', 'support'):
@@ -201,15 +245,17 @@ async def ai_answer(bot, tg_id, user, value):
         if action == 'stop':
             await db.set_notifications(tg_id, False)
         suffix = {'stop': copy.STOPPED, 'later': copy.PAUSED, 'support': copy.HUMAN}[action]
-        await send_business(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language)
-                            + ('\n\n' + copy.text(copy.CHAT_PAUSED, language) if action in ('stop', 'support') else ''))
+        await send_chat_reply(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language)
+                            + ('\n\n' + copy.text(copy.CHAT_PAUSED, language) if action in ('stop', 'support') else ''),
+                            timing, guard=False)
         return
     nonce = secrets.token_hex(4)
     history += [{'role': 'user', 'content': ai.private_text(user, value)},
                 {'role': 'assistant', 'content': ai.private_text(user, result['reply'])}]
     if not await store.remember(tg_id, claimed['revision'], history, result['reply'], nonce):
         return
-    if await send_business(bot, tg_id, chat_text(user, result['reply'], action, generated=True)):
+    if await send_chat_reply(bot, tg_id, chat_text(user, result['reply'], action, generated=True),
+                             timing, revision=claimed['revision'], requires_ai=True):
         logging.info('Elena AI reply delivered; action=%s', action)
 
 
@@ -306,6 +352,7 @@ async def connection_changed(event):
 
 
 async def business_message(message, bot):
+    timing = ReplyTiming.start()
     if not enabled() or message.chat.type != 'private' or not message.from_user:
         return
     if message.sender_business_bot or message.via_bot or message.is_from_offline:
@@ -407,13 +454,17 @@ async def business_message(message, bot):
                 await send_business(bot, tg_id, copy.text(copy.CHAT_VOICE, language))
             return
         reason = reason_for(user) or 'ready'
-        if reason == 'deposit':
-            user = await refresh(tg_id)
-            reason = reason_for(user) or 'ready'
+        if reason == 'deposit' and timing.processing_remaining() > 0:
+            try:
+                # A slow broker lookup must not consume the conversation budget.
+                async with asyncio.timeout(min(1.5, timing.processing_remaining())):
+                    user = await refresh(tg_id)
+            except TimeoutError:
+                logging.info('Elena quick status lookup timed out; using saved status')
         if value and not session.get('local_only') and ai.configured():
-            await ai_answer(bot, tg_id, user, value)
+            await ai_answer(bot, tg_id, user, value, timing=timing)
         else:
-            await send_business(bot, tg_id, basic_answer(user, value))
+            await send_chat_reply(bot, tg_id, basic_answer(user, value), timing, revision=session['revision'])
 
 
 async def confirm_activation(bot, tg_id, user):

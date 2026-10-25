@@ -31,6 +31,9 @@ def user(**kwargs):
 
 class ElenaTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        wait = patch.object(E.ReplyTiming, 'wait', AsyncMock())
+        wait.start()
+        self.addCleanup(wait.stop)
         self.bot = types.SimpleNamespace(send_message=AsyncMock(), get_business_connection=AsyncMock())
         self.conn = types.SimpleNamespace(execute=AsyncMock())
 
