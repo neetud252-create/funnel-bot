@@ -171,8 +171,9 @@ async def consent(tg_id):
 
 
 async def resume(tg_id, revision):
-    # Explicit customer request only. Do not grant AI consent, re-enable
-    # notifications, or schedule reminders when restoring conversation replies.
+    # A new customer message or a legacy resume action restores conversation.
+    # Never grant consent, change local-only choices, re-enable notifications,
+    # or schedule reminders. A newer Stop/operator update must still win.
     return await one("""UPDATE elena_sessions SET stopped=FALSE,handoff=FALSE,
         status='paused',due_at=NULL,revision=revision+1,updated_at=now()
         WHERE tg_id=$1 AND revision=$2 AND (stopped OR handoff) RETURNING *""",
