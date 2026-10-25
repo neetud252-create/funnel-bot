@@ -82,7 +82,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.row['account_kind'], 'existing')
         self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
         self.assertIn('Send your Pocket Option Trader ID', H.last_screen(self.bot)['body'])
-        self.assertFalse(any(b.url for r in H.last_screen(self.bot)['markup'].inline_keyboard for b in r))
+        self.assertIn('Registration Link', H.last_screen(self.bot)['markup'].inline_keyboard[0][0].text)
         await self.resume()
         self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
         self.assertIn('Send your Pocket Option Trader ID', H.last_screen(self.bot)['body'])
@@ -213,11 +213,31 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             await self.tap('enter_id')
             self.assertIn('What is your Pocket Option Trader ID?', (await self.resume())['body'])
 
+    async def test_rejected_uid_retry_and_restart_keep_registration_link(self):
+        self.row.update(account_kind='new', ref_code='saved_91')
+        with patch.object(config, 'REF_LINK', 'https://pocketoption.com/?a=campaign'), \
+             patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(config.VERIFY_WRONG_LINK, None))):
+            ref = config.ref_url('saved_91')
+            await self.tap('new')
+            await self.tap('enter_id')
+            await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
+            for card in (H.last_screen(self.bot), await self.resume(), await self.tap('enter_id')):
+                self.assertIn(ref, [b.url for row in card['markup'].inline_keyboard for b in row])
+            self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
+            self.assertFalse(self.row['verified'])
+            self.assertEqual(self.row['uid'], '123456789')
+            # Old no-URL help buttons also reopen registration instead of looping to ID entry.
+            self.assertEqual((await self.tap('register_again'))['markup'].inline_keyboard[0][0].url, ref)
+            self.assertEqual((await self.resume())['markup'].inline_keyboard[0][0].url, ref)
+        self.assertEqual(self.row['uid'], '123456789')
+        self.assertEqual(self.row['access_check_status'], config.VERIFY_WRONG_LINK)
+
     async def test_access_details_available_before_registration_without_losing_progress(self):
         await self.tap('new')
         card = await self.tap('requirements')
         self.assertIn('new Pocket Option account', card['body'])
         self.assertIn('Pocket Option UID', card['body'])
+
         self.assertNotIn('deposit', card['body'].lower())
         self.assertNotIn('$', card['body'])
         self.assertEqual(self.row['setup_stage'], 'register')
@@ -226,6 +246,14 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             card = await self.tap('register')
         self.assertNotIn('$', card['body'])
         self.assertEqual(len(card['markup'].inline_keyboard), 3)
+
+    async def test_old_registration_button_keeps_confirmed_linked_account(self):
+        self.row.update(uid='123456789', setup_stage='id', access_check_status=config.VERIFY_NEED_DEPOSIT,
+                        access_check_deposit=Decimal('0'))
+        card = await self.tap('register_again')
+        self.assertIn('Your Trader ID is confirmed under our link.', card['body'])
+        self.assertEqual(self.row['uid'], '123456789')
+        self.assertFalse(self.row['verified'])
 
     async def test_existing_account_without_referral_has_support_and_resumable_id_check(self):
         card = await self.tap('existing')

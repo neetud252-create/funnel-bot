@@ -203,7 +203,7 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E.store, 'finish', AsyncMock()) as finish:
             await E.send_job(self.bot, self.conn, job)
         self.bot.send_message.assert_awaited_once_with(42, E.copy.prompt(user(), 'uid'),
-            parse_mode='HTML', reply_markup=E.keyboard('uid'), business_connection_id='business-test')
+            parse_mode='HTML', reply_markup=E.keyboard('uid', user=user()), business_connection_id='business-test')
         finish.assert_awaited_once_with(self.conn, job, 'sent')
 
     async def test_rejected_direct_message_never_falls_back_to_pocket_iq(self):

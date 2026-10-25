@@ -48,6 +48,8 @@ ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_opened_at TIMESTA
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_retry_at TIMESTAMPTZ;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS pending_question TEXT;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS pending_question_at TIMESTAMPTZ;
 """
 
 
@@ -154,6 +156,8 @@ async def pause(tg_id, *, stopped=False, handoff=False):
         stopped=stopped OR $2,handoff=handoff OR $3,revision=revision+1,
         history=CASE WHEN $2 OR $3 THEN '[]'::jsonb ELSE history END,
         consent=CASE WHEN $2 THEN FALSE ELSE consent END,
+        pending_question=CASE WHEN $2 OR $3 THEN NULL ELSE pending_question END,
+        pending_question_at=CASE WHEN $2 OR $3 THEN NULL ELSE pending_question_at END,
         reply_text=NULL,reply_nonce=NULL,updated_at=now()
         WHERE tg_id=$1""", tg_id, stopped, handoff)
 
@@ -166,7 +170,24 @@ async def consent(tg_id):
 
 async def local_only(tg_id):
     await execute("""UPDATE elena_sessions SET local_only=TRUE,consent=FALSE,
-        history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,revision=revision+1 WHERE tg_id=$1""", tg_id)
+        history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,pending_question=NULL,
+        pending_question_at=NULL,revision=revision+1 WHERE tg_id=$1""", tg_id)
+
+
+async def save_question(tg_id, revision, value):
+    # Redacted locally before consent; never sent to OpenAI until opt-in.
+    await execute("""UPDATE elena_sessions SET pending_question=$3,pending_question_at=now()
+        WHERE tg_id=$1 AND revision=$2 AND NOT consent AND NOT local_only
+        AND NOT stopped AND NOT handoff""", tg_id, revision, value[:1200])
+
+
+async def take_question(tg_id):
+    return await one("""WITH pending AS (
+        SELECT tg_id,pending_question FROM elena_sessions WHERE tg_id=$1
+        AND consent AND NOT stopped AND NOT handoff AND pending_question IS NOT NULL
+        AND pending_question_at>now()-interval '1 day' FOR UPDATE)
+        UPDATE elena_sessions e SET pending_question=NULL,pending_question_at=NULL
+        FROM pending p WHERE e.tg_id=p.tg_id RETURNING p.pending_question""", tg_id)
 
 
 async def claim_ai(tg_id):
@@ -177,8 +198,7 @@ async def claim_ai(tg_id):
         memory_since=CASE WHEN memory_since IS NULL OR memory_since<now()-interval '1 day' THEN now() ELSE memory_since END,
         ai_day=CURRENT_DATE,last_ai_at=now()
         WHERE tg_id=$1 AND consent AND NOT stopped AND NOT handoff
-        AND (ai_day IS DISTINCT FROM CURRENT_DATE OR ai_count<40)
-        AND (last_ai_at IS NULL OR last_ai_at<now()-interval '5 seconds') RETURNING *""", tg_id)
+        AND (ai_day IS DISTINCT FROM CURRENT_DATE OR ai_count<40) RETURNING *""", tg_id)
 
 
 async def remember(tg_id, revision, history, reply, nonce):

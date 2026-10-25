@@ -60,6 +60,28 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
                     transport=httpx.MockTransport(lambda request: httpx.Response(200, json=data)))
             self.assertIsNone(actual)
 
+    async def test_conversation_and_registration_answers_use_new_actions(self):
+        requests = []
+        for action, answer in [('none', 'You’re welcome!'), ('register',
+                '1. Open Registration Link.\n2. Complete the broker’s form.\n3. Confirm your account.\n'
+                '4. Copy your Trader ID from your profile.\n5. Submit it inside Pocket IQ.')]:
+            def handler(request):
+                requests.append(json.loads(request.content))
+                return httpx.Response(200, json=response(answer, action))
+            with patch.dict(os.environ, {'OPENAI_API_KEY': 'test'}), \
+                 patch.object(E.config, 'REF_LINK', 'https://pocketoption.com/?a=campaign'):
+                result = await E.ai.reply(user(ref_code='private-attribution'), 'How do I register?',
+                    [{'role': 'assistant', 'content': 'Do you already have an account?'},
+                     {'role': 'user', 'content': 'No, this is my first account.'}],
+                    consented=True, transport=httpx.MockTransport(handler))
+            self.assertEqual(result, {'reply': answer, 'action': action})
+        facts = json.loads(requests[-1]['instructions'].split('Verified context:\n')[1])
+        self.assertTrue(facts['registration_link_available'])
+        self.assertTrue(facts['has_submitted_uid'])
+        self.assertNotIn('private-attribution', json.dumps(requests))
+        self.assertNotIn('https://pocketoption.com', json.dumps(requests))
+        self.assertIn('first account', requests[-1]['input'][-2]['content'])
+
     async def test_model_failure_uses_no_raw_response(self):
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test'}):
             actual = await E.ai.reply(user(), 'help', [], consented=True,
@@ -93,10 +115,97 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.ai, 'configured', return_value=True), \
              patch.object(E.ai, 'reply', AsyncMock()) as reply, \
+             patch.object(E.store, 'save_question', AsyncMock()) as save, \
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.business_message(self.message(), object())
         reply.assert_not_awaited()
         self.assertEqual(send.await_args.args[2], E.copy.CONSENT)
+        save.assert_awaited_once_with(42, row['revision'], 'help')
+
+    async def test_allow_ai_answers_saved_question_without_retyping(self):
+        row = session(consent=False)
+        cb = types.SimpleNamespace(message=types.SimpleNamespace(
+                chat=types.SimpleNamespace(id=42, type='private'), business_connection_id='business-test'),
+            from_user=types.SimpleNamespace(id=42), data='elena:consent', answer=AsyncMock())
+        with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E.store, 'pause', AsyncMock()), \
+             patch.object(E.store, 'consent', AsyncMock()) as consent, \
+             patch.object(E.store, 'take_question', AsyncMock(return_value={'pending_question': 'Registration fails.'})), \
+             patch.object(E.ai, 'configured', return_value=True), \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer:
+            await E.callback(cb, object())
+        consent.assert_awaited_once_with(42)
+        self.assertEqual(answer.await_args.args[-1], 'Registration fails.')
+
+    async def test_each_consented_message_reaches_ai_with_current_user_context(self):
+        row = session(consent=True)
+        current = user(language='hi')
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=row)), \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=current)), \
+             patch.object(E.ai, 'configured', return_value=True), \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer:
+            for value in ('Hello', 'I cannot register', 'Where do I find the ID?', 'Thank you'):
+                message = self.message()
+                message.text = value
+                await E.business_message(message, object())
+                self.assertEqual(answer.await_args.args[-2:], (current, value))
+        self.assertEqual(answer.await_count, 4)
+
+    async def test_question_sent_during_activation_survives_until_consent(self):
+        old = session(activated_at=None, consent=False)
+        activated = session(consent=False)
+        message = self.message()
+        message.text = 'Registration failed for 123456789'
+        with patch.object(E.store, 'connection', AsyncMock(return_value=CONNECTION)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=old)), \
+             patch.object(E.store, 'incoming', AsyncMock(return_value=old)), \
+             patch.object(E.store, 'activate', AsyncMock(return_value=activated)), \
+             patch.object(E.store, 'save_question', AsyncMock()) as save, \
+             patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
+             patch.object(E, 'confirm_activation', AsyncMock()) as confirm, \
+             patch.object(E.activation, 'deliver', AsyncMock()), \
+             patch.object(E.ai, 'configured', return_value=True), \
+             patch.object(E, 'ai_answer', AsyncMock()) as answer, \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.business_message(message, object())
+        confirm.assert_awaited_once()
+        answer.assert_not_awaited()
+        self.assertNotIn('123456789', save.await_args.args[-1])
+        self.assertEqual(send.await_args.args[2], E.copy.CONSENT)
+
+    async def test_registration_reply_includes_authoritative_link_and_next_step(self):
+        row = session(consent=True, history=[])
+        data = user(ref_code='saved-source')
+        with patch.object(E.config, 'REF_LINK', 'https://pocketoption.com/?a=campaign'), \
+             patch.object(E.store, 'claim_ai', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'remember', AsyncMock(return_value={'tg_id':42})), \
+             patch.object(E.ai, 'reply', AsyncMock(return_value={'reply': 'Here are the registration steps.', 'action': 'register'})), \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.ai_answer(object(), 42, data, 'Send the registration link')
+            url = E.registration_url(data)
+        text, markup = send.await_args.args[2:]
+        self.assertIn('Here are the registration steps.', text)
+        self.assertIn('saved-source', text)
+        self.assertIn(E.journey.DISCLOSURE, text)
+        self.assertEqual(markup.inline_keyboard[0][0].url, url)
+        self.assertEqual(markup.inline_keyboard[1][0].url, E.link('uid'))
+
+    async def test_small_talk_reply_does_not_force_setup_menu(self):
+        row = session(consent=True, history=[])
+        with patch.object(E.store, 'claim_ai', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=row)), \
+             patch.object(E.store, 'remember', AsyncMock(return_value={'tg_id':42})), \
+             patch.object(E.ai, 'reply', AsyncMock(return_value={'reply': 'You’re welcome!', 'action': 'none'})), \
+             patch.object(E, 'send_business', AsyncMock()) as send:
+            await E.ai_answer(object(), 42, user(), 'Thanks')
+        text, markup = send.await_args.args[2:]
+        self.assertEqual(text, 'You’re welcome!')
+        self.assertFalse(any(b.url for row in markup.inline_keyboard for b in row))
 
     async def test_help_only_choice_does_not_keep_asking_for_ai(self):
         row = session(consent=False, local_only=True)

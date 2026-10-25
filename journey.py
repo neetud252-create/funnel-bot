@@ -264,8 +264,13 @@ def referral_help():
         [url('📖 Read Broker Terms', config.BROKER_TERMS_URL)], *back('existing')]
 
 
-def uid():
-    return UID, [[cb('📍 Where Is My Trader ID?', 'id_guide')],
+def registration_button(ref=None):
+    return (url('🔗 Registration Link', ref, True) if ref is not None
+            else cb('🔗 Registration Link', 'register_again', True))
+
+
+def uid(ref=None):
+    return UID, [[registration_button(ref)], [cb('📍 Where Is My Trader ID?', 'id_guide')],
                  [cb('💬 Support', 'support'), cb('❌ Cancel', 'home')]]
 
 
@@ -298,11 +303,12 @@ def pending(premium=False):
                      [cb('💬 Support', 'support'), cb('⏸ Later', 'dashboard' if premium else 'home')]]
 
 
-def unlinked(premium=False):
+def unlinked(premium=False, ref=None):
     if premium:
         return UNLINKED, [[cb('🔄 Check My Linked Account Again', 'premium_check', True)],
                           [cb('💬 Ask Support About Access', 'support')], *back('dashboard')]
     return UNLINKED, [[cb('🔍 Check a Corrected ID', 'enter_id', True)],
+                      [registration_button(ref)],
                       [cb('💬 Ask Support About Access', 'support')], *back()]
 
 
