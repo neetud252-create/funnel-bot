@@ -121,6 +121,16 @@ def consent_keyboard():
         [button('Talk to a person', action='human'), button('Stop reminders', action='stop')]])
 
 
+def resume_keyboard(language='en'):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [button(copy.text(copy.RESUME, language), action='resume')]])
+
+
+async def paused_reply(bot, tg_id, language):
+    await send_business(bot, tg_id, copy.text(copy.REPLIES_PAUSED, language), resume_keyboard(language))
+    logging.info('Elena reply paused; explicit resume offered')
+
+
 async def ai_answer(bot, tg_id, user, value):
     claimed = await store.claim_ai(tg_id)
     reason = reason_for(user) or 'ready'
@@ -144,7 +154,8 @@ async def ai_answer(bot, tg_id, user, value):
         if action == 'stop':
             await db.set_notifications(tg_id, False)
         suffix = {'stop': copy.STOPPED, 'later': copy.PAUSED, 'support': copy.HUMAN}[action]
-        await send_business(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language))
+        await send_business(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language),
+                            resume_keyboard(language) if action in ('stop', 'support') else None)
         return
     nonce = secrets.token_hex(4)
     history += [{'role': 'user', 'content': ai.private_text(user, value)},
@@ -249,6 +260,7 @@ async def send_business(bot, tg_id, text, markup=None):
     connection = await active_connection(bot)
     session = await store.session(tg_id)
     if not business_window(session, connection):
+        logging.info('Elena reply skipped; business reply window or connection unavailable')
         return False
     await bot.send_message(tg_id, text, parse_mode='HTML', reply_markup=markup,
                            business_connection_id=connection['connection_id'])
@@ -286,6 +298,7 @@ async def business_message(message, bot):
     if message.from_user.id == connection['owner_id']:
         # A real operator has taken over this particular customer conversation.
         await store.pause(message.chat.id, handoff=True)
+        logging.info('Elena automatic replies paused; operator takeover')
         return
     if message.from_user.id != message.chat.id:
         return
@@ -300,7 +313,8 @@ async def business_message(message, bot):
         await store.pause(tg_id, stopped=stop, handoff=not stop)
         if stop:
             await db.set_notifications(tg_id, False)
-        await send_business(bot, tg_id, copy.text(copy.STOPPED if stop else copy.HUMAN, user.get('language', 'en')))
+        language = user.get('language', 'en')
+        await send_business(bot, tg_id, copy.text(copy.STOPPED if stop else copy.HUMAN, language), resume_keyboard(language))
         return
     lock = _locks.setdefault(tg_id, asyncio.Lock())
     async with lock:
@@ -326,11 +340,16 @@ async def business_message(message, bot):
                     return
                 session = activated
         if session['stopped'] or session['handoff']:
+            if value:
+                # A new greeting is not permission to undo Stop or interrupt a
+                # human operator. Explain the pause and provide an explicit exit.
+                await paused_reply(bot, tg_id, user.get('language', 'en'))
             return
         if not session.get('consent') and not session.get('local_only') and ai.configured():
             if value:
                 await store.save_question(tg_id, session['revision'], ai.private_text(user, value))
             await send_business(bot, tg_id, copy.text(copy.CONSENT, user.get('language', 'en')), consent_keyboard())
+            logging.info('Elena reply awaiting customer AI permission')
             return
         reason = reason_for(user) or 'ready'
         if reason == 'deposit':
@@ -388,7 +407,7 @@ async def callback(cb, bot):
             await db.set_notifications(tg_id, False)
         text = copy.text({'stop': copy.STOPPED, 'human': copy.HUMAN, 'later': copy.PAUSED}[action], language)
         if business_id:
-            await send_business(bot, tg_id, text)
+            await send_business(bot, tg_id, text, resume_keyboard(language) if action in ('stop', 'human') else None)
         else:
             await bot.send_message(tg_id, text)
         return
@@ -398,7 +417,20 @@ async def callback(cb, bot):
         if not session:
             return
         language = user.get('language', 'en')
+        if action == 'resume':
+            if session['stopped'] or session['handoff']:
+                session = await store.resume(tg_id, session['revision'])
+                if not session:
+                    return  # A newer Stop or operator takeover wins the race.
+                logging.info('Elena automatic replies resumed by customer')
+            if not session.get('consent') and not session.get('local_only') and ai.configured():
+                await send_business(bot, tg_id, copy.text(copy.CONSENT, language), consent_keyboard())
+            else:
+                reason = reason_for(user) or 'ready'
+                await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
+            return
         if session['stopped'] or session['handoff']:
+            await paused_reply(bot, tg_id, language)
             return
         if action.startswith('voice:'):
             await voice_reply(bot, tg_id, action.split(':', 1)[1], language)

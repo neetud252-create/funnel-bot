@@ -31,9 +31,11 @@ LISTEN = '🔊 Listen · AI voice via OpenAI'
 AI_VOICE = 'AI-generated voice · Elena, Pocket IQ'
 VOICE_UNAVAILABLE = 'Voice is unavailable right now. You can read the reply above.'
 REOPEN = 'Send Elena a new message to continue this chat.'
+RESUME = 'Resume replies'
+REPLIES_PAUSED = 'Automatic replies are paused in this chat. Tap Resume replies to chat with Elena again. Your reminder preferences will stay unchanged.'
 SOURCES = (INTRO, QUESTION, INVITE, PAUSED, STOPPED, HUMAN, OFFLINE, UID, FALLBACK,
            CONSENT, AGREE, BUTTONS_ONLY, LISTEN, AI_VOICE, VOICE_UNAVAILABLE, REOPEN,
-           ACTIVATION, ACTIVATED, ACTIVATE_BUTTON, OPEN_BOT)
+           ACTIVATION, ACTIVATED, ACTIVATE_BUTTON, OPEN_BOT, RESUME, REPLIES_PAUSED)
 
 
 def text(source, language):
