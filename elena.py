@@ -73,7 +73,19 @@ def button(label, *, action=None, url=None):
     return InlineKeyboardButton(text=label, callback_data='elena:' + action if action else None, url=url)
 
 
-def keyboard(reason='inactive', *, invitation=False):
+def registration_url(user):
+    if not journey.safe_url(config.REF_LINK):
+        return None
+    sub_id = user.get('ref_code') or user.get('tg_id')
+    return journey.safe_url(config.ref_url(sub_id) if sub_id else config.REF_LINK)
+
+
+def registration_button(user):
+    url = registration_url(user)
+    return button('🔗 Registration Link', url=url) if url else button('Continue Setup', url=link('setup'))
+
+
+def keyboard(reason='inactive', *, invitation=False, user=None):
     if invitation:
         rows = [[button('Chat with Elena', url=activation.chat_url())],
                 [button('Continue Setup', url=link('setup'))]]
@@ -88,6 +100,8 @@ def keyboard(reason='inactive', *, invitation=False):
             'ready': [('📊 Get Signals', 'signals'), ('📖 Guide', 'guide')],
         }.get(reason, [('Continue Setup', 'account')])
         rows = [[button(label, action=action)] for label, action in choices]
+        if user and reason in ('registration', 'uid', 'problem', 'inactive'):
+            rows.insert(0, [registration_button(user)])
         rows.append([button('Talk to a person', action='human')])
     rows += [[button('⏸ Later', action='later'), button('Stop reminders', action='stop')]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -112,7 +126,7 @@ async def ai_answer(bot, tg_id, user, value):
     reason = reason_for(user) or 'ready'
     language = user.get('language', 'en')
     if not claimed:
-        await send_business(bot, tg_id, copy.text(copy.FALLBACK, language), keyboard(reason))
+        await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
         return
     history = claimed['history']
     if isinstance(history, str):
@@ -122,7 +136,7 @@ async def ai_answer(bot, tg_id, user, value):
     if not latest or latest['revision'] != claimed['revision'] or latest['stopped'] or latest['handoff'] or not latest['consent']:
         return
     if not result:
-        await send_business(bot, tg_id, copy.text(copy.FALLBACK, language), keyboard(reason))
+        await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
         return
     action = result['action']
     if action in ('stop', 'later', 'support'):
@@ -133,17 +147,33 @@ async def ai_answer(bot, tg_id, user, value):
         await send_business(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language))
         return
     nonce = secrets.token_hex(4)
-    history += [{'role': 'user', 'content': ai.redact(value)},
-                {'role': 'assistant', 'content': ai.redact(result['reply'])}]
+    history += [{'role': 'user', 'content': ai.private_text(user, value)},
+                {'role': 'assistant', 'content': ai.private_text(user, result['reply'])}]
     if not await store.remember(tg_id, claimed['revision'], history, result['reply'], nonce):
         return
-    markup = keyboard(reason)
-    targets = {'setup': 'account', 'uid': 'uid', 'recheck': 'recheck', 'signals': 'signals'}
-    markup.inline_keyboard.insert(0, [button('Continue Setup' if action == 'setup' else
-        {'uid': '📍 Where Is My Trader ID?', 'recheck': '🔄 Check Again', 'signals': '📊 Get Signals'}[action],
-        action=targets[action])])
-    markup.inline_keyboard.insert(1, [button(copy.LISTEN, action='voice:' + nonce)])
-    await send_business(bot, tg_id, escape(result['reply']), markup)
+    rows = []
+    text = escape(result['reply'])
+    if action == 'register':
+        rows = [[registration_button(user)],
+                [button('✅ I Created an Account — Check ID', url=link('uid'))]]
+        if url := registration_url(user):
+            text += '\n\n<a href="' + escape(url, quote=True) + '">' + copy.text('🔗 Registration Link', language) + '</a>'
+            text += '\n' + copy.text(journey.DISCLOSURE, language)
+    else:
+        targets = {'setup': ('Continue Setup', link('setup')),
+                   'uid': ('📍 Where Is My Trader ID?', link('uid')),
+                   'guide': ('📖 Guide', link('guide')),
+                   'signals': ('📊 Get Signals', link('signals')),
+                   'deposit': ('📖 Deposit Help', link('setup'))}
+        if action in targets:
+            label, url = targets[action]
+            rows.append([button(label, url=url)])
+        elif action == 'recheck':
+            rows.append([button('🔄 Check Again', action='recheck')])
+    rows += [[button(copy.LISTEN, action='voice:' + nonce)],
+             [button('Talk to a person', action='human'), button('Stop reminders', action='stop')]]
+    if await send_business(bot, tg_id, text, InlineKeyboardMarkup(inline_keyboard=rows)):
+        logging.info('Elena AI reply delivered; action=%s', action)
 
 
 async def voice_reply(bot, tg_id, nonce, language):
@@ -292,10 +322,14 @@ async def business_message(message, bot):
                 # Both chats update immediately; neither waits for AI or a timer.
                 await asyncio.gather(confirm_activation(bot, tg_id, user),
                                      activation.deliver(bot, tg_id))
-                return
+                if not value or value == activation.DRAFT:
+                    return
+                session = activated
         if session['stopped'] or session['handoff']:
             return
         if not session.get('consent') and not session.get('local_only') and ai.configured():
+            if value:
+                await store.save_question(tg_id, session['revision'], ai.private_text(user, value))
             await send_business(bot, tg_id, copy.text(copy.CONSENT, user.get('language', 'en')), consent_keyboard())
             return
         reason = reason_for(user) or 'ready'
@@ -305,7 +339,7 @@ async def business_message(message, bot):
         if value and session.get('consent') and ai.configured():
             await ai_answer(bot, tg_id, user, value)
         else:
-            await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason))
+            await send_business(bot, tg_id, copy.prompt(user, reason), keyboard(reason, user=user))
 
 
 async def confirm_activation(bot, tg_id, user):
@@ -372,15 +406,22 @@ async def callback(cb, bot):
         await store.pause(tg_id)
         if action == 'consent':
             await store.consent(tg_id)
-            text, markup = copy.prompt(user, reason_for(user) or 'ready'), keyboard(reason_for(user) or 'ready')
+            pending = await store.take_question(tg_id)
+            if pending and ai.configured():
+                await ai_answer(bot, tg_id, user, pending['pending_question'])
+                return
+            text, markup = copy.prompt(user, reason_for(user) or 'ready'), keyboard(reason_for(user) or 'ready', user=user)
         elif action == 'local':
             await store.local_only(tg_id)
-            text, markup = copy.prompt(user, reason_for(user) or 'ready'), keyboard(reason_for(user) or 'ready')
+            text, markup = copy.prompt(user, reason_for(user) or 'ready'), keyboard(reason_for(user) or 'ready', user=user)
         elif action == 'recheck':
             user = await refresh(tg_id)
             reason = reason_for(user) or 'ready'
-            text, markup = copy.prompt(user, reason), keyboard(reason)
+            text, markup = copy.prompt(user, reason), keyboard(reason, user=user)
         else:
+            if action == 'account' and session.get('consent') and ai.configured():
+                await ai_answer(bot, tg_id, user, 'Help me set up my account. Explain the registration steps and how to submit my Trader ID.')
+                return
             sources = {'uid': copy.UID, 'account': journey.ACCOUNT_QUESTION,
                        'deposit': journey.TEXTS['payment_help'],
                        'guide': journey.TEXTS['how'], 'signals': journey.TEXTS['analysis_help']}
@@ -392,6 +433,8 @@ async def callback(cb, bot):
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [button('Open Pocket IQ', url=link(target))],
                 [button('Talk to a person', action='human'), button('⏸ Later', action='later')]])
+            if action in ('account', 'uid'):
+                markup.inline_keyboard.insert(0, [registration_button(user)])
         if business_id:
             await send_business(bot, tg_id, text, markup)
         else:
@@ -506,7 +549,7 @@ async def send_job(bot, conn, job):
         return
     try:
         await bot.send_message(tg_id, copy.prompt(user, reason), parse_mode='HTML',
-            reply_markup=keyboard(reason), business_connection_id=connection['connection_id'])
+            reply_markup=keyboard(reason, user=user), business_connection_id=connection['connection_id'])
         await store.finish(conn, job, 'sent')
         logging.info('Elena follow-up delivered; reason=%s; admin=%s',
                      reason, tg_id in config.ADMIN_IDS)
@@ -536,6 +579,7 @@ async def worker(bot):
                     logging.info('Elena assistant ready; account=@%s; awaiting authorized connection if absent', USERNAME)
                     while True:
                         await conn.execute("UPDATE elena_sessions SET history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,memory_since=NULL,revision=revision+1 WHERE memory_since<now()-interval '1 day'")
+                        await conn.execute("UPDATE elena_sessions SET pending_question=NULL,pending_question_at=NULL WHERE pending_question_at<now()-interval '1 day'")
                         if activation.enabled():
                             for pending in await store.pending_activations(conn):
                                 await activation.deliver(bot, pending['tg_id'])

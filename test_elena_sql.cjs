@@ -14,10 +14,11 @@ def schema(name):
 queries = {}
 for fn in tree('elena_store').body:
     if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish', 'await_chat', 'observe', 'incoming',
-            'activate', 'claim_activation', 'activation_opened', 'pending_activations'):
+            'activate', 'claim_activation', 'activation_opened', 'pending_activations',
+            'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai'):
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
-            and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ')))
+            and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ', 'WITH ')))
 version = next(ast.literal_eval(n.value) for n in tree('elena_store').body
     if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'ACTIVATION_VERSION' for t in n.targets))
 print(json.dumps({'schema': ''.join(schema(n) for n in
@@ -187,6 +188,28 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         await db.exec('UPDATE elena_sessions SET sent_count=0 WHERE tg_id=201');
         assert.equal((await claim(201)).length, 1, 'Activated admin can claim a due follow-up');
         assert.equal((await claim(201)).length, 0, 'Admin delivery is also duplicate-safe');
+        await db.exec(`INSERT INTO users(tg_id) VALUES(301);
+            INSERT INTO elena_sessions(tg_id,reason) VALUES(301,'registration');`);
+        await db.query(queries.save_question, [301,1,'My registration form fails.']);
+        assert.equal((await db.query(queries.take_question, [301])).rows.length, 0, 'No question is sent before consent');
+        await db.query(queries.consent, [301]);
+        assert.equal((await db.query(queries.take_question, [301])).rows[0].pending_question, 'My registration form fails.');
+        assert.equal((await db.query(queries.take_question, [301])).rows.length, 0, 'Consent double-taps cannot repeat the question');
+        assert.equal((await db.query(queries.claim_ai, [301])).rows[0].ai_count, 1);
+        assert.equal((await db.query(queries.claim_ai, [301])).rows[0].ai_count, 2, 'Quick conversational follow-up is not dropped');
+        await db.exec('UPDATE elena_sessions SET ai_count=40 WHERE tg_id=301');
+        assert.equal((await db.query(queries.claim_ai, [301])).rows.length, 0, 'Daily cost limit remains enforced');
+        for (const choice of ['local_only', 'stop', 'human']) {
+            await db.exec(`UPDATE elena_sessions SET pending_question='redacted question',
+                pending_question_at=now(),stopped=false,handoff=false WHERE tg_id=301`);
+            if (choice==='local_only') await db.query(queries.local_only, [301]);
+            else await db.query(queries.pause, [301,choice==='stop',choice==='human']);
+            assert.equal((await db.query('SELECT pending_question FROM elena_sessions WHERE tg_id=301')).rows[0].pending_question, null);
+        }
+        await db.exec(`UPDATE elena_sessions SET pending_question='expired',pending_question_at=now()-interval '2 days',
+            consent=true,stopped=false,handoff=false WHERE tg_id=301`);
+        assert.equal((await db.query(queries.take_question, [301])).rows.length, 0, 'Expired questions never leave local storage');
+        console.log('PASS: pending question consent, single consumption, fast follow-ups, daily cap and privacy controls.');
         console.log('PASS: activated admin follow-ups, old/unactivated admin exclusion and unchanged delivery safeguards.');
         console.log('PASS: all-account activation reset migration, old-job exclusion, new-message reactivation, entitlement preservation, duplicate suppression, durable delivery and restart stability.');
     } finally {

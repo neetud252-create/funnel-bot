@@ -893,7 +893,7 @@ async def _open_uid_entry(bot, tg_id, state=None):
     await db.set_setup_stage(tg_id, 'id')
     if state is not None:
         await state.set_state(Reg.waiting_uid.state)
-    await _journey(bot, tg_id, journey.uid(), key='account_id_prompt')
+    await _journey(bot, tg_id, journey.uid(await _ref_url(tg_id)), key='account_id_prompt')
 
 
 async def _show_existing_registration(bot, tg_id, user):
@@ -926,7 +926,7 @@ async def _resume_setup(bot, tg_id, state=None):
     elif user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT and user.get('uid'):
         await _journey(bot, tg_id, journey.deposit(user['access_check_deposit']), key='deposit_requirements')
     elif user.get('access_check_status') == config.VERIFY_WRONG_LINK:
-        await _journey(bot, tg_id, journey.unlinked(), key='account_unlinked')
+        await _journey(bot, tg_id, journey.unlinked(ref=await _ref_url(tg_id)), key='account_unlinked')
     elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
         await _journey(bot, tg_id, journey.pending(), key='verification_pending')
     elif user.get('account_kind') == 'existing' or user.get('uid'):
@@ -978,6 +978,17 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         else:
             await db.set_setup_stage(tg_id, 'register', account_kind='new')
             await _show_register(bot, tg_id)
+    elif action == 'register_again':
+        if user.get('verified'):
+            await _show_menu(bot, tg_id)
+            return
+        if user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT:
+            await db.set_setup_stage(tg_id, 'deposit')
+            await _resume_setup(bot, tg_id, state)
+            return
+        # Reopen registration without erasing the submitted ID or its result.
+        await db.set_setup_stage(tg_id, 'existing_register')
+        await _show_existing_registration(bot, tg_id, user)
     elif action == 'register_existing':
         if user.get('verified'):
             await _show_menu(bot, tg_id)
@@ -1922,7 +1933,7 @@ async def _run_verification(bot, tg_id, uid):
     if status == config.VERIFY_WRONG_LINK:
         await db.record_access_check(tg_id, status)
         await db.set_setup_stage(tg_id, 'help')
-        text, rows = journey.unlinked()
+        text, rows = journey.unlinked(ref=await _ref_url(tg_id))
         await _replace(bot, tg_id, ack.message_id, text, rows)
         return status
     # Every retry was also temporary. Say so once, after the attempts, rather
