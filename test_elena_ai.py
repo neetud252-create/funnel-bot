@@ -102,6 +102,12 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AIFlowTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Timing is exercised separately with a virtual clock and real deadlines.
+        wait = patch.object(E.ReplyTiming, 'wait', AsyncMock())
+        wait.start()
+        self.addCleanup(wait.stop)
+
     def message(self):
         return types.SimpleNamespace(chat=types.SimpleNamespace(type='private', id=42),
             from_user=types.SimpleNamespace(id=42), business_connection_id='business-test',
@@ -431,6 +437,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_limited_user_gets_local_help_without_model_charge(self):
         with patch.object(E.store, 'claim_ai', AsyncMock(return_value=None)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=session())), \
              patch.object(E.ai, 'reply', AsyncMock()) as reply, \
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.ai_answer(object(), 42, user(), 'help')
