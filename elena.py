@@ -43,6 +43,8 @@ _touch = {}   # tg_id -> (reason, touch_count); escalates the follow-up chain
 # Human-like pause between bubbles (seconds).
 BUBBLE_MIN = float(os.getenv('ELENA_BUBBLE_MIN', '3'))
 BUBBLE_MAX = float(os.getenv('ELENA_BUBBLE_MAX', '5'))
+# Extra grace so the inter-bubble gaps never cancel the link bubble.
+SEND_GRACE = float(os.getenv('ELENA_SEND_GRACE', '20'))
 
 # If the user asks for the link, always attach it even if the model said "none".
 LINK_REQUEST = re.compile(r'(?i)\b(link|register|registration|sign.?up|referral|join|refer)\b')
@@ -212,40 +214,42 @@ async def paused_reply(bot, tg_id, language):
 
 
 async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True, requires_ai=False):
-    """Pace ordinary conversation; recheck Stop/takeover after each gap."""
-    try:
-        remaining = timing.remaining()
-        if remaining <= 0:
-            return False
-        async with asyncio.timeout(remaining):
-            await timing.wait()
-            for index, part in enumerate(messages.bubbles(text)):
-                if index:
-                    # Real-person gap between messages.
-                    await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
-                if guard:
-                    latest = await store.session(tg_id)
-                    if (not latest or latest['stopped'] or latest['handoff']
-                            or (revision is not None and latest['revision'] != revision)
-                            or (requires_ai and latest.get('local_only'))):
-                        return False
-                if not await send_business(bot, tg_id, part):
-                    return False
-            return True
-    except TimeoutError:
-        logging.warning('Elina chat reply deadline reached; no duplicate retry')
+    """Wait for the typing pause, then send every bubble with a real-person gap.
+
+    Bubbles are sent OUTSIDE the AI reply budget so the link bubble can never be
+    cancelled by the reply deadline.
+    """
+    parts = messages.bubbles(text)
+    if not parts:
         return False
+    wait = timing.remaining()
+    if wait > 0:
+        try:
+            async with asyncio.timeout(wait):
+                await timing.wait()
+        except TimeoutError:
+            logging.warning('Elina chat reply wait deadline reached; sending anyway')
+    for index, part in enumerate(parts):
+        if index:
+            await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
+        if guard:
+            latest = await store.session(tg_id)
+            if (not latest or latest['stopped'] or latest['handoff']
+                    or (revision is not None and latest['revision'] != revision)
+                    or (requires_ai and latest.get('local_only'))):
+                return False
+        if not await send_business(bot, tg_id, part):
+            return False
+    return True
 
 
 async def ai_answer(bot, tg_id, user, value, *, timing=None):
     if activation_only():
         return
     timing = timing or ReplyTiming.start()
-    remaining = timing.remaining()
-    if remaining <= 0:
-        return
+    # Grace window covers the inter-bubble gaps so the link is always delivered.
     try:
-        async with asyncio.timeout(remaining):
+        async with asyncio.timeout(timing.remaining() + SEND_GRACE):
             await _ai_answer(bot, tg_id, user, value, timing)
     except TimeoutError:
         logging.warning('Elina chat reply deadline reached; no duplicate retry')
