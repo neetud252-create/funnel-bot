@@ -13,9 +13,9 @@ def schema(name):
         if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'SCHEMA' for t in n.targets))
 queries = {}
 for fn in tree('elena_store').body:
-    if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('claim', 'due', 'finish', 'await_chat', 'observe', 'incoming',
+    if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('activity', 'claim', 'due', 'finish', 'await_chat', 'observe', 'incoming',
             'activate', 'claim_activation', 'activation_opened', 'pending_activations',
-            'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai', 'remember', 'claim_voice', 'resume', 'offer_consent'):
+            'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai', 'remember', 'remember_followup', 'claim_voice', 'resume', 'offer_consent'):
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
             and n.value.startswith(('INSERT ',) if fn.name == 'observe' else ('SELECT ', 'UPDATE ', 'WITH ')))
@@ -45,6 +45,49 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         const oldUsers = (await db.query('SELECT * FROM users ORDER BY tg_id')).rows;
         await db.exec(schema);
         await db.exec(schema);
+        // New policy: stable clocks, three independent conditions, no replay.
+        await db.exec('INSERT INTO users(tg_id) VALUES(601)');
+        const follow = async () => (await db.query('SELECT * FROM elena_sessions WHERE tg_id=601')).rows[0];
+        await db.query(queries.observe,[601,'inactive',600]);
+        let timed=await follow();
+        assert.ok(timed.due_at-Date.now()>590000);
+        const originalDeadline=timed.due_at.getTime();
+        await db.query(queries.activity,[601]);
+        await db.query(queries.observe,[601,'inactive',600]);
+        assert.equal((await follow()).due_at.getTime(),originalDeadline,'Menu clicks cannot restart the timer');
+        await db.query(queries.observe,[601,'uid',300]);
+        assert.ok((await follow()).due_at-Date.now()<301000,'Wrong UID changes the deadline to five minutes');
+        await db.exec("UPDATE elena_sessions SET due_at=now()-interval '1 second' WHERE tg_id=601");
+        await db.query(queries.activity,[601]);
+        timed=await follow();
+        assert.equal((await db.query(queries.claim,[601,timed.revision])).rows.length,0,'An in-flight handler blocks a send');
+        await db.query(queries.observe,[601,'uid',300]);
+        timed=await follow();
+        assert.equal((await db.query(queries.claim,[601,timed.revision])).rows.length,1);
+        await db.query(queries.finish,[601,timed.revision,'pending',1]);
+        assert.deepEqual((await follow()).sent_reasons,[],'A rejected first send may retry');
+        await db.exec("UPDATE elena_sessions SET due_at=now()-interval '1 second' WHERE tg_id=601");
+        await db.query(queries.claim,[601,timed.revision]);
+        await db.query(queries.finish,[601,timed.revision,'sent',null]);
+        await db.query(queries.remember_followup,[601,timed.revision,'Do you need help finding your Trader ID?']);
+        assert.equal((await follow()).history[0].content,'Do you need help finding your Trader ID?');
+        assert.ok((await follow()).memory_since instanceof Date);
+        await db.query(queries.incoming,[601,'approved',1]);
+        await db.query(queries.observe,[601,'uid',300]);
+        assert.equal((await follow()).status,'sent','A new greeting cannot repeat the same follow-up');
+        await db.query(queries.observe,[601,'deposit',900]);
+        timed=await follow();
+        assert.equal(timed.status,'pending');
+        assert.ok(timed.due_at-Date.now()>890000,'Confirmed deposit condition gets its own fifteen-minute clock');
+        await db.exec(schema);
+        assert.equal((await follow()).due_at.getTime(),timed.due_at.getTime(),'Restart preserves the timer');
+        await db.query(queries.observe,[601,'uid',300]);
+        assert.equal((await follow()).status,'sent','Returning to an old condition cannot duplicate outreach');
+        await db.query(queries.observe,[601,'deposit',900]);
+        await db.query(queries.pause,[601,false,false]);
+        await db.query(queries.observe,[601,'deposit',900]);
+        assert.equal((await follow()).status,'paused','Later suppresses further reminders for the same condition');
+        await db.exec('DELETE FROM elena_sessions WHERE tg_id=601; DELETE FROM users WHERE tg_id=601');
         const oldSessions = (await db.query('SELECT * FROM elena_sessions ORDER BY tg_id')).rows;
         assert.ok(oldSessions.every(row=>row.activation_version===0), 'Every old account requires this release activation');
         assert.deepEqual((await db.query('SELECT * FROM users ORDER BY tg_id')).rows, oldUsers);
@@ -57,6 +100,8 @@ const {schema, queries, version} = JSON.parse(source.stdout);
             INSERT INTO elena_sessions(tg_id,reason,due_at)
                 SELECT tg_id,'uid',now()-interval '1 minute' FROM users WHERE tg_id IN (101,102,103);
         `);
+        assert.equal((await dueJobs([103])).rows.length,0,'Historical jobs stay dormant on rollout');
+        await db.exec('UPDATE elena_sessions SET followup_version=1 WHERE tg_id IN (101,102,103)');
         const due = (await dueJobs([103])).rows;
         assert.deepEqual(due.map(r=>Number(r.tg_id)).sort(), [101,102]);
         const claim = async (id, revision=1) =>
@@ -81,9 +126,9 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         await db.exec('UPDATE users SET broadcast_opt_out=false WHERE tg_id=102');
         await db.exec('UPDATE elena_sessions SET stopped=true WHERE tg_id=102');
         assert.equal((await claim(102,2)).length, 0, 'Stop cancels delivery');
-        await db.exec(`UPDATE elena_sessions SET stopped=false,sent_count=1 WHERE tg_id=102;
+        await db.exec(`UPDATE elena_sessions SET stopped=false,sent_reasons=ARRAY['uid'] WHERE tg_id=102;
             INSERT INTO verification_reminder_deliveries(tg_id,status) VALUES(102,'sent');`);
-        assert.equal((await claim(102,2)).length, 0, 'Legacy and Elena reminders share the two-message cap');
+        assert.equal((await claim(102,2)).length, 0, 'A previously delivered condition cannot send again');
         assert.equal((await dueJobs([103])).rows.length, 0);
 
         const row = async () => (await db.query('SELECT * FROM elena_sessions WHERE tg_id=103')).rows[0];
@@ -92,7 +137,7 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         await db.query(queries.await_chat, [103,1]);
         let deferred = await row();
         assert.equal(deferred.status, 'awaiting_chat');
-        assert.equal(deferred.due_at, null);
+        assert.ok(deferred.due_at instanceof Date, 'Preserve the original due time while awaiting contact');
         assert.equal(deferred.attempts, 0, 'No Telegram attempt was made');
         assert.equal(deferred.sent_count, 0, 'No delivery consumed');
         assert.equal((await dueJobs()).rows.length, 0, 'Deferred jobs must leave the delivery queue');
@@ -107,7 +152,7 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         await db.query(queries.incoming, [103,'business-test',1]);
         await db.query(queries.await_chat, [103,revision]);
         deferred = await row();
-        assert.equal(deferred.status, 'paused', 'A new Elena conversation must not be overwritten');
+        assert.equal(deferred.status, 'pending', 'New contact resumes the existing pending timer');
         assert.equal(deferred.business_connection_id, 'business-test');
         assert.ok(deferred.last_business_at instanceof Date);
         await db.exec("UPDATE elena_sessions SET status='awaiting_chat',stopped=true WHERE tg_id=103");
@@ -167,6 +212,7 @@ const {schema, queries, version} = JSON.parse(source.stdout);
             VALUES(201,'uid',now()-interval '1 minute',now(),${version}),
                   (202,'uid',now()-interval '1 minute',now(),0),
                   (203,'uid',now()-interval '1 minute',NULL,${version});`);
+        await db.exec('UPDATE elena_sessions SET followup_version=1 WHERE tg_id IN (201,202,203)');
         const adminJobs = async () => (await dueJobs([201,202,203])).rows
             .filter(row=>Number(row.tg_id)>=201 && Number(row.tg_id)<=203);
         assert.deepEqual((await adminJobs()).map(row=>Number(row.tg_id)), [201]);
@@ -183,9 +229,9 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         await db.exec('UPDATE verification_reminder_settings SET enabled=false WHERE id=1');
         assert.equal((await adminJobs()).length, 0);
         await db.exec('UPDATE verification_reminder_settings SET enabled=true WHERE id=1');
-        await db.exec('UPDATE elena_sessions SET sent_count=2 WHERE tg_id=201');
-        assert.equal((await adminJobs()).length, 0, 'Admin still respects the unanswered-message cap');
-        await db.exec('UPDATE elena_sessions SET sent_count=0 WHERE tg_id=201');
+        await db.exec("UPDATE elena_sessions SET sent_reasons=ARRAY['uid'] WHERE tg_id=201");
+        assert.equal((await adminJobs()).length, 0, 'Admin still respects one follow-up per condition');
+        await db.exec('UPDATE elena_sessions SET sent_reasons=ARRAY[]::text[] WHERE tg_id=201');
         assert.equal((await claim(201)).length, 1, 'Activated admin can claim a due follow-up');
         assert.equal((await claim(201)).length, 0, 'Admin delivery is also duplicate-safe');
         await db.exec(`INSERT INTO users(tg_id) VALUES(301);

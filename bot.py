@@ -1996,6 +1996,7 @@ async def _check_premium(tg_id, uid, bot, state):
             limit=config.daily_limit(True)), config.UNLOCK_KB)
         return
     if not UID_RE.fullmatch(uid):
+        await db.record_access_check(tg_id, config.VERIFY_INVALID_UID)
         await render(bot, tg_id, None, config.MSG_ACCOUNT_ID_INVALID, config.UNLOCK_KB)
         return
     if uid != str(user['uid']):

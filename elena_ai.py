@@ -29,6 +29,11 @@ Reply in the supplied bot language, matching the user's conversational tone.
 Usually write 1-2 short sentences (10-40 words). Registration or troubleshooting
 gets at most 3 short steps and 65 words. Expand only when the user asks for detail,
 still within 100 words. No headings, sales pitches, menus or repetitive sign-offs.
+Separate longer answers into 2 or 3 short paragraphs, each with one idea. The app
+delivers these as separate chat messages. Never pad a short answer to fill space.
+The supplied required_qualifying_deposits is the actual access threshold. Explain that a
+qualifying deposit is real money deposited with the broker, not a fee paid to us.
+Do not promise unlimited signals, lifetime service availability or 95% accuracy.
 For 'hi', say something like 'Hi! How can I help you?' and action none. For thanks,
 respond briefly, with no setup reminder. Never greet again halfway through a chat.
 Address what
@@ -165,6 +170,17 @@ async def reply(user, text, history, *, authorized=False, transport=None):
                 or re.search(r'https?://|tg://|t\.me/|@[\w]|<[^>]+>', result['reply'])):
             return None
         return result
+    except httpx.HTTPStatusError as exc:
+        # Status/code aid deployment checks; never log response text or headers.
+        code = None
+        try:
+            candidate = exc.response.json().get('error', {}).get('code')
+            if isinstance(candidate, str) and re.fullmatch(r'[a-z_]{1,60}', candidate):
+                code = candidate
+        except (ValueError, AttributeError):
+            pass
+        logging.warning('Elena OpenAI request failed; status=%s; code=%s', exc.response.status_code, code)
+        return None
     except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError) as exc:
         logging.warning('Elena AI reply unavailable (%s); using local help', type(exc).__name__)
         return None  # No raw messages, responses or credential-bearing errors in logs.

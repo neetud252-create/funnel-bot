@@ -2,29 +2,43 @@
 
 Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 
-## Current mode: activation only (2026-10-27)
+## Current flow: OpenAI conversation and three follow-ups (2026-10-27)
 
-`ELENA_ACTIVATION_ONLY=1` is now the default. Elena sends only the existing
-activation-success confirmation and opens the customer's normal Pocket IQ
-interface. The same authenticated sender checks, one-time activation version,
-duplicate protection and failed-menu retries still apply. This update does not
-reset accounts or change trading access requirements.
+Production uses `ELENA_ACTIVATION_ONLY=0` and `MIN_DEPOSIT=20`. The default
+activation-only switch remains available as a rollback. `ELENA_STARTUP_CHECK=1`
+runs one synthetic OpenAI greeting and a read-only Telegram connection check at
+startup, logging only status, model, referral-link availability and the threshold.
+It never sends a test message to a customer.
 
-Ordinary chat replies, local fallback replies, AI, voice, old help buttons and
-scheduled UID/deposit/inactivity reminders are disabled. The older verification
-reminder worker is disabled too, so already-queued reminders cannot bypass this
-mode. Stop and human-handoff preferences are still honored silently. No customer
-messages are sent to OpenAI through Elena in this mode. The activation message
-omits the OpenAI chat notice because AI conversation is disabled.
+Activation is immediate and unchanged. Ordinary questions use the existing OpenAI
+Responses integration and recent redacted context, with short replies split into
+at most three chat bubbles. No approval prompt or help keyboard is required.
+The existing 4/5/6-second pacing uses a single eight-second reply budget.
 
-`/elenastatus` reports the current mode. `/reminderson` cannot override it.
-The normal Pocket IQ menus, signals and verification flow continue to work.
-To deliberately restore the earlier conversation behavior, set
-`ELENA_ACTIVATION_ONLY=0` and redeploy. The sections below describe that legacy
-conversation mode unless they concern activation itself.
+After activation, Elena schedules one follow-up per condition:
 
-Offline coverage: `python scripts/check_offline.py test_elena_activation_only.py
-test_activation.py test_elena.py test_elena_timing.py test_verification_reminders.py`.
+- No submitted UID: 10 minutes. Mention two free analyses only if both remain.
+- Invalid-format or unmatched UID: 5 minutes. Explain the check, use the configured
+  referral link for new accounts, and direct existing-account issues to the broker.
+- Confirmed qualifying deposits below $20: 15 minutes. Recheck before delivery.
+  Standard access still has its existing daily quota; Premium rules are unchanged.
+
+Timers persist across restarts. Menu clicks do not restart them; a changed
+condition gets its own timer. Pending verification or provider errors do not
+produce deposit/referral claims. Every send rechecks current state. Stop, Later,
+human handoff, notification opt-outs and Telegram's business reply window apply.
+Partial or uncertain deliveries are not repeated. The separate 24-hour campaign
+is disabled. Existing users retain activation and verification; old reminders are
+not bulk-reactivated. New interactions enroll users in this follow-up policy.
+
+No unsupported accuracy, profit, unlimited/lifetime service or human-identity
+claims are made. The referral disclosure stays beside the actual registration
+link. AI cannot grant access, make payments or place trades.
+
+Offline validation includes activation, UID verification, replies/deadlines,
+translations, follow-up interruption and disposable PostgreSQL state transitions.
+The older sections below record previous releases; this flow supersedes their
+reminder timing, consent-button and activation-only descriptions.
 
 ## Implemented
 

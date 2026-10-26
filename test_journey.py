@@ -72,7 +72,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.row['setup_stage'], 'deposit')
         self.assertFalse(self.row['verified'])
         await self.mod.home_action(H.FakeCB(91, 'home:access', 1), self.bot, self.state)
-        self.assertIn('$37.66', H.last_screen(self.bot)['body'])
+        self.assertIn('$7.66', H.last_screen(self.bot)['body'])
 
     async def test_verify_id_opens_immediately_and_resumes_after_restart(self):
         await self.tap('setup')
@@ -142,13 +142,13 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.row.update(uid='123456789', account_kind='existing')
         with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(config.VERIFY_NEED_DEPOSIT, Decimal('12.34')))):
             card = await self.tap('recheck')
-        self.assertIn('$37.66', card['body'])
+        self.assertIn('$7.66', card['body'])
         self.assertFalse(self.row['verified'])
         self.assertEqual(self.row['setup_stage'], 'deposit')
         self.assertEqual(card['markup'].inline_keyboard[0][0].url, config.BROKER_ACCOUNT_URL)
         self.mod = H._load_bot()  # No in-memory setup state is required to resume.
         await self.mod._resume_setup(self.bot, 91)
-        self.assertIn('$37.66', self.bot.calls[-1]['body'])
+        self.assertIn('$7.66', self.bot.calls[-1]['body'])
         with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(config.VERIFY_GRANTED, Decimal('50')))) as lookup:
             await self.tap('recheck')
         lookup.assert_awaited_once_with(91, '123456789')
@@ -346,10 +346,10 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
                         setup_stage='deposit', access_check_status=config.VERIFY_NEED_DEPOSIT,
                         access_check_deposit=Decimal('12.34'))
         await self.tap('home')
-        self.assertIn('$37.66', (await self.resume())['body'])
+        self.assertIn('$7.66', (await self.resume())['body'])
         for action in ('setup', 'new'):
             await self.tap(action)
-        self.assertIn('$37.66', H.last_screen(self.bot)['body'])
+        self.assertIn('$7.66', H.last_screen(self.bot)['body'])
         self.assertEqual(self.row['account_kind'], 'existing')
         self.assertEqual(self.row['uid'], '123456789')
 

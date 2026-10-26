@@ -26,7 +26,7 @@ def session(**kwargs):
 
 def user(**kwargs):
     return dict(dict(tg_id=42, language='en', verified=False, uid='123456789',
-        setup_stage='help', access_check_status=config.VERIFY_WRONG_LINK), **kwargs)
+        setup_stage='help', access_check_status=config.VERIFY_WRONG_LINK, access_check_deposit=Decimal('0')), **kwargs)
 
 
 class ElenaTests(unittest.IsolatedAsyncioTestCase):
@@ -43,24 +43,24 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
     def test_classifies_actual_access_without_balances_or_new_account_assumptions(self):
         self.assertIsNone(E.reason_for(user(verified=True)))
         for status, reason in [(config.VERIFY_WRONG_LINK, 'uid'),
-                               (config.VERIFY_TEMPORARY, 'temporary'),
+                               (config.VERIFY_TEMPORARY, None),
                                (config.VERIFY_NEED_DEPOSIT, 'deposit')]:
             self.assertEqual(E.reason_for(user(access_check_status=status)), reason)
-        self.assertEqual(E.reason_for(user(access_check_status=None, setup_stage='new')), 'inactive')
-        self.assertEqual(E.reason_for(user(access_check_status=None, setup_stage='register')), 'registration')
-        self.assertEqual(E.wait_seconds('uid'), 60)
-        for reason in ('deposit', 'inactive', 'registration', 'problem', 'temporary'):
-            self.assertEqual(E.wait_seconds(reason), 1800)
+        self.assertEqual(E.reason_for(user(uid=None, access_check_status=None, setup_stage='new')), 'inactive')
+        self.assertEqual(E.reason_for(user(uid=None, access_check_status=None, setup_stage='register')), 'inactive')
+        self.assertEqual(E.wait_seconds('uid'), 300)
+        for reason, seconds in [('deposit',900), ('inactive',600), ('temporary',0)]:
+            self.assertEqual(E.wait_seconds(reason), seconds)
 
     async def test_bot_activity_schedules_help_without_an_elena_message(self):
         event = types.SimpleNamespace(from_user=types.SimpleNamespace(id=42, is_bot=False),
             chat=types.SimpleNamespace(id=42, type='private'), text='/start')
         cases = [
-            (user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 1800),
-            (user(uid=None, access_check_status=None, setup_stage='register'), 'registration', 1800),
-            (user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 1800),
-            (user(), 'uid', 60),
-            (user(verified=True), None, 1800),
+            (user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 600),
+            (user(uid=None, access_check_status=None, setup_stage='register'), 'inactive', 600),
+            (user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 900),
+            (user(), 'uid', 300),
+            (user(verified=True), None, 0),
         ]
         for current, reason, delay in cases:
             with self.subTest(reason=reason), \
@@ -80,12 +80,12 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
         sender = types.SimpleNamespace(id=42, is_bot=False)
         chat = types.SimpleNamespace(id=42, type='private')
         cases = [
-            (types.SimpleNamespace(from_user=sender, chat=chat, text='123456789'), user(), 'uid', 60),
+            (types.SimpleNamespace(from_user=sender, chat=chat, text='123456789'), user(), 'uid', 300),
             (types.SimpleNamespace(from_user=sender, chat=chat, text='/start@goplusaitrader_bot'),
-             user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 1800),
+             user(uid=None, access_check_status=None, setup_stage='new'), 'inactive', 600),
             (types.SimpleNamespace(from_user=sender, message=types.SimpleNamespace(chat=chat),
                                    data='flow:check_access'),
-             user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 1800),
+             user(access_check_status=config.VERIFY_NEED_DEPOSIT), 'deposit', 900),
         ]
         for event, current, reason, delay in cases:
             with self.subTest(reason=reason), \
@@ -206,10 +206,13 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.store, 'claim', AsyncMock(return_value=job)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=job)), \
              patch.object(E.store, 'finish', AsyncMock()) as finish:
             await E.send_job(self.bot, self.conn, job)
-        self.bot.send_message.assert_awaited_once_with(42, E.chat_text(user(), E.copy.CHAT_UID, 'uid'),
-            parse_mode='HTML', business_connection_id='business-test')
+        self.assertIn(self.bot.send_message.await_count, (2,3))
+        for call in self.bot.send_message.await_args_list:
+            self.assertEqual(call.kwargs['business_connection_id'], 'business-test')
+            self.assertNotIn('reply_markup', call.kwargs)
         finish.assert_awaited_once_with(self.conn, job, 'sent')
 
     async def test_rejected_direct_message_never_falls_back_to_pocket_iq(self):
@@ -219,6 +222,7 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.store, 'claim', AsyncMock(return_value=job)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=job)), \
              patch.object(E.store, 'finish', AsyncMock()) as finish:
             await E.send_job(self.bot, self.conn, job)
         self.assertEqual(self.bot.send_message.await_count, 1)
@@ -232,6 +236,7 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.store, 'claim', AsyncMock(return_value=job)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=job)), \
              patch.object(E.store, 'finish', AsyncMock()) as finish:
             await E.send_job(self.bot, self.conn, job)
         self.assertEqual(self.bot.send_message.await_args.kwargs['business_connection_id'], 'business-test')
@@ -245,9 +250,10 @@ class ElenaTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(E, 'active_connection', AsyncMock(return_value=CONNECTION)), \
              patch.object(E.db, 'get_user', AsyncMock(return_value=user())), \
              patch.object(E.store, 'claim', AsyncMock(return_value=job)), \
+             patch.object(E.store, 'session', AsyncMock(return_value=job)), \
              patch.object(E.store, 'finish', AsyncMock()) as finish:
             await E.send_job(self.bot, self.conn, job)
-        finish.assert_awaited_once_with(self.conn, job, 'failed', 31)
+        finish.assert_awaited_once_with(self.conn, job, 'failed', None)
 
     async def test_business_handoff_and_echo_are_not_replied_to(self):
         m = types.SimpleNamespace(chat=types.SimpleNamespace(type='private', id=42),

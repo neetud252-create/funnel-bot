@@ -90,8 +90,8 @@ class TimingTests(unittest.IsolatedAsyncioTestCase):
                               timing=T.ReplyTiming(started, .04))
         self.assertLess(time.monotonic() - started, .8)
         self.assertEqual(cancelled, [True])
-        send.assert_awaited_once()
-        self.assertIn(E.copy.CHAT_REGISTER, send.await_args.args[2])
+        self.assertLessEqual(send.await_count, 3)
+        self.assertIn('Full Pocket IQ access', '\n'.join(c.args[2] for c in send.await_args_list))
 
     async def test_model_capacity_queue_is_included_in_deadline(self):
         real_reply = E.ai.reply

@@ -261,7 +261,7 @@ async def clear_eligibility(tg_id):
 async def record_access_check(tg_id, status, deposit=None):
     import config
     if status not in (config.VERIFY_GRANTED, config.VERIFY_NEED_DEPOSIT,
-                      config.VERIFY_WRONG_LINK, config.VERIFY_TEMPORARY):
+                      config.VERIFY_WRONG_LINK, config.VERIFY_TEMPORARY, config.VERIFY_INVALID_UID):
         raise ValueError('Unknown verification result')
     # Pending/error responses must never be shown as a confirmed zero deposit.
     amount = deposit if status in (config.VERIFY_GRANTED, config.VERIFY_NEED_DEPOSIT) else None
@@ -363,7 +363,8 @@ async def save_uid_only(tg_id: int, uid: str):
     async with pool.acquire() as c:
         await c.execute("""
             INSERT INTO users (tg_id, uid) VALUES ($1, $2)
-            ON CONFLICT (tg_id) DO UPDATE SET uid = EXCLUDED.uid
+            ON CONFLICT (tg_id) DO UPDATE SET uid = EXCLUDED.uid,
+                access_check_status=NULL,access_check_at=NULL,access_check_deposit=NULL
         """, tg_id, uid)
 
 
