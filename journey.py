@@ -26,9 +26,9 @@ def safe_url(value):
         return None
 
 
-def url(label, value, primary=False):
+def url(label, value, primary=False, style=None):
     valid = safe_url(value)
-    return button(label, 'url:' + valid, 'success' if primary else None) if valid else cb(label, 'link_unavailable')
+    return button(label, 'url:' + valid, style or ('success' if primary else None)) if valid else cb(label, 'link_unavailable')
 
 
 def support_url():
@@ -66,12 +66,11 @@ REQUIREMENTS = ('ℹ️ <b>Pocket IQ account requirement</b>\n\n'
     'to verify your account.\n\n'
     'Already have an account? Contact <b>Support</b> before creating another.\n\n'
     '<i>' + DISCLOSURE + '</i>')
-REGISTER = ('🔒 To continue Pocket IQ setup, you must create a <b>new Pocket Option '
-    'account using our bot link</b>:\n'
+REGISTER = ('🔑 <b>Let’s activate your Pocket IQ access!</b>\n\n'
+    '1️⃣ Register for a <b>new Pocket Option account</b> using our bot link below:\n\n'
     '👉 {ref}\n\n'
-    '✅ Once registered, send your <b>Pocket Option UID</b> in this chat '
-    'to verify your account.\n\n'
-    '⚠️ Your UID must contain <b>numbers only</b> — no spaces or symbols.\n'
+    '2️⃣ Send your <b>new account ID (UID)</b> in this chat below 👇\n\n'
+    '❗ Your ID must contain <b>numbers only</b>, without spaces or symbols.\n\n'
     'Example: <code>123456789</code>')
 EXISTING = REGISTER
 REFERRAL_HELP = ('🔗 <b>Let’s check your referral options.</b>\n\n'
@@ -247,11 +246,11 @@ def registration(ref):
         label = valid if len(valid) <= 120 else 'Open Pocket Option registration'
         link = f'<a href="{escape(valid, quote=True)}">{escape(label)}</a>'
     else:
-        link = 'Link unavailable — tap Create New Account below for support.'
+        link = 'Link unavailable — tap Support below.'
     return REGISTER.format(ref=link), [
-        [url('🔗 Create New Account', ref, True)],
-        [button('✅ I Created an Account — Check ID', 'cb:flow:enter_id', 'primary')],
-        [button('⬅️ Back', 'cb:flow:setup', 'danger')]]
+        [url('🔗 Register & Get Access', ref, True)],
+        [url('📖 How to register', config.SETUP_GUIDE_URL, style='primary')],
+        [url('💬 Support', support_url(), style='primary')]]
 
 
 def existing(ref=None):

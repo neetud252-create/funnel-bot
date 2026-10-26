@@ -896,7 +896,9 @@ async def _open_uid_entry(bot, tg_id, state=None):
     await _journey(bot, tg_id, journey.uid(await _ref_url(tg_id)), key='account_id_prompt')
 
 
-async def _show_existing_registration(bot, tg_id, user):
+async def _show_existing_registration(bot, tg_id, user, state=None):
+    if state is not None:
+        await state.set_state(Reg.waiting_uid.state)
     ref = await _ref_url(tg_id)
     if ref:
         await activity_stats.record(tg_id, 'registration_opened')
@@ -909,15 +911,13 @@ async def _resume_setup(bot, tg_id, state=None):
     stage = user.get('setup_stage')
     if user.get('verified'):
         await _show_menu(bot, tg_id)
-    elif stage == 'account_question':
-        await _journey(bot, tg_id, journey.setup(), key='account_question')
     elif stage == 'account_help':
         await _journey(bot, tg_id, journey.account_help(), key='account_question_help')
     elif stage == 'requirements' and user.get('account_kind') == 'new' and not user.get('uid'):
         # Visitors saved on the former introduction now resume registration.
-        await _show_register(bot, tg_id)
+        await _show_register(bot, tg_id, state)
     elif stage in ('existing_account', 'existing_register'):
-        await _show_existing_registration(bot, tg_id, user)
+        await _show_existing_registration(bot, tg_id, user, state)
     elif stage == 'referral_help':
         await _journey(bot, tg_id, journey.referral_help(), key='referral_help')
     elif stage == 'id':
@@ -930,12 +930,9 @@ async def _resume_setup(bot, tg_id, state=None):
     elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
         await _journey(bot, tg_id, journey.pending(), key='verification_pending')
     elif user.get('account_kind') == 'existing' or user.get('uid'):
-        await _show_existing_registration(bot, tg_id, user)
-    elif user.get('account_kind') == 'new':
-        await _show_register(bot, tg_id)
+        await _show_existing_registration(bot, tg_id, user, state)
     else:
-        await db.set_setup_stage(tg_id, 'account_question')
-        await _journey(bot, tg_id, journey.setup(), key='account_question')
+        await _show_register(bot, tg_id, state)
 
 
 @dp.callback_query(F.data.startswith('flow:'))
@@ -953,11 +950,7 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     elif action == 'dashboard':
         await _show_menu(bot, tg_id)
     elif action == 'setup':
-        if user.get('verified'):
-            await _show_menu(bot, tg_id)
-            return
-        await db.set_setup_stage(tg_id, 'account_question')
-        await _journey(bot, tg_id, journey.setup(), key='account_question')
+        await _resume_setup(bot, tg_id, state)
     elif action == 'not_sure':
         if user.get('verified'):
             await _show_menu(bot, tg_id)
@@ -974,10 +967,10 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             await _resume_setup(bot, tg_id, state)
         elif action == 'existing' or user.get('uid'):
             await db.set_setup_stage(tg_id, 'existing_account', account_kind='existing')
-            await _show_existing_registration(bot, tg_id, user)
+            await _show_existing_registration(bot, tg_id, user, state)
         else:
             await db.set_setup_stage(tg_id, 'register', account_kind='new')
-            await _show_register(bot, tg_id)
+            await _show_register(bot, tg_id, state)
     elif action == 'register_again':
         if user.get('verified'):
             await _show_menu(bot, tg_id)
@@ -988,7 +981,7 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
             return
         # Reopen registration without erasing the submitted ID or its result.
         await db.set_setup_stage(tg_id, 'existing_register')
-        await _show_existing_registration(bot, tg_id, user)
+        await _show_existing_registration(bot, tg_id, user, state)
     elif action == 'register_existing':
         if user.get('verified'):
             await _show_menu(bot, tg_id)
@@ -1383,7 +1376,7 @@ async def results(cb: CallbackQuery, bot: Bot):
 async def _open_registration(bot, tg_id, state):
     await _clear_nudge(bot, tg_id)
     await state.clear()
-    await _resume_setup(bot, tg_id)
+    await _resume_setup(bot, tg_id, state)
 
 
 # Must precede the retired trading callbacks below. Existing messages migrate
@@ -1796,17 +1789,19 @@ def _with_ref(item, url):
     return item
 
 
-async def _show_register(bot, tg_id):
+async def _show_register(bot, tg_id, state=None):
     # Preserve the existing attribution sub-ID on the registration button.
     user = await db.get_user(tg_id) or {}
     if user.get('verified'):
         await _show_menu(bot, tg_id)
         return
-    if user.get('account_kind') != 'new' or user.get('uid'):
-        await _resume_setup(bot, tg_id)
+    if user.get('uid'):
+        await _resume_setup(bot, tg_id, state)
         return
     url = await _ref_url(tg_id)
-    await db.set_setup_stage(tg_id, 'register')
+    await db.set_setup_stage(tg_id, 'register', account_kind=user.get('account_kind') or 'new')
+    if state is not None:
+        await state.set_state(Reg.waiting_uid.state)
     await activity_stats.record(tg_id, 'registration_opened')
     await _journey(bot, tg_id, journey.registration(url), media=journey.REGISTER_PHOTO, key='register')
 

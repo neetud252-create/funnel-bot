@@ -56,7 +56,7 @@ class StartHereTests(unittest.IsolatedAsyncioTestCase):
         trial = await self.tap('home:test', anchor)
         self.assertIn('Select market type', trial['body'])
         setup = await self.tap('home:access', anchor)
-        self.assertIn('Do you already have a Pocket Option account?', setup['body'])
+        self.assertIn('Let’s activate your Pocket IQ access!', setup['body'])
         self.assertFalse(row['verified'])
         for callback in ('flow:how', 'flow:community', 'flow:reviews', 'flow:support',
                          'flow:tools', 'home:language'):

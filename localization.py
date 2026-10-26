@@ -41,7 +41,7 @@ EXTRA_MESSAGES = (
     'Open Pocket IQ in a private chat.',
     'Reminders and broadcasts stopped. Bot access is unchanged.',
     'Open Pocket Option registration',
-    'Link unavailable — tap Create New Account below for support.',
+    'Link unavailable — tap Support below.',
 )
 
 _catalog = {}
@@ -120,7 +120,7 @@ _sources = None
 # Whole templates preserve grammar across HTML emphasis and protect interpolated
 # values (asset names, user searches, URLs, IDs, amounts and AI-generated prose).
 TEMPLATES = {}
-for _template_name in ('interface.json', 'activation.json'):
+for _template_name in ('interface.json', 'activation.json', 'access.json'):
     _template_file = Path(__file__).parent / 'locales' / _template_name
     TEMPLATES.update(json.loads(_template_file.read_text(encoding='utf-8')))
 _template_patterns = []
@@ -166,7 +166,7 @@ def translate_message(text, language):
                 label = 'Open Pocket Option registration'
                 values['ref'] = values['ref'].replace('>' + label + '</a>',
                     '>' + translate_parts(label, language) + '</a>')
-                fallback = 'Link unavailable — tap Create New Account below for support.'
+                fallback = 'Link unavailable — tap Support below.'
                 if values['ref'] == fallback:
                     values['ref'] = translate_parts(fallback, language)
             return translations[language].format(**values)
