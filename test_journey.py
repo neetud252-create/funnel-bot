@@ -240,7 +240,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
                 for card in (H.last_screen(self.bot), await self.resume()):
                     self.assertEqual(card['kind'], 'photo')
                     self.assertEqual(card['asset'], 'assets/account_recovery.png')
-                    self.assertIn('We couldn’t confirm this account ID', card['body'])
+                    self.assertIn('Your Pocket Option account wasn’t registered using my link.', card['body'])
                     rows = card['markup'].inline_keyboard
                     self.assertEqual([len(row) for row in rows], [1, 1, 1, 1])
                     self.assertEqual([row[0].url for row in rows], [ref,
