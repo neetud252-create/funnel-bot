@@ -121,7 +121,7 @@ def asset_path(key, ext):
         ext = home_menu.PHOTO_EXT
     elif key == config.UID_GUIDE_PHOTO and ext == 'jpg':
         ext = 'png'
-    elif key == journey.REGISTER_PHOTO and ext == 'jpg':
+    elif key in (journey.REGISTER_PHOTO, journey.RECOVERY_PHOTO) and ext == 'jpg':
         ext = 'png'
     elif ext == 'jpg' and key in (*market_signals.DIRECTION_BANNERS.values(),
                                   'trading_type', 'asset_category', 'currency_pair', 'expiration_time', 'menu'):
@@ -320,7 +320,8 @@ def referenced_assets():
     uploaded, and adding a screen needs no change here.
     """
     ref = {(activation.PHOTO, 'jpg'), (home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
-           (config.UID_GUIDE_PHOTO, 'jpg'), (journey.REGISTER_PHOTO, 'jpg')}
+           (config.UID_GUIDE_PHOTO, 'jpg'), (journey.REGISTER_PHOTO, 'jpg'),
+           (journey.RECOVERY_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -906,6 +907,13 @@ async def _show_existing_registration(bot, tg_id, user, state=None):
                    media=journey.REGISTER_PHOTO, key='existing_account_registration')
 
 
+async def _show_account_recovery(bot, tg_id, state=None):
+    if state is not None:
+        await state.set_state(Reg.waiting_uid.state)
+    await _journey(bot, tg_id, journey.unlinked(ref=await _ref_url(tg_id)),
+                   media=journey.RECOVERY_PHOTO, key='account_unlinked')
+
+
 async def _resume_setup(bot, tg_id, state=None):
     user = await db.get_user(tg_id) or {}
     stage = user.get('setup_stage')
@@ -926,7 +934,7 @@ async def _resume_setup(bot, tg_id, state=None):
     elif user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT and user.get('uid'):
         await _journey(bot, tg_id, journey.deposit(user['access_check_deposit']), key='deposit_requirements')
     elif user.get('access_check_status') == config.VERIFY_WRONG_LINK:
-        await _journey(bot, tg_id, journey.unlinked(ref=await _ref_url(tg_id)), key='account_unlinked')
+        await _show_account_recovery(bot, tg_id, state)
     elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
         await _journey(bot, tg_id, journey.pending(), key='verification_pending')
     elif user.get('account_kind') == 'existing' or user.get('uid'):
@@ -1928,8 +1936,11 @@ async def _run_verification(bot, tg_id, uid):
     if status == config.VERIFY_WRONG_LINK:
         await db.record_access_check(tg_id, status)
         await db.set_setup_stage(tg_id, 'help')
-        text, rows = journey.unlinked(ref=await _ref_url(tg_id))
-        await _replace(bot, tg_id, ack.message_id, text, rows)
+        try:
+            await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
+        except Exception:
+            pass
+        await _show_account_recovery(bot, tg_id)
         return status
     # Every retry was also temporary. Say so once, after the attempts, rather
     # than after each one.

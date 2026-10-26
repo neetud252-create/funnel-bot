@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 import config
 
 REGISTER_PHOTO = 'register_account'
+RECOVERY_PHOTO = 'account_recovery'
 
 
 def button(label, action, style=None):
@@ -101,6 +102,16 @@ PENDING = ('⏳ <b>We cannot confirm your status yet</b>\n\n'
 UNLINKED = ('👤 <b>We could not confirm access for this account</b>\n\n'
     'The account was not found under this referral offer. Check your ID or ask support. '
     'Do not open another trading account to change referral eligibility.')
+REGISTRATION_RECOVERY = ('❌ <b>Let’s fix your Pocket IQ registration!</b>\n\n'
+    'We couldn’t confirm this account ID under our registration link.\n\n'
+    '1️⃣ Check your UID first. If this is an existing account, ask Pocket Option '
+    'support before deleting it or registering again.\n\n'
+    '2️⃣ If you’re eligible to register, create a <b>new Pocket Option account</b> '
+    'using our link:\n\n'
+    '👉 {ref}\n\n'
+    '3️⃣ Send your <b>new or corrected account ID</b> in this chat 👇\n\n'
+    '❗ Your ID must contain <b>numbers only</b>, without spaces or symbols.\n'
+    'Example: <code>123456789</code>')
 PREMIUM = ('👑 <b>Premium access</b>\n\n'
     'Standard: <b>{standard} analyses/day</b>.\n'
     'Premium: <b>{premium} analyses/day</b>.\n'
@@ -180,7 +191,7 @@ TEXTS = {
 }
 SOURCES = (RISK, DISCLOSURE, ACCOUNT_QUESTION, ACCOUNT_UNSURE, REQUIREMENTS,
            REGISTER, EXISTING, REFERRAL_HELP, UID, DEPOSIT, READY,
-           PENDING, UNLINKED, PREMIUM, PREMIUM_SHORT, *TEXTS.values())
+           PENDING, UNLINKED, REGISTRATION_RECOVERY, PREMIUM, PREMIUM_SHORT, *TEXTS.values())
 
 
 def screen(name, user=None):
@@ -239,7 +250,7 @@ def requirements():
         [cb('💬 Support', 'support')]]
 
 
-def registration(ref):
+def referral_link(ref):
     valid = safe_url(ref)
     if valid:
         # Keep long tracking URLs clickable without overflowing Telegram's caption.
@@ -247,7 +258,11 @@ def registration(ref):
         link = f'<a href="{escape(valid, quote=True)}">{escape(label)}</a>'
     else:
         link = 'Link unavailable — tap Support below.'
-    return REGISTER.format(ref=link), [
+    return link
+
+
+def registration(ref):
+    return REGISTER.format(ref=referral_link(ref)), [
         [url('🔗 Register & Get Access', ref, True)],
         [url('📖 How to register', config.SETUP_GUIDE_URL, style='primary')],
         [url('💬 Support', support_url(), style='primary')]]
@@ -306,9 +321,11 @@ def unlinked(premium=False, ref=None):
     if premium:
         return UNLINKED, [[cb('🔄 Check My Linked Account Again', 'premium_check', True)],
                           [cb('💬 Ask Support About Access', 'support')], *back('dashboard')]
-    return UNLINKED, [[cb('🔍 Check a Corrected ID', 'enter_id', True)],
-                      [registration_button(ref)],
-                      [cb('💬 Ask Support About Access', 'support')], *back()]
+    return REGISTRATION_RECOVERY.format(ref=referral_link(ref)), [
+        [url('🔗 Register & Get Access', ref, True)],
+        [url('🗑 How to Delete Your Account', config.ACCOUNT_DELETE_GUIDE_URL, style='primary')],
+        [url('📖 How to register', config.SETUP_GUIDE_URL, style='primary')],
+        [url('💬 Support', support_url(), style='primary')]]
 
 
 def premium(amount=None):
