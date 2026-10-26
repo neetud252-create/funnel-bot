@@ -1,12 +1,14 @@
 """Short chat bubbles. Trusted HTML links are kept intact.
 
 Replies are split on blank lines and long sentences so they arrive as 2-3 short
-messages (never one big block). At most 3 bubbles per reply.
+messages (never one big block). At most 3 bubbles per reply, with light random
+variation so the rhythm never feels scripted.
 
 Follow-up copy applies persuasion levers: reciprocity, commitment, social proof,
 authority, scarcity and loss aversion.
 """
 import re
+import random
 from html import escape
 import config
 import elena_copy as copy
@@ -65,10 +67,11 @@ def _split_sentences(paragraph):
 
 
 def bubbles(text):
-    """Split a reply into at most 3 short bubbles.
+    """Split a reply into at most 3 short bubbles, with light variation.
 
     Blank lines force a new bubble (so the AI's 2-3 short lines arrive as
-    separate messages); a long paragraph is broken on sentence boundaries.
+    separate messages); a long paragraph is broken on sentence boundaries. A
+    small random merge keeps the shape from feeling mechanical.
     """
     text = (text or '').strip()
     if not text:
@@ -82,6 +85,11 @@ def bubbles(text):
             chunks.append(paragraph)
         else:
             chunks.extend(_split_sentences(paragraph))
+    # Occasional variation: sometimes collapse the last two into one.
+    if len(chunks) > 1 and random.random() < 0.25:
+        merged = chunks[-2] + ' ' + chunks[-1]
+        if len(merged) <= MAX_BUBBLE_CHARS + 60:
+            chunks = chunks[:-2] + [merged]
     if len(chunks) <= MAX_BUBBLES:
         return chunks
     return chunks[:MAX_BUBBLES - 1] + [' '.join(chunks[MAX_BUBBLES - 1:])]
