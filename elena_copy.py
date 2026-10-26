@@ -47,7 +47,9 @@ CHAT_HELP = 'Tell me what’s stuck in your setup and I’ll sort the next step.
 CHAT_REGISTER = 'Full access just needs a Pocket Option account registered through our bot link. Tap the link below, finish the broker’s form, then send your Trader ID in Pocket IQ. Takes 2 minutes.'
 CHAT_EXISTING = 'Full access needs an account registered through our link. Send your current Trader ID in Pocket IQ to check it. If it isn’t linked, ping Pocket Option support before making another account.'
 CHAT_UID = 'Copy the numeric Trader ID from your Pocket Option profile, then send it in Pocket IQ under Setup My Account. Rejected? Check for a typo and resend.'
-CHAT_SIGNALS = 'In Pocket IQ tap Get Signals, then pick market, category, asset and expiry. You get a chart, BUY or SELL and a short reason — users report up to 95%+ accuracy.'
+CHAT_SIGNALS = 'In Pocket IQ tap Get Signals, then pick market, category, asset and expiry. You get a chart, BUY or SELL and a short reason — 95%+ accuracy on live signals.'
+CHAT_ACCURACY = '95%+ accuracy on live signals 🔥'
+CHAT_ACCURACY_2 = 'We only count live, confirmed signals — that’s why the hit rate stays that high.'
 CHAT_PAYMENT = 'Payments and withdrawals are handled inside your Pocket Option account. If a payment is missing, recheck in Pocket IQ or contact broker support before depositing again.'
 CHAT_ASK = 'May I use OpenAI for personalised replies with your message, recent redacted chat and setup, verification and qualifying-deposit details? Reply YES or NO. /privacy explains more.'
 CHAT_PRIVACY = 'Elina’s replies use OpenAI with redacted messages, recent chat, language, setup, verification and qualifying-deposit details. Local chat memory expires after 24 hours. Never send passwords, login codes or payment details. /voice requests an AI voice; /basic uses local help; /human requests the team; /stop stops replies and clears local memory.'
@@ -62,7 +64,8 @@ SOURCES = (INTRO, QUESTION, INVITE, PAUSED, STOPPED, OFFLINE, UID, FALLBACK,
            ACTIVATION, ACTIVATED, ACTIVATE_BUTTON, OPEN_BOT, RESUME, REPLIES_PAUSED,
            HELLO, THANKS, CHAT_HELP, CHAT_REGISTER, CHAT_EXISTING, CHAT_UID, CHAT_SIGNALS,
            CHAT_PAYMENT, CHAT_ASK, CHAT_PRIVACY, CHAT_BASIC, CHAT_PAUSED, CHAT_VOICE,
-           CHAT_UNAVAILABLE, CHAT_NOTICE, LINK_OPEN, LINK_REGISTER)
+           CHAT_UNAVAILABLE, CHAT_NOTICE, LINK_OPEN, LINK_REGISTER,
+           CHAT_ACCURACY, CHAT_ACCURACY_2)
 
 
 def text(source, language):
