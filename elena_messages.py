@@ -1,33 +1,40 @@
-"""Short chat bubbles. Trusted HTML links are kept intact."""
+"""Short chat bubbles. Trusted HTML links are kept intact.
+
+Replies are split on blank lines and long sentences so they arrive as 2-3 short
+messages (never one big block). At most 3 bubbles per reply.
+"""
 import re
 from html import escape
 import config
 import elena_copy as copy
 
+MAX_BUBBLES = 3
+MAX_BUBBLE_CHARS = 180
+
 # ---- first-touch copy (kept for compatibility) ----
-NO_UID = 'Hi! Want to try your two free Pocket IQ analyses today?'
-UID_HELP = 'You haven’t submitted a Trader ID yet. Need a hand finding it or setting up your account?'
-WRONG_UID = 'I couldn’t verify the Trader ID you submitted. Please check it against your Pocket Option profile.'
-NEW_ACCOUNT = 'If you’re new to Pocket Option, register through our bot link, then send your new Trader ID in Pocket IQ.'
-EXISTING_ACCOUNT = 'Already have an account? Check with Pocket Option support before creating another one.'
-DEPOSIT = 'Your account is linked. Standard bot access requires at least ${amount} in qualifying deposits with Pocket Option.'
-DEPOSIT_CHECK = 'Already deposited? Recheck your Trader ID in Pocket IQ so we can confirm it. Need help with this step?'
+NO_UID = 'Hey 👋 you still have 2 free Pocket IQ analyses — want to try them?'
+UID_HELP = 'You haven’t submitted your Trader ID yet — takes 2 minutes. Need a hand?'
+WRONG_UID = 'That Trader ID didn’t verify. Copy it straight from your Pocket Option profile and send it again.'
+NEW_ACCOUNT = 'New here? Register through our bot link, then send your new Trader ID in Pocket IQ.'
+EXISTING_ACCOUNT = 'Already on Pocket Option? Check with Pocket Option support before making a second account.'
+DEPOSIT = 'Your account is linked 🎉 One step left: at least ${amount} in qualifying deposits unlocks full access.'
+DEPOSIT_CHECK = 'Already deposited? Hit recheck in Pocket IQ so we confirm it. Need help with this step?'
 
 # ---- escalation copy: touch 1..4 ----
-INACTIVE_1 = 'Still with us? Your two free Pocket IQ analyses are ready whenever you are.'
-INACTIVE_2 = 'Setup takes about two minutes: register through our link, then send your Trader ID in Pocket IQ.'
-INACTIVE_3 = 'Quick reminder — full access needs a Pocket Option account registered through our bot link.'
-INACTIVE_4 = 'Last nudge 👋 Finish setup today and your free analyses are waiting.'
+INACTIVE_1 = 'Hey 👋 your 2 free analyses are ready — don’t leave them unused.'
+INACTIVE_2 = 'Setup is 2 minutes: register through our link, then send your Trader ID in Pocket IQ.'
+INACTIVE_3 = 'Quick one — full access just needs an account registered through our link. Let’s go 🚀'
+INACTIVE_4 = 'Last nudge 👋 finish setup today and your free analyses are yours.'
 
-UID_1 = 'Did the Trader ID step give you trouble? Try copying the number straight from your Pocket Option profile.'
-UID_2 = 'If you already had a Pocket Option account, it’s an account registered through our link that unlocks full access.'
-UID_3 = 'Two minutes to fix it: use our registration link, then submit the new Trader ID in Pocket IQ.'
-UID_4 = 'Last check 👋 Submit your Trader ID in Pocket IQ and full access is one step away.'
+UID_1 = 'Trader ID step giving you trouble? Copy the number straight from your Pocket Option profile.'
+UID_2 = 'It’s the account registered through our link that unlocks full access — 2 minutes.'
+UID_3 = 'Two minutes to fix it: use our registration link, then submit your new Trader ID in Pocket IQ.'
+UID_4 = 'Last check 👋 submit your Trader ID and full access is one step away.'
 
-DEPOSIT_1 = 'Heads up — you can add promo code {code} on Pocket Option for a {pct}% bonus on deposits of ${amount} or more.'
-DEPOSIT_2 = 'A qualifying deposit is real money in your Pocket Option account, not a fee paid to us. Recheck in Pocket IQ once done.'
-DEPOSIT_3 = 'With {code} your ${amount} becomes ${total} to trade. Same risk, more capital to start.'
-DEPOSIT_4 = 'Last reminder 👋 Complete your qualifying deposit and full Pocket IQ access is yours.'
+DEPOSIT_1 = 'Heads up — add promo code {code} on Pocket Option for a {pct}% bonus on deposits of ${amount} or more.'
+DEPOSIT_2 = 'A qualifying deposit is real money in your Pocket Option account, not a fee to us. Recheck once done.'
+DEPOSIT_3 = 'With {code} your ${amount} becomes ${total} to trade — same risk, more capital to start.'
+DEPOSIT_4 = 'Last reminder 👋 finish your qualifying deposit and full Pocket IQ access is yours.'
 
 SOURCES = (NO_UID, UID_HELP, WRONG_UID, NEW_ACCOUNT, EXISTING_ACCOUNT, DEPOSIT, DEPOSIT_CHECK,
            INACTIVE_1, INACTIVE_2, INACTIVE_3, INACTIVE_4,
@@ -42,21 +49,39 @@ FOLLOWUP_DELAYS = {
 }
 
 
-def bubbles(text):
-    """One short greeting; at most three bubbles for a longer explanation."""
-    parts = []
-    for paragraph in re.split(r'\n\s*\n', text.strip()):
-        if len(paragraph) > 180 and '<' not in paragraph:
-            parts.extend(re.split(r'(?<=[.!?。])\s+', paragraph))
-        else:
-            parts.append(paragraph)
-    result = []
+def _split_sentences(paragraph):
+    """Group a long paragraph into <=180-char chunks on sentence boundaries."""
+    parts = re.split(r'(?<=[.!?。！？…])\s+', paragraph.strip())
+    out = []
     for part in filter(None, parts):
-        if result and len(result[-1]) + len(part) < 180:
-            result[-1] += '\n\n' + part
+        if out and len(out[-1]) + len(part) + 1 <= MAX_BUBBLE_CHARS:
+            out[-1] += ' ' + part
         else:
-            result.append(part)
-    return result[:2] + ['\n\n'.join(result[2:])] if len(result) > 3 else result
+            out.append(part)
+    return out
+
+
+def bubbles(text):
+    """Split a reply into at most 3 short bubbles.
+
+    Blank lines force a new bubble (so the AI's 2-3 short lines arrive as
+    separate messages); a long paragraph is broken on sentence boundaries.
+    """
+    text = (text or '').strip()
+    if not text:
+        return []
+    chunks = []
+    for paragraph in re.split(r'\n\s*\n', text):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        if len(paragraph) <= MAX_BUBBLE_CHARS or '<' in paragraph:
+            chunks.append(paragraph)
+        else:
+            chunks.extend(_split_sentences(paragraph))
+    if len(chunks) <= MAX_BUBBLES:
+        return chunks
+    return chunks[:MAX_BUBBLES - 1] + [' '.join(chunks[MAX_BUBBLES - 1:])]
 
 
 def _amount():
