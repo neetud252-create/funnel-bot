@@ -1,8 +1,4 @@
-"""Elina's local, translated setup help. No external AI request is made here.
-
-Chat lines carry the persuasion levers (reciprocity, commitment, social proof,
-authority, scarcity, loss aversion) so the local fallback converts too.
-"""
+"""Elina's local, translated setup help. No external AI request is made here."""
 import localization
 import journey
 
@@ -48,13 +44,13 @@ REPLIES_PAUSED = REOPEN
 HELLO = 'Hi 👋 Ready to grab your 2 free analyses?'
 THANKS = 'Anytime 🙌'
 CHAT_HELP = 'Tell me what’s stuck in your setup and I’ll sort the next step.'
-CHAT_REGISTER = 'You’ve already got 2 free analyses from us 👇 Tap the link and register — most people finish in 2 minutes. Then send your Trader ID in Pocket IQ.'
-CHAT_EXISTING = 'Send your current Trader ID in Pocket IQ and I’ll check the link for you — one step, then full access.'
-CHAT_UID = 'Copy the numeric Trader ID from your Pocket Option profile and send it in Pocket IQ. Most get it first try — rejected just means a typo, resend it.'
-CHAT_SIGNALS = 'In Pocket IQ tap Get Signals, pick market, category, asset and expiry. You get a chart, BUY or SELL and a reason — 95%+ accuracy on live signals.'
+CHAT_REGISTER = 'Here you go 👇 Tap the link and register — takes 2 minutes. Then send your Trader ID in Pocket IQ.'
+CHAT_EXISTING = 'Send your current Trader ID in Pocket IQ and I’ll check the link for you. No need to open another account unless I tell you.'
+CHAT_UID = 'Copy the numeric Trader ID from your Pocket Option profile, then send it in Pocket IQ under Setup My Account. Rejected? Check for a typo and resend.'
+CHAT_SIGNALS = 'In Pocket IQ tap Get Signals, then pick market, category, asset and expiry. You get a chart, BUY or SELL and a short reason — 95%+ accuracy on live signals.'
 CHAT_ACCURACY = '95%+ accuracy on live signals 🔥'
 CHAT_ACCURACY_2 = 'We only count live, confirmed signals — that’s why the hit rate stays that high.'
-CHAT_PAYMENT = 'Payments stay inside your Pocket Option account. If one’s missing, hit recheck and tell me — I’ll sort it, don’t deposit twice.'
+CHAT_PAYMENT = 'Payments and withdrawals happen inside your Pocket Option account. If a payment is missing, hit recheck in Pocket IQ and tell me — I’ll help you sort it.'
 CHAT_ASK = 'May I use OpenAI for personalised replies with your message, recent redacted chat and setup, verification and qualifying-deposit details? Reply YES or NO. /privacy explains more.'
 CHAT_PRIVACY = 'Elina’s replies use OpenAI with redacted messages, recent chat, language, setup, verification and qualifying-deposit details. Local chat memory expires after 24 hours. Never send passwords, login codes or payment details. /voice requests an AI voice; /basic uses local help; /human requests the team; /stop stops replies and clears local memory.'
 CHAT_BASIC = 'Sure, I can still help with basic setup here. Send your question. You can type /ai later for personalised replies.'
