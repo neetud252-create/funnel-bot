@@ -6,6 +6,7 @@ customer by UID. Owner-enabled AI conversation respects customer opt-outs.
 import asyncio
 import logging
 import os
+import random
 import re
 import json
 import secrets
@@ -37,6 +38,10 @@ _check = None
 _busy = lambda uid: False
 _checking = set()
 _touch = {}   # tg_id -> (reason, touch_count); escalates the follow-up chain
+
+# Human-like pause between bubbles (seconds).
+BUBBLE_MIN = float(os.getenv('ELENA_BUBBLE_MIN', '3'))
+BUBBLE_MAX = float(os.getenv('ELENA_BUBBLE_MAX', '5'))
 
 
 def checking(tg_id):
@@ -166,6 +171,8 @@ def basic_answer(user, value):
                          'uid' if existing else 'register')
     if re.search(r'\b(uid|id|trader)\b|wrong|rejected|गलत|पहचान|شناخت', value):
         return chat_text(user, copy.CHAT_UID, 'uid')
+    if re.search(r'accura|win.?rate|percent|%|success|hit.?rate|सटीक|정확|دقت|doğruluk|akurasi|độ chính xác', value):
+        return chat_text(user, copy.CHAT_ACCURACY + '\n\n' + copy.CHAT_ACCURACY_2)
     if re.search(r'signal|analysis|trade|trading|сигнал|सिग्नल|সিগন্যাল|اشار|tín hiệu|sinyal|señal|إشار', value):
         return chat_text(user, copy.CHAT_SIGNALS, 'signals')
     if re.search(r'deposit|withdraw|payment|deposite|जमा|جمع|ডিপোজিট|nạp|çekim|плат|депозит|إيداع|سحب', value):
@@ -200,14 +207,17 @@ async def paused_reply(bot, tg_id, language):
 
 
 async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True, requires_ai=False):
-    """Pace ordinary conversation; recheck Stop/takeover after the wait."""
+    """Pace ordinary conversation; recheck Stop/takeover after each gap."""
     try:
         remaining = timing.remaining()
         if remaining <= 0:
             return False
         async with asyncio.timeout(remaining):
             await timing.wait()
-            for part in messages.bubbles(text):
+            for index, part in enumerate(messages.bubbles(text)):
+                if index:
+                    # Real-person gap between messages.
+                    await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
                 if guard:
                     latest = await store.session(tg_id)
                     if (not latest or latest['stopped'] or latest['handoff']
@@ -265,10 +275,13 @@ async def _ai_answer(bot, tg_id, user, value, timing):
         await store.pause(tg_id, stopped=action == 'stop', handoff=action == 'support')
         if action == 'stop':
             await db.set_notifications(tg_id, False)
-        suffix = {'stop': copy.STOPPED, 'later': copy.PAUSED, 'support': copy.HUMAN}[action]
-        await send_chat_reply(bot, tg_id, escape(result['reply']) + '\n\n' + copy.text(suffix, language)
-                            + ('\n\n' + copy.text(copy.CHAT_PAUSED, language) if action in ('stop', 'support') else ''),
-                            timing, guard=False)
+        body = escape(result['reply'])
+        if action == 'stop':
+            body += '\n\n' + copy.text(copy.STOPPED, language)
+        elif action == 'later':
+            body += '\n\n' + copy.text(copy.PAUSED, language)
+        # 'support': nothing appended — no "paused / team will help" notice.
+        await send_chat_reply(bot, tg_id, body, timing, guard=False)
         return
     nonce = secrets.token_hex(4)
     history += [{'role': 'user', 'content': ai.private_text(user, value)},
@@ -409,9 +422,9 @@ async def business_message(message, bot):
             await db.set_notifications(tg_id, False)
         if activation_only():
             return
-        language = user.get('language', 'en')
-        await send_business(bot, tg_id, copy.text(copy.STOPPED if stop else copy.HUMAN, language)
-                            + '\n\n' + copy.text(copy.CHAT_PAUSED, language))
+        if stop:
+            await send_business(bot, tg_id, copy.text(copy.STOPPED, user.get('language', 'en')))
+        # human/support: no notice
         return
     lock = _locks.setdefault(tg_id, asyncio.Lock())
     async with lock:
@@ -495,7 +508,9 @@ async def confirm_activation(bot, tg_id, user):
         language = user.get('language', 'en')
         text = copy.text(copy.ACTIVATED, language)
         if not activation_only():
-            text += '\n\n' + copy.text(copy.CHAT_NOTICE, language)
+            note = copy.text(copy.CHAT_NOTICE, language)
+            if note:
+                text += '\n\n' + note
         await send_business(bot, tg_id, text, activation_confirmation=True)
     except Exception as exc:
         logging.warning('Activation confirmation unavailable (%s)', type(exc).__name__)
@@ -537,12 +552,11 @@ async def callback(cb, bot):
         await store.pause(tg_id, stopped=action == 'stop', handoff=action == 'human')
         if action == 'stop':
             await db.set_notifications(tg_id, False)
-        if activation_only():
-            return
-        text = copy.text({'stop': copy.STOPPED, 'human': copy.HUMAN, 'later': copy.PAUSED}[action], language)
+        if activation_only() or action == 'human':
+            return  # human: no notice
+        text = copy.text(copy.STOPPED if action == 'stop' else copy.PAUSED, language)
         if business_id:
-            await send_business(bot, tg_id, text + ('\n\n' + copy.text(copy.CHAT_PAUSED, language)
-                                                   if action in ('stop', 'human') else ''))
+            await send_business(bot, tg_id, text)
         else:
             await bot.send_message(tg_id, text)
         return
@@ -707,8 +721,10 @@ async def send_job(bot, conn, job):
     delivered = 0
     sent_parts = []
     try:
-        for part in messages.followup(user, reason, registration_url(user),
-                                      link('uid' if reason == 'uid' else 'setup'), touch=touch):
+        for index, part in enumerate(messages.followup(user, reason, registration_url(user),
+                                      link('uid' if reason == 'uid' else 'setup'), touch=touch)):
+            if index:
+                await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
             latest, current = await store.session(tg_id), await db.get_user(tg_id)
             if (not latest or latest['revision'] != job['revision'] or latest['stopped'] or latest['handoff']
                     or not current or current.get('broadcast_opt_out') or current.get('broadcast_blocked')
