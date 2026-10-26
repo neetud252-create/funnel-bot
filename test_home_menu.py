@@ -62,8 +62,9 @@ async def main():
             assert bot.calls[-1]['asset'] == 'assets/register_account.png'
             assert not fake_db._users[uid]['verified']
         else:
-            assert 'Do you already have a Pocket Option account?' in bot.calls[-1]['body']
-            assert fake_db._users[uid]['setup_stage'] == 'account_question'
+            assert 'Let’s activate your Pocket IQ access!' in bot.calls[-1]['body']
+            assert fake_db._users[uid]['setup_stage'] == 'register'
+            assert state.state == bot_mod.Reg.waiting_uid.state
         await bot_mod.nav(H.FakeCB(uid, 'go:guide', 1), bot, state)
         assert bot.calls[-1]['asset'] == 'assets/guide_opPxk6Af.mp4'
         await bot_mod.home_action(H.FakeCB(uid, 'home:back', 1), bot, state)

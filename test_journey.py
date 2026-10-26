@@ -22,27 +22,27 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         await self.mod.flow_action(H.FakeCB(91, 'flow:' + action, 1), self.bot, self.state)
         return [c for c in self.bot.calls if c['kind'] != 'delete'][-1]
 
-    async def test_both_account_answers_open_the_same_three_button_registration_card(self):
-        card = await self.tap('setup')
-        self.assertIn('Do you already have a Pocket Option account?', card['body'])
+    async def test_setup_and_legacy_account_answers_open_three_link_registration_card(self):
         ref = 'https://pocketoption.com/?a=test&sub_id=source_91'
         cards = []
-        for action in ('new', 'existing'):
+        for action in ('setup', 'new', 'existing'):
             with patch.object(self.mod, '_ref_url', AsyncMock(return_value=ref)):
                 card = await self.tap(action)
             cards.append(card)
             self.assertEqual(card['kind'], 'photo')
             self.assertEqual(card['asset'], 'assets/register_account.png')
-            self.assertIn('new Pocket Option account using our bot link', card['body'])
+            self.assertIn('Let’s activate your Pocket IQ access!', card['body'])
+            self.assertIn('new Pocket Option account', card['body'])
             self.assertIn('<code>123456789</code>', card['body'])
             self.assertNotIn('deposit', card['body'].lower())
             rows = card['markup'].inline_keyboard
             self.assertEqual([len(row) for row in rows], [1, 1, 1])
-            self.assertEqual([row[0].style for row in rows], ['success', 'primary', 'danger'])
+            self.assertEqual([row[0].style for row in rows], ['success', 'primary', 'primary'])
             self.assertEqual(rows[0][0].url, ref)
-            self.assertEqual(rows[1][0].callback_data, 'flow:enter_id')
-            self.assertEqual(rows[2][0].callback_data, 'flow:setup')
-            self.assertIn('Do you already have a Pocket Option account?', (await self.tap('setup'))['body'])
+            self.assertEqual(rows[1][0].url, config.SETUP_GUIDE_URL)
+            self.assertEqual(rows[2][0].url, journey.support_url())
+            self.assertTrue(all(row[0].callback_data is None for row in rows))
+            self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
         self.assertEqual(cards[0]['body'], cards[1]['body'])
         self.assertEqual(cards[0]['markup'], cards[1]['markup'])
         self.assertIsNone(self.row['eligibility_confirmed_at'])
@@ -51,19 +51,15 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_continue_setup_registration_and_id_verification(self):
         self.row.update(setup_stage='requirements')
-        await self.mod.home_action(H.FakeCB(91, 'home:access', 1), self.bot, self.state)
-        card = H.last_screen(self.bot)
-        self.assertIn('Do you already have a Pocket Option account?', card['body'])
-        self.assertEqual([r[0].callback_data for r in card['markup'].inline_keyboard[:3]],
-                         ['flow:existing', 'flow:new', 'flow:not_sure'])
         ref = 'https://pocketoption.com/?a=campaign&sub_id=source_91'
         with patch.object(self.mod, '_ref_url', AsyncMock(return_value=ref)) as referral:
-            card = await self.tap('new')
+            await self.mod.home_action(H.FakeCB(91, 'home:access', 1), self.bot, self.state)
+        card = H.last_screen(self.bot)
+        self.assertIn('Let’s activate your Pocket IQ access!', card['body'])
         referral.assert_awaited_once_with(91)
         self.assertEqual(card['markup'].inline_keyboard[0][0].url, ref)
-        self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:enter_id')
-        await self.tap('enter_id')
         self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
+        # Submitting from the card requires no additional button or confirmation.
         with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(
                 config.VERIFY_NEED_DEPOSIT, Decimal('12.34')))) as lookup:
             await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
@@ -79,7 +75,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         await self.tap('enter_id')
         self.assertIsNone(self.row['eligibility_confirmed_at'])
         self.assertEqual(self.row['setup_stage'], 'id')
-        self.assertEqual(self.row['account_kind'], 'existing')
+        self.assertEqual(self.row['account_kind'], 'new')
         self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
         self.assertIn('Send your Pocket Option Trader ID', H.last_screen(self.bot)['body'])
         self.assertIn('Registration Link', H.last_screen(self.bot)['markup'].inline_keyboard[0][0].text)
@@ -133,9 +129,9 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.row['account_kind'], 'existing')
             self.assertEqual(card['kind'], 'photo')
             self.assertEqual(card['asset'], 'assets/register_account.png')
-            self.assertIn('To continue Pocket IQ setup', card['body'])
+            self.assertIn('Let’s activate your Pocket IQ access!', card['body'])
             self.assertEqual(card['markup'].inline_keyboard[0][0].url, ref)
-            self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:enter_id')
+            self.assertEqual(card['markup'].inline_keyboard[1][0].url, config.SETUP_GUIDE_URL)
             self.assertEqual(self.row['uid'], saved)
 
     async def test_saved_id_deposit_retry_and_restart_resume(self):
@@ -168,7 +164,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.mod, '_ref_url', AsyncMock(return_value=ref)):
             await self.tap('new')
         self.assertEqual(self.row['setup_stage'], 'register')
-        for stage in ('register', 'requirements'):
+        for stage in ('register', 'requirements', 'account_question'):
             self.row['setup_stage'] = stage
             self.mod = H._load_bot()
             with patch.object(self.mod, '_ref_url', AsyncMock(return_value=ref)):
@@ -176,7 +172,8 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             card = H.last_screen(self.bot)
             self.assertEqual(card['markup'].inline_keyboard[0][0].url, ref)
             self.assertEqual(len(card['markup'].inline_keyboard), 3)
-            self.assertIn('Check ID', card['markup'].inline_keyboard[1][0].text)
+            self.assertEqual(card['markup'].inline_keyboard[1][0].url, config.SETUP_GUIDE_URL)
+            self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
         await self.tap('enter_id')
         self.assertIn('What is your Pocket Option Trader ID?', (await self.resume())['body'])
         self.assertEqual(self.state.state, self.mod.Reg.waiting_uid.state)
@@ -186,8 +183,8 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Let’s help you check.', (await self.resume())['body'])
         await self.tap('existing')
         card = await self.resume()
-        self.assertIn('To continue Pocket IQ setup', card['body'])
-        self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:enter_id')
+        self.assertIn('Let’s activate your Pocket IQ access!', card['body'])
+        self.assertEqual(card['markup'].inline_keyboard[1][0].url, config.SETUP_GUIDE_URL)
         await self.tap('enter_id')
         self.assertIn('Send your Pocket Option Trader ID', (await self.resume())['body'])
         with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(
@@ -241,7 +238,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('deposit', card['body'].lower())
         self.assertNotIn('$', card['body'])
         self.assertEqual(self.row['setup_stage'], 'register')
-        self.assertIn('To continue Pocket IQ setup', (await self.resume())['body'])
+        self.assertIn('Let’s activate your Pocket IQ access!', (await self.resume())['body'])
         with patch.object(self.mod, '_ref_url', AsyncMock(return_value='https://pocketoption.com/?a=test')):
             card = await self.tap('register')
         self.assertNotIn('$', card['body'])
@@ -318,7 +315,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.mod, 'media_missing', return_value=True):
             card = await self.tap('existing')
         self.assertEqual(card['kind'], 'text')
-        self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:enter_id')
+        self.assertEqual(card['markup'].inline_keyboard[1][0].url, config.SETUP_GUIDE_URL)
 
     async def test_twenty_dollar_request_only_after_confirmed_referral_and_insufficient_deposits(self):
         self.row.update(eligibility_confirmed_at='now', account_kind='new')
@@ -340,6 +337,23 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertIn('Your Pocket IQ access is ready!', card['body'])
                     self.assertTrue(self.row['verified'])
+
+    async def test_registration_card_accepts_correction_and_keeps_verified_access(self):
+        await self.tap('setup')
+        with patch.object(self.mod, '_panel_verdict', AsyncMock()) as lookup:
+            await self.mod.capture_uid(H.FakeMessage(91, 'wrong id'), self.bot, self.state)
+        lookup.assert_not_awaited()
+        self.assertIsNotNone(self.state.state)
+        with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(
+                config.VERIFY_GRANTED, Decimal('20')))) as lookup:
+            await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
+        lookup.assert_awaited_once_with(91, '123456789')
+        self.assertTrue(self.row['verified'])
+        for action in ('setup', 'new', 'existing', 'register_again'):
+            card = await self.tap(action)
+            self.assertIn('Pocket IQ main menu', card['body'])
+            self.assertTrue(self.row['verified'])
+            self.assertIsNone(self.state.state)
 
     async def test_finish_later_retains_deposit_and_existing_saved_accounts_skip_questions(self):
         self.row.update(eligibility_confirmed_at='now', account_kind='new', uid='123456789',
