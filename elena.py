@@ -27,6 +27,7 @@ import elena_ai as ai
 import activation
 from activation import USERNAME, BOT_USERNAME
 from elena_timing import ReplyTiming
+from elena_mode import activation_only
 
 LOCK_ID = 8790198820
 _locks = weakref.WeakValueDictionary()
@@ -203,6 +204,8 @@ async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True
 
 
 async def ai_answer(bot, tg_id, user, value, *, timing=None):
+    if activation_only():
+        return
     timing = timing or ReplyTiming.start()
     remaining = timing.remaining()
     if remaining <= 0:
@@ -260,6 +263,8 @@ async def _ai_answer(bot, tg_id, user, value, timing):
 
 
 async def voice_reply(bot, tg_id, nonce, language):
+    if activation_only():
+        return
     claimed = await store.claim_voice(tg_id, nonce)
     if not claimed:
         return
@@ -268,7 +273,7 @@ async def voice_reply(bot, tg_id, nonce, language):
     connection = await active_connection(bot)
     if not latest or latest['stopped'] or latest['handoff'] or latest.get('local_only') or latest['reply_nonce'] != nonce:
         return
-    if not business_window(latest, connection):
+    if activation_only() or not business_window(latest, connection):
         return
     if audio is None:
         await send_business(bot, tg_id, copy.text(copy.VOICE_UNAVAILABLE, language))
@@ -328,7 +333,9 @@ async def refresh(tg_id):
         _checking.discard(tg_id)
 
 
-async def send_business(bot, tg_id, text, markup=None):
+async def send_business(bot, tg_id, text, markup=None, *, activation_confirmation=False):
+    if activation_only() and not activation_confirmation:
+        return False
     connection = await active_connection(bot)
     session = await store.session(tg_id)
     if not business_window(session, connection):
@@ -386,6 +393,8 @@ async def business_message(message, bot):
         await store.pause(tg_id, stopped=stop, handoff=not stop)
         if stop:
             await db.set_notifications(tg_id, False)
+        if activation_only():
+            return
         language = user.get('language', 'en')
         await send_business(bot, tg_id, copy.text(copy.STOPPED if stop else copy.HUMAN, language)
                             + '\n\n' + copy.text(copy.CHAT_PAUSED, language))
@@ -403,7 +412,7 @@ async def business_message(message, bot):
         if not session:
             return
         if activation.enabled() and not activation.current(session):
-            reason = reason_for(user) or 'ready'
+            reason = 'ready' if activation_only() else reason_for(user) or 'ready'
             activated = await store.activate(tg_id, connection['connection_id'],
                                              message.message_id, reason, wait_seconds(reason))
             if activated:
@@ -413,6 +422,10 @@ async def business_message(message, bot):
                 if not value or value == activation.DRAFT:
                     return
                 session = activated
+        if activation_only():
+            # The first authenticated DM may activate access. All later chat,
+            # commands and attachments are left for the account's human operator.
+            return
         language = user.get('language', 'en')
         command = value.casefold().strip(' .!?')
         if command == '/privacy':
@@ -476,8 +489,10 @@ async def confirm_activation(bot, tg_id, user):
     # reminders, revoke human handoff, or grant OpenAI consent.
     try:
         language = user.get('language', 'en')
-        await send_business(bot, tg_id, copy.text(copy.ACTIVATED, language)
-                            + '\n\n' + copy.text(copy.CHAT_NOTICE, language))
+        text = copy.text(copy.ACTIVATED, language)
+        if not activation_only():
+            text += '\n\n' + copy.text(copy.CHAT_NOTICE, language)
+        await send_business(bot, tg_id, text, activation_confirmation=True)
     except Exception as exc:
         logging.warning('Activation confirmation unavailable (%s)', type(exc).__name__)
 
@@ -498,6 +513,9 @@ async def callback(cb, bot):
         if not connection or business_id != connection['connection_id']:
             await cb.answer()
             return
+        if activation_only() and action not in ('stop', 'human', 'later'):
+            await cb.answer()
+            return
         if (action not in ('stop', 'human', 'later') and activation.enabled()
                 and not activation.current(await store.session(tg_id))):
             language = await localization.language_for(tg_id)
@@ -516,6 +534,8 @@ async def callback(cb, bot):
         await store.pause(tg_id, stopped=action == 'stop', handoff=action == 'human')
         if action == 'stop':
             await db.set_notifications(tg_id, False)
+        if activation_only():
+            return
         text = copy.text({'stop': copy.STOPPED, 'human': copy.HUMAN, 'later': copy.PAUSED}[action], language)
         if business_id:
             await send_business(bot, tg_id, text + ('\n\n' + copy.text(copy.CHAT_PAUSED, language)
@@ -580,6 +600,13 @@ async def status_command(message):
         return
     connection = await store.connection()
     ready = bool(connection and connection['enabled'] and connection['can_reply'])
+    if activation_only():
+        await message.answer('Elena account: @' + USERNAME + '\nTelegram connection: '
+            + ('connected' if ready else 'not connected')
+            + '\nMode: activation only'
+            + '\nActivation confirmation and Pocket IQ menu handoff: enabled'
+            + '\nChat replies, AI, voice and scheduled reminders: disabled')
+        return
     await message.answer('Elena account: @' + USERNAME + '\nTelegram connection: '
         + ('connected' if ready else 'not connected')
         + '\nContextual help and timers: installed'
@@ -595,7 +622,7 @@ class ActivityMiddleware:
         message = getattr(event, 'message', None) or event
         user = getattr(event, 'from_user', None)
         chat = getattr(message, 'chat', None)
-        normal = (enabled() and user and not user.is_bot and chat and chat.type == 'private'
+        normal = (enabled() and not activation_only() and user and not user.is_bot and chat and chat.type == 'private'
                   and user.id == chat.id and not getattr(message, 'business_connection_id', None)
                   and not str(getattr(event, 'data', '')).startswith('elena:'))
         if normal and user.id in config.ADMIN_IDS:
@@ -643,6 +670,8 @@ class ActivityMiddleware:
 
 
 async def send_job(bot, conn, job):
+    if activation_only():
+        return
     tg_id = job['tg_id']
     if activation.enabled() and not activation.current(job):
         # Pre-update reminders cannot present old feature controls before the
@@ -704,14 +733,15 @@ async def worker(bot):
                     continue
                 try:
                     await conn.execute("UPDATE elena_sessions SET status='uncertain',sent_count=sent_count+1 WHERE status='sending'")
-                    logging.info('Elena assistant ready; account=@%s; awaiting authorized connection if absent', USERNAME)
+                    logging.info('Elena assistant ready; account=@%s; activation_only=%s', USERNAME, activation_only())
                     while True:
                         await conn.execute("UPDATE elena_sessions SET history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,memory_since=NULL,revision=revision+1 WHERE memory_since<now()-interval '1 day'")
                         await conn.execute("UPDATE elena_sessions SET pending_question=NULL,pending_question_at=NULL WHERE pending_question_at<now()-interval '1 day'")
                         if activation.enabled():
                             for pending in await store.pending_activations(conn):
                                 await activation.deliver(bot, pending['tg_id'])
-                        for job in await store.due(conn, config.ADMIN_IDS):
+                        jobs = [] if activation_only() else await store.due(conn, config.ADMIN_IDS)
+                        for job in jobs:
                             lock = _locks.setdefault(job['tg_id'], asyncio.Lock())
                             async with lock:
                                 await send_job(bot, conn, job)

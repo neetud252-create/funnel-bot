@@ -11,6 +11,7 @@ from aiogram.exceptions import (
 )
 import config
 import db
+from elena_mode import activation_only
 
 TEXT = (
     "Hi! Your Pocket IQ verification is still incomplete.\n\n"
@@ -83,6 +84,9 @@ def keyboard():
 
 
 async def report(conn):
+    if activation_only():
+        return ('Verification reminders: OFF (Elena activation-only mode).\n'
+                'Scheduled reminders are disabled, including previously queued deliveries.')
     enabled = await conn.fetchval('SELECT enabled FROM verification_reminder_settings WHERE id=1')
     count = await conn.fetchval(f'SELECT count(*) FROM users u LEFT JOIN '
         f'verification_reminder_deliveries d USING(tg_id) WHERE {ELIGIBLE} AND {DUE}',
@@ -103,6 +107,9 @@ def install(dp, is_admin, open_funnel):
         if m.chat.type != 'private' or not is_admin(m.from_user.id):
             return
         name = (m.text or '').split()[0].split('@')[0]
+        if name == '/reminderson' and activation_only():
+            await m.answer('Reminders stay OFF while Elena activation-only mode is enabled.')
+            return
         async with db.pool.acquire() as conn:
             if name in ('/reminderson', '/remindersoff'):
                 await conn.execute('UPDATE verification_reminder_settings SET enabled=$1,updated_at=now() WHERE id=1',
@@ -128,6 +135,8 @@ def install(dp, is_admin, open_funnel):
 
 
 async def send_one(bot, conn, tg_id):
+    if activation_only():
+        return 0
     # Admission is rechecked immediately before each send, including after a 429.
     claim = await conn.fetchrow(CLAIM, list(config.ADMIN_IDS), tg_id)
     if not claim:
@@ -163,6 +172,8 @@ async def send_one(bot, conn, tg_id):
 
 
 async def run_queue(bot, conn):
+    if activation_only():
+        return
     await conn.execute("UPDATE verification_reminder_deliveries SET status='uncertain' WHERE status='sending'")
     logging.info('Verification reminders ready; one per user after 24h; /verificationreminders')
     while True:
@@ -178,6 +189,9 @@ async def run_queue(bot, conn):
 
 
 async def worker(bot):
+    if activation_only():
+        logging.info('Verification reminders disabled; Elena activation-only mode')
+        return
     while True:
         try:
             async with db.pool.acquire() as conn:

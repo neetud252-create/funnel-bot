@@ -2,6 +2,30 @@
 
 Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 
+## Current mode: activation only (2026-10-27)
+
+`ELENA_ACTIVATION_ONLY=1` is now the default. Elena sends only the existing
+activation-success confirmation and opens the customer's normal Pocket IQ
+interface. The same authenticated sender checks, one-time activation version,
+duplicate protection and failed-menu retries still apply. This update does not
+reset accounts or change trading access requirements.
+
+Ordinary chat replies, local fallback replies, AI, voice, old help buttons and
+scheduled UID/deposit/inactivity reminders are disabled. The older verification
+reminder worker is disabled too, so already-queued reminders cannot bypass this
+mode. Stop and human-handoff preferences are still honored silently. No customer
+messages are sent to OpenAI through Elena in this mode. The activation message
+omits the OpenAI chat notice because AI conversation is disabled.
+
+`/elenastatus` reports the current mode. `/reminderson` cannot override it.
+The normal Pocket IQ menus, signals and verification flow continue to work.
+To deliberately restore the earlier conversation behavior, set
+`ELENA_ACTIVATION_ONLY=0` and redeploy. The sections below describe that legacy
+conversation mode unless they concern activation itself.
+
+Offline coverage: `python scripts/check_offline.py test_elena_activation_only.py
+test_activation.py test_elena.py test_elena_timing.py test_verification_reminders.py`.
+
 ## Implemented
 
 - `/start` first shows a one-time activation card with exactly one button:

@@ -14,6 +14,7 @@ async def main():
     A, E = B.activation, B.elena
     os.environ['ELENA_ACTIVATION_ENABLED'] = '1'
     os.environ['ELENA_ENABLED'] = '1'
+    os.environ['ELENA_ACTIVATION_ONLY'] = '0'  # Legacy conversation mode; see test_elena_activation_only.
     now = datetime.now(timezone.utc)
     uid = 74001
     state = H.FakeState()
