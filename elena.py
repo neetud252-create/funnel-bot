@@ -2,6 +2,7 @@
 
 Only @elitecsupport may attach. A different chat/account cannot select another
 customer by UID. Owner-enabled AI conversation respects customer opt-outs.
+Elina is the single support channel; links are always attached when asked.
 """
 import asyncio
 import logging
@@ -42,6 +43,9 @@ _touch = {}   # tg_id -> (reason, touch_count); escalates the follow-up chain
 # Human-like pause between bubbles (seconds).
 BUBBLE_MIN = float(os.getenv('ELENA_BUBBLE_MIN', '3'))
 BUBBLE_MAX = float(os.getenv('ELENA_BUBBLE_MAX', '5'))
+
+# If the user asks for the link, always attach it even if the model said "none".
+LINK_REQUEST = re.compile(r'(?i)\b(link|register|registration|sign.?up|referral|join|refer)\b')
 
 
 def checking(tg_id):
@@ -146,10 +150,11 @@ def chat_text(user, body, action='none', *, generated=False):
         nonlocal text
         text += '\n\n<a href="' + escape(url, quote=True) + '">' + copy.text(label, language) + '</a>'
     if action == 'register':
+        # Only the registration link — no commission/disclosure line.
         if url := registration_url(user):
             add_link(copy.LINK_REGISTER, url)
-            text += '\n' + copy.text(journey.DISCLOSURE, language)
-        add_link(copy.LINK_OPEN, link('uid'))
+        else:
+            add_link(copy.LINK_OPEN, link('setup'))
     elif action != 'none':
         target = {'uid': 'uid', 'guide': 'guide', 'signals': 'signals',
                   'setup': 'setup', 'deposit': 'setup', 'recheck': 'setup'}.get(action)
@@ -271,6 +276,11 @@ async def _ai_answer(bot, tg_id, user, value, timing):
             timing, revision=latest['revision'], requires_ai=True)
         return
     action = result['action']
+    # Hard guarantee: attach the registration link whenever one is asked for,
+    # or whenever the model talks about a link but chose action "none".
+    if action == 'none' and (LINK_REQUEST.search(value or '')
+                             or re.search(r'(?i)\blink\b', result['reply'])):
+        action = 'register'
     if action in ('stop', 'later', 'support'):
         await store.pause(tg_id, stopped=action == 'stop', handoff=action == 'support')
         if action == 'stop':
