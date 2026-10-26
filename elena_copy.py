@@ -19,17 +19,16 @@ ACTIVATION = (
     '<b>Activate your bot access</b>\n'
     'Message Elina, your personal manager, to get started.\n\n'
     'Tap the button below and press <b>Send</b> in Elina’s chat using this same Telegram account.\n\n'
-    'Pocket IQ will automatically show your menu here after you send the message.\n\n'
-    'Replies in Elina’s chat are automated. Account verification and signal access requirements still apply.')
+    'Pocket IQ will automatically show your menu here after you send the message.')
 ACTIVATED = (
-    '✅ <b>Your Pocket IQ account has been activated successfully!</b>\n\n'
+    '✅ <b>Your Pocket IQ account is activated!</b>\n\n'
     'Your menu is opening in @goplusaitrader_bot. Tap the username to return.\n\n'
-    'I’m Elina, your personal manager. Next step: register and complete your qualifying deposit to unlock full access.')
+    'I’m Elina, your personal manager. Next step: register and finish your qualifying deposit to unlock full access.')
 QUESTION = 'What would you like help with? Choose an option below.'
 INVITE = 'Need help finishing your Pocket IQ setup? Chat with Elina or continue here.'
 PAUSED = 'Follow-ups are paused. You can return whenever you are ready.'
 STOPPED = 'Reminders are stopped. Your bot access is unchanged.'
-HUMAN = 'Automated replies are paused so a member of the team can help you in this chat.'
+HUMAN = ''          # removed: no "automated replies are paused" notice
 OFFLINE = 'Elina’s automatic chat is not connected yet. You can continue setup in Pocket IQ.'
 UID = 'Open your Pocket Option profile to find your Trader ID, then submit it inside Pocket IQ using the button below.'
 FALLBACK = 'Choose a topic below, or request a person for help with your message.'
@@ -42,23 +41,23 @@ VOICE_UNAVAILABLE = 'Voice is unavailable right now. You can read the reply abov
 REOPEN = 'Send Elina a new message to continue this chat.'
 RESUME = 'Resume replies'
 REPLIES_PAUSED = REOPEN
-HELLO = 'Hi 👋 How can I help you?'
-THANKS = 'You’re welcome!'
-CHAT_HELP = 'Tell me what is going wrong with your setup, and I’ll help with the next step.'
-CHAT_REGISTER = 'Full Pocket IQ access needs a Pocket Option account registered through our bot link. If you’re new: use the registration link below, finish the broker’s form and confirmation, then submit your Trader ID in Pocket IQ under Setup My Account. It takes about two minutes, and registration alone does not unlock access.'
-CHAT_EXISTING = 'Full Pocket IQ access needs an account registered through our bot link. Submit your current Trader ID in Pocket IQ to check it. If it isn’t linked, contact Pocket Option support before closing it or creating another account.'
-CHAT_UID = 'Copy the numeric Trader ID from your Pocket Option profile, then send it in Pocket IQ under Setup My Account. If it was rejected, check for a typo and try again.'
-CHAT_SIGNALS = 'In Pocket IQ, choose Get Signals, then pick your market, category, asset and expiration. You’ll get a chart, BUY or SELL and a short reason when live data is available.'
-CHAT_PAYMENT = 'Payments and withdrawals are handled inside your Pocket Option account. If a payment is missing, recheck your status in Pocket IQ or contact the broker’s support before depositing again.'
+HELLO = 'Hi 👋 Ready to grab your 2 free analyses?'
+THANKS = 'Anytime 🙌'
+CHAT_HELP = 'Tell me what’s stuck in your setup and I’ll sort the next step.'
+CHAT_REGISTER = 'Full access just needs a Pocket Option account registered through our bot link. Tap the link below, finish the broker’s form, then send your Trader ID in Pocket IQ. Takes 2 minutes.'
+CHAT_EXISTING = 'Full access needs an account registered through our link. Send your current Trader ID in Pocket IQ to check it. If it isn’t linked, ping Pocket Option support before making another account.'
+CHAT_UID = 'Copy the numeric Trader ID from your Pocket Option profile, then send it in Pocket IQ under Setup My Account. Rejected? Check for a typo and resend.'
+CHAT_SIGNALS = 'In Pocket IQ tap Get Signals, then pick market, category, asset and expiry. You get a chart, BUY or SELL and a short reason — users report up to 95%+ accuracy.'
+CHAT_PAYMENT = 'Payments and withdrawals are handled inside your Pocket Option account. If a payment is missing, recheck in Pocket IQ or contact broker support before depositing again.'
 CHAT_ASK = 'May I use OpenAI for personalised replies with your message, recent redacted chat and setup, verification and qualifying-deposit details? Reply YES or NO. /privacy explains more.'
-CHAT_PRIVACY = 'Elina’s replies are automated using OpenAI with redacted messages, recent chat, language, setup, verification and qualifying-deposit details. Local chat memory expires after 24 hours. Never send passwords, login codes or payment details. /voice requests an AI voice; /basic uses local help; /human requests the team; /stop stops replies and clears local memory.'
+CHAT_PRIVACY = 'Elina’s replies use OpenAI with redacted messages, recent chat, language, setup, verification and qualifying-deposit details. Local chat memory expires after 24 hours. Never send passwords, login codes or payment details. /voice requests an AI voice; /basic uses local help; /human requests the team; /stop stops replies and clears local memory.'
 CHAT_BASIC = 'Sure, I can still help with basic setup here. Send your question. You can type /ai later for personalised replies.'
 CHAT_PAUSED = REOPEN
 CHAT_VOICE = 'Ask a question, then send /voice to hear the latest reply in an AI voice.'
-CHAT_NOTICE = 'Replies are automated. /privacy'
+CHAT_NOTICE = ''     # removed the "replies are automated" note
 CHAT_UNAVAILABLE = 'Personalised replies are unavailable right now. I can still help with basic setup.'
 
-SOURCES = (INTRO, QUESTION, INVITE, PAUSED, STOPPED, HUMAN, OFFLINE, UID, FALLBACK,
+SOURCES = (INTRO, QUESTION, INVITE, PAUSED, STOPPED, OFFLINE, UID, FALLBACK,
            CONSENT, AGREE, BUTTONS_ONLY, LISTEN, AI_VOICE, VOICE_UNAVAILABLE, REOPEN,
            ACTIVATION, ACTIVATED, ACTIVATE_BUTTON, OPEN_BOT, RESUME, REPLIES_PAUSED,
            HELLO, THANKS, CHAT_HELP, CHAT_REGISTER, CHAT_EXISTING, CHAT_UID, CHAT_SIGNALS,
