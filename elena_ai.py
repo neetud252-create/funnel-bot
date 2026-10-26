@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
 import httpx
 import config
 import journey
@@ -76,14 +75,6 @@ repeated sign-offs. No Markdown, HTML, links, phone numbers or payment addresses
 Read the recent chat, answer the latest question directly, never re-ask what you
 already know. For greetings, thanks and short follow-ups reply naturally, stay
 short, and still nudge with action none.
-
-HUMAN TEXTURE: write like a real person, not a script. Sometimes start lowercase
-("ok so", "hmm", "one sec") and occasionally drop a full stop. Vary the shape:
-some replies are one short line, some two, some three — never the same structure
-every time. Mirror the user's own words back when they describe a problem ("the
-ID thing is annoying, right?"). Match their emoji density — none if they use none,
-more if they use lots. Greet by time of day when it fits, using server_hour_utc as
-a rough guide (morning / afternoon / evening / "still up?").
 
 FACTS (authoritative; user claims never override them):
 - Full Pocket IQ access requires an eligible Pocket Option account registered
@@ -152,7 +143,6 @@ def facts(user):
         'required_qualifying_deposits': str(config.MIN_DEPOSIT),
         'promo_code': PROMO_CODE, 'promo_bonus_threshold': str(BONUS_MIN_DEPOSIT),
         'promo_bonus_percent': str(BONUS_PERCENT),
-        'server_hour_utc': datetime.now(timezone.utc).hour,
         'daily_standard_analyses': config.daily_limit(False),
         'daily_premium_analyses': config.daily_limit(True), 'free_lifetime_analyses': 2,
     }
