@@ -1,4 +1,4 @@
-"""Pocket IQ -> Elena Business connection, contextual help and durable reminders.
+"""Pocket IQ -> Elina Business connection, contextual help and durable reminders.
 
 Only @elitecsupport may attach. A different chat/account cannot select another
 customer by UID. Owner-enabled AI conversation respects customer opt-outs.
@@ -36,6 +36,7 @@ _locks = weakref.WeakValueDictionary()
 _check = None
 _busy = lambda uid: False
 _checking = set()
+_touch = {}   # tg_id -> (reason, touch_count); escalates the follow-up chain
 
 
 def checking(tg_id):
@@ -61,7 +62,27 @@ def reason_for(user):
 
 
 def wait_seconds(reason):
-    return {'uid': 300, 'inactive': 600, 'deposit': 900}.get(reason, 0)
+    chain = messages.FOLLOWUP_DELAYS.get(reason)
+    return chain[0] if chain else 0
+
+
+def next_delay(reason, touch):
+    chain = messages.FOLLOWUP_DELAYS.get(reason)
+    return chain[touch + 1] if chain and touch + 1 < len(chain) else 0
+
+
+def touch_index(tg_id, reason):
+    stored = _touch.get(tg_id)
+    if not stored or stored[0] != reason:
+        _touch[tg_id] = (reason, 0)
+        return 0
+    return stored[1]
+
+
+def bump_touch(tg_id, reason):
+    stored = _touch.get(tg_id)
+    count = (stored[1] if stored and stored[0] == reason else 0) + 1
+    _touch[tg_id] = (reason, count)
 
 
 def link(action='home'):
@@ -86,7 +107,7 @@ def registration_button(user):
 
 def keyboard(reason='inactive', *, invitation=False, user=None):
     if invitation:
-        rows = [[button('Chat with Elena', url=activation.chat_url())],
+        rows = [[button('Chat with Elina', url=activation.chat_url())],
                 [button('Continue Setup', url=link('setup'))]]
     else:
         choices = {
@@ -121,14 +142,14 @@ def chat_text(user, body, action='none', *, generated=False):
         text += '\n\n<a href="' + escape(url, quote=True) + '">' + copy.text(label, language) + '</a>'
     if action == 'register':
         if url := registration_url(user):
-            add_link('🔗 Registration Link', url)
+            add_link(copy.LINK_REGISTER, url)
             text += '\n' + copy.text(journey.DISCLOSURE, language)
-        add_link('Open Pocket IQ', link('uid'))
+        add_link(copy.LINK_OPEN, link('uid'))
     elif action != 'none':
         target = {'uid': 'uid', 'guide': 'guide', 'signals': 'signals',
                   'setup': 'setup', 'deposit': 'setup', 'recheck': 'setup'}.get(action)
         if target:
-            add_link('Open Pocket IQ', link(target))
+            add_link(copy.LINK_OPEN, link(target))
     return text
 
 
@@ -169,13 +190,13 @@ async def resume_chat(bot, tg_id, user, session):
         session = await store.resume(tg_id, session['revision'])
         if not session:
             return
-        logging.info('Elena automatic replies resumed by customer')
+        logging.info('Elina automatic replies resumed by customer')
     await send_business(bot, tg_id, copy.text(copy.HELLO, user.get('language', 'en')))
 
 
 async def paused_reply(bot, tg_id, language):
     await send_business(bot, tg_id, copy.text(copy.CHAT_PAUSED, language))
-    logging.info('Elena stale help button; a new message can continue the chat')
+    logging.info('Elina stale help button; a new message can continue the chat')
 
 
 async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True, requires_ai=False):
@@ -193,12 +214,11 @@ async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True
                             or (revision is not None and latest['revision'] != revision)
                             or (requires_ai and latest.get('local_only'))):
                         return False
-                # One shared deadline; never retry a partially delivered reply.
                 if not await send_business(bot, tg_id, part):
                     return False
             return True
     except TimeoutError:
-        logging.warning('Elena chat reply deadline reached; no duplicate retry')
+        logging.warning('Elina chat reply deadline reached; no duplicate retry')
         return False
 
 
@@ -213,7 +233,7 @@ async def ai_answer(bot, tg_id, user, value, *, timing=None):
         async with asyncio.timeout(remaining):
             await _ai_answer(bot, tg_id, user, value, timing)
     except TimeoutError:
-        logging.warning('Elena chat reply deadline reached; no duplicate retry')
+        logging.warning('Elina chat reply deadline reached; no duplicate retry')
 
 
 async def _ai_answer(bot, tg_id, user, value, timing):
@@ -228,10 +248,9 @@ async def _ai_answer(bot, tg_id, user, value, timing):
                     history = claimed['history']
                     if isinstance(history, str):
                         history = json.loads(history)
-                    # Also bounds time waiting for the shared model semaphore.
                     result = await ai.reply(user, value, history, authorized=True)
         except TimeoutError:
-            logging.info('Elena AI time budget reached; using local help')
+            logging.info('Elina AI time budget reached; using local help')
     latest = await store.session(tg_id)
     if (not latest or (claimed and latest['revision'] != claimed['revision'])
             or latest['stopped'] or latest['handoff'] or latest.get('local_only')):
@@ -258,7 +277,7 @@ async def _ai_answer(bot, tg_id, user, value, timing):
         return
     if await send_chat_reply(bot, tg_id, chat_text(user, result['reply'], action, generated=True),
                              timing, revision=claimed['revision'], requires_ai=True):
-        logging.info('Elena AI reply delivered; action=%s', action)
+        logging.info('Elina AI reply delivered; action=%s', action)
 
 
 async def voice_reply(bot, tg_id, nonce, language):
@@ -277,7 +296,7 @@ async def voice_reply(bot, tg_id, nonce, language):
     if audio is None:
         await send_business(bot, tg_id, copy.text(copy.VOICE_UNAVAILABLE, language))
         return
-    await bot.send_voice(tg_id, BufferedInputFile(audio, filename='elena.mp3'),
+    await bot.send_voice(tg_id, BufferedInputFile(audio, filename='elina.mp3'),
         caption=copy.text(copy.AI_VOICE, language), business_connection_id=connection['connection_id'])
 
 
@@ -288,7 +307,6 @@ async def active_connection(bot):
     try:
         current = await bot.get_business_connection(saved['connection_id'])
     except Exception:
-        # Unknown permission status fails closed, never falls back to an account session.
         return None
     if current.user.id != saved['owner_id']:
         return None
@@ -338,7 +356,7 @@ async def send_business(bot, tg_id, text, markup=None, *, activation_confirmatio
     connection = await active_connection(bot)
     session = await store.session(tg_id)
     if not business_window(session, connection):
-        logging.info('Elena reply skipped; business reply window or connection unavailable')
+        logging.info('Elina reply skipped; business reply window or connection unavailable')
         return False
     await bot.send_message(tg_id, text, parse_mode='HTML', reply_markup=markup,
                            business_connection_id=connection['connection_id'])
@@ -353,7 +371,7 @@ async def connection_changed(event):
     elif (event.user.username or '').lower() != USERNAME:
         return
     await store.save_connection(event)
-    logging.info('Elena connection updated; enabled=%s; can_reply=%s',
+    logging.info('Elina connection updated; enabled=%s; can_reply=%s',
                  event.is_enabled, bool(event.rights and event.rights.can_reply))
 
 
@@ -365,7 +383,6 @@ async def business_message(message, bot):
         return
     connection = await store.connection()
     if not connection:
-        # Recover a connection update missed while the worker was being deployed.
         try:
             await connection_changed(await bot.get_business_connection(message.business_connection_id))
             connection = await store.connection()
@@ -375,15 +392,13 @@ async def business_message(message, bot):
             or message.business_connection_id != connection['connection_id']):
         return
     if message.from_user.id == connection['owner_id']:
-        # A real operator has taken over this particular customer conversation.
         await store.pause(message.chat.id, handoff=True)
-        logging.info('Elena automatic replies paused; operator takeover')
+        logging.info('Elina automatic replies paused; operator takeover')
         return
     if message.from_user.id != message.chat.id:
         return
     tg_id = message.from_user.id
     value = (message.text or '').strip()
-    # Interrupt pending model work immediately when the customer stops or requests a person.
     if value.lower() in ('/stop', '/unsubscribe', 'stop', 'human', '/human', 'support', 'person'):
         user = await db.get_user(tg_id)
         if not user:
@@ -402,8 +417,9 @@ async def business_message(message, bot):
     async with lock:
         user = await db.get_user(tg_id)
         if not user:
-            # Do not import unrelated private contacts into the marketing database.
             return
+        # A genuine customer message restarts the escalation chain from touch 1.
+        _touch.pop(tg_id, None)
         if not await store.session(tg_id):
             reason = reason_for(user) or 'ready'
             await store.observe(tg_id, reason, wait_seconds(reason))
@@ -415,15 +431,12 @@ async def business_message(message, bot):
             activated = await store.activate(tg_id, connection['connection_id'],
                                              message.message_id, reason, wait_seconds(reason))
             if activated:
-                # Both chats update immediately; neither waits for AI or a timer.
                 await asyncio.gather(confirm_activation(bot, tg_id, user),
                                      activation.deliver(bot, tg_id))
                 if not value or value == activation.DRAFT:
                     return
                 session = activated
         if activation_only():
-            # The first authenticated DM may activate access. All later chat,
-            # commands and attachments are left for the account's human operator.
             return
         language = user.get('language', 'en')
         command = value.casefold().strip(' .!?')
@@ -436,13 +449,10 @@ async def business_message(message, bot):
         if session['stopped'] or session['handoff']:
             if not value:
                 return
-            # A fresh customer message reopens conversation and is itself the
-            # question to answer. Do not require a command or send a placeholder.
-            # A newer Stop/operator event still wins through the revision check.
             session = await store.resume(tg_id, session['revision'])
             if not session:
                 return
-            logging.info('Elena conversation reopened by a new customer message')
+            logging.info('Elina conversation reopened by a new customer message')
         if command == '/ai':
             if ai.configured():
                 await allow_ai(bot, tg_id, user)
@@ -453,8 +463,6 @@ async def business_message(message, bot):
             await store.local_only(tg_id)
             await send_business(bot, tg_id, copy.text(copy.CHAT_BASIC, language))
             return
-        # Honor answers to permission offers sent by the previous release.
-        # New conversations never send an offer or require YES/NO.
         if not session.get('consent') and session.get('consent_prompted_at'):
             if command in ('yes', 'allow ai', 'да', 'так', 'हाँ', 'हां', 'হ্যাঁ', 'جی', 'ہاں', 'có', 'ya', 'evet', 'sí', 'si', 'نعم', 'sim'):
                 await allow_ai(bot, tg_id, user)
@@ -472,11 +480,10 @@ async def business_message(message, bot):
         reason = reason_for(user) or 'ready'
         if reason == 'deposit' and timing.processing_remaining() > 0:
             try:
-                # A slow broker lookup must not consume the conversation budget.
                 async with asyncio.timeout(min(1.5, timing.processing_remaining())):
                     user = await refresh(tg_id)
             except TimeoutError:
-                logging.info('Elena quick status lookup timed out; using saved status')
+                logging.info('Elina quick status lookup timed out; using saved status')
         if value and not session.get('local_only') and ai.configured():
             await ai_answer(bot, tg_id, user, value, timing=timing)
         else:
@@ -484,8 +491,6 @@ async def business_message(message, bot):
 
 
 async def confirm_activation(bot, tg_id, user):
-    # This response to the new activation message does not resume marketing
-    # reminders, revoke human handoff, or grant OpenAI consent.
     try:
         language = user.get('language', 'en')
         text = copy.text(copy.ACTIVATED, language)
@@ -502,7 +507,6 @@ async def callback(cb, bot):
         return
     tg_id = cb.from_user.id
     action = (cb.data or '').split(':', 1)[-1]
-    # Normal-bot invitation buttons may only stop/pause. Other help is in Elena.
     business_id = getattr(cb.message, 'business_connection_id', None)
     if not business_id and action not in ('later', 'stop'):
         await cb.answer()
@@ -600,19 +604,19 @@ async def status_command(message):
     connection = await store.connection()
     ready = bool(connection and connection['enabled'] and connection['can_reply'])
     if activation_only():
-        await message.answer('Elena account: @' + USERNAME + '\nTelegram connection: '
+        await message.answer('Elina account: @' + USERNAME + '\nTelegram connection: '
             + ('connected' if ready else 'not connected')
             + '\nMode: activation only'
             + '\nActivation confirmation and Pocket IQ menu handoff: enabled'
             + '\nChat replies, AI, voice and scheduled reminders: disabled')
         return
-    await message.answer('Elena account: @' + USERNAME + '\nTelegram connection: '
+    await message.answer('Elina account: @' + USERNAME + '\nTelegram connection: '
         + ('connected' if ready else 'not connected')
-        + '\nFollow-ups: no UID 10m; wrong UID 5m; deposit 15m'
+        + '\nFollow-up chain: no UID 10m/30m/3h/24h/48h; wrong UID 5m/1h/6h/24h/48h; deposit 15m/1h/6h/24h/72h'
         + '\nAI replies: ' + ('configured; direct replies enabled' if ai.configured() else 'OPENAI_API_KEY missing')
         + '\nVoice: optional /voice command; AI-generated'
-        + '\nConnect Pocket IQ in Elena’s Telegram Settings > Chat Automation.'
-        + '\nUsers must message Elena before she can reply from that account.'
+        + '\nConnect Pocket IQ in Elina’s Telegram Settings > Chat Automation.'
+        + '\nUsers must message Elina before she can reply from that account.'
         + '\n/remindersoff pauses scheduled reminders; /reminderson resumes them.')
 
 
@@ -625,8 +629,6 @@ class ActivityMiddleware:
                   and user.id == chat.id and not getattr(message, 'business_connection_id', None)
                   and not str(getattr(event, 'data', '')).startswith('elena:'))
         if normal and user.id in config.ADMIN_IDS:
-            # Activated owners can exercise the customer journey. Operator
-            # commands, reports and broadcast drafting must not move its timer.
             text = (getattr(event, 'text', None) or '').strip()
             command = text.split(maxsplit=1)[0].split('@')[0].lower() if text else ''
             normal = (not command.startswith('/') or command == '/start') and not str(
@@ -638,12 +640,12 @@ class ActivityMiddleware:
                         normal = not await broadcast.draft(user.id)
                 except Exception:
                     normal = False
-                    logging.warning('Elena admin test eligibility unavailable')
+                    logging.warning('Elina admin test eligibility unavailable')
         if normal:
             try:
                 await store.activity(user.id)
             except Exception:
-                logging.warning('Elena activity unavailable')
+                logging.warning('Elina activity unavailable')
         failed = False
         try:
             return await handler(event, data)
@@ -660,12 +662,13 @@ class ActivityMiddleware:
                             and getattr(event, 'text', None) and not event.text.startswith('/')
                             and not re.fullmatch(r'\d{5,15}', event.text.strip())):
                         reason = 'uid'
+                    _touch.pop(user.id, None)
                     await store.observe(user.id, reason, wait_seconds(reason))
                     if user.id in config.ADMIN_IDS:
-                        logging.info('Elena admin test follow-up updated; reason=%s; delay=%ss',
+                        logging.info('Elina admin test follow-up updated; reason=%s; delay=%ss',
                                      reason or 'resolved', wait_seconds(reason) if reason else 0)
                 except Exception:
-                    logging.warning('Elena follow-up scheduling unavailable')
+                    logging.warning('Elina follow-up scheduling unavailable')
 
 
 async def send_job(bot, conn, job):
@@ -673,8 +676,6 @@ async def send_job(bot, conn, job):
         return
     tg_id = job['tg_id']
     if activation.enabled() and not activation.current(job):
-        # Pre-update reminders cannot present old feature controls before the
-        # customer has completed the newly required activation.
         await store.await_chat(conn, job)
         return
     connection = await active_connection(bot)
@@ -690,24 +691,24 @@ async def send_job(bot, conn, job):
         reason = reason_for(user)
         if reason is None:
             return
-    # A typing/verification update during the lookup invalidates the old job.
     if reason != job['reason']:
         await store.observe(tg_id, reason, wait_seconds(reason))
         return
     if not business_window(job, connection):
-        # No automatic invitation or normal-bot fallback when Elena cannot DM.
         await store.await_chat(conn, job)
         return
     if reason == 'inactive':
         _, remaining = await chart_trial._status(conn, tg_id)
         user = dict(user, free_analyses_remaining=remaining)
+    touch = touch_index(tg_id, reason)
     job = await store.claim(conn, job)
     if not job:
         return
     delivered = 0
     sent_parts = []
     try:
-        for part in messages.followup(user, reason, registration_url(user), link('uid' if reason == 'uid' else 'setup')):
+        for part in messages.followup(user, reason, registration_url(user),
+                                      link('uid' if reason == 'uid' else 'setup'), touch=touch):
             latest, current = await store.session(tg_id), await db.get_user(tg_id)
             if (not latest or latest['revision'] != job['revision'] or latest['stopped'] or latest['handoff']
                     or not current or current.get('broadcast_opt_out') or current.get('broadcast_blocked')
@@ -719,13 +720,17 @@ async def send_job(bot, conn, job):
             delivered += 1
             sent_parts.append(part)
         await store.finish(conn, job, 'sent')
+        # Advance the escalation chain; stop when the last touch is delivered.
+        bump_touch(tg_id, reason)
+        if (delay := next_delay(reason, touch)):
+            await store.observe(tg_id, reason, delay)
         try:
             plain = unescape(re.sub(r'<[^>]+>', '', '\n'.join(sent_parts)))
             await store.remember_followup(tg_id, job['revision'], ai.private_text(user, plain))
         except Exception:
-            logging.warning('Elena follow-up memory unavailable; delivery already recorded')
-        logging.info('Elena follow-up delivered; reason=%s; admin=%s',
-                     reason, tg_id in config.ADMIN_IDS)
+            logging.warning('Elina follow-up memory unavailable; delivery already recorded')
+        logging.info('Elina follow-up delivered; reason=%s; touch=%s; admin=%s',
+                     reason, touch, tg_id in config.ADMIN_IDS)
     except TelegramRetryAfter as exc:
         retry = not delivered and job['attempts'] < 5
         await store.finish(conn, job, 'pending' if retry else 'partial' if delivered else 'failed',
@@ -735,26 +740,25 @@ async def send_job(bot, conn, job):
     except TelegramBadRequest:
         await store.finish(conn, job, 'failed')
     except asyncio.CancelledError:
-        raise  # Persisted sending marker is recovered as uncertain, never resent.
+        raise
     except Exception:
         await store.finish(conn, job, 'uncertain')
-        logging.warning('Elena delivery uncertain; not repeating')
+        logging.warning('Elina delivery uncertain; not repeating')
 
 
 async def worker(bot):
     if not activation_only() and os.getenv('ELENA_STARTUP_CHECK') == '1':
-        # Synthetic input only: no customer chat, no Telegram send, no stored IDs.
         try:
             connection = await active_connection(bot)
             async with db.pool.acquire() as probe:
                 reminders = await probe.fetchval('SELECT enabled FROM verification_reminder_settings WHERE id=1')
-            logging.info('Elena startup check: business_connected=%s; registration_link=%s; minimum_deposit=%s',
+            logging.info('Elina startup check: business_connected=%s; registration_link=%s; minimum_deposit=%s',
                          bool(connection), bool(registration_url({})), config.MIN_DEPOSIT)
-            logging.info('Elena startup check: scheduled_reminders=%s', reminders)
+            logging.info('Elina startup check: scheduled_reminders=%s', reminders)
             result = await ai.reply({'language': 'en', 'setup_stage': 'new'}, 'Hi', [], authorized=True)
-            logging.info('Elena startup check: openai_reply=%s; model=%s', bool(result), ai.MODEL)
+            logging.info('Elina startup check: openai_reply=%s; model=%s', bool(result), ai.MODEL)
         except Exception as exc:
-            logging.warning('Elena startup check unavailable (%s)', type(exc).__name__)
+            logging.warning('Elina startup check unavailable (%s)', type(exc).__name__)
     while True:
         try:
             async with db.pool.acquire() as conn:
@@ -763,7 +767,7 @@ async def worker(bot):
                     continue
                 try:
                     await conn.execute("UPDATE elena_sessions SET status='uncertain',sent_count=sent_count+1 WHERE status='sending'")
-                    logging.info('Elena assistant ready; account=@%s; activation_only=%s', USERNAME, activation_only())
+                    logging.info('Elina assistant ready; account=@%s; activation_only=%s', USERNAME, activation_only())
                     while True:
                         await conn.execute("UPDATE elena_sessions SET history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,memory_since=NULL,revision=revision+1 WHERE memory_since<now()-interval '1 day'")
                         await conn.execute("UPDATE elena_sessions SET pending_question=NULL,pending_question_at=NULL WHERE pending_question_at<now()-interval '1 day'")
@@ -782,8 +786,7 @@ async def worker(bot):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            # Error types aid diagnosis without logging customer data or credentials.
-            logging.warning('Elena queue unavailable; retrying (%s)', type(exc).__name__)
+            logging.warning('Elina queue unavailable; retrying (%s)', type(exc).__name__)
             await asyncio.sleep(5)
 
 
@@ -794,4 +797,7 @@ def install(dp, check, busy):
     dp.business_message.register(business_message)
     dp.callback_query.register(callback, F.data.startswith('elena:'))
     dp.message.register(open_elena, Command('elena'))
-    dp.message.register(status_command, Command('elenastatus'))
+    dp.message.register(status_command, Command('status'))
+    # Remove this line if your original registered ActivityMiddleware elsewhere.
+    dp.update.outer_middleware(ActivityMiddleware())
+    return worker
