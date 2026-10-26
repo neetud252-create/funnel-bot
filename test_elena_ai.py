@@ -103,6 +103,9 @@ class AIClientTests(unittest.IsolatedAsyncioTestCase):
 
 class AIFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        mode = patch.dict(os.environ, ELENA_ACTIVATION_ONLY='0')
+        mode.start()
+        self.addCleanup(mode.stop)
         # Timing is exercised separately with a virtual clock and real deadlines.
         wait = patch.object(E.ReplyTiming, 'wait', AsyncMock())
         wait.start()

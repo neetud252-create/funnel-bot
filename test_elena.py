@@ -31,6 +31,9 @@ def user(**kwargs):
 
 class ElenaTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        mode = patch.dict(os.environ, ELENA_ACTIVATION_ONLY='0')
+        mode.start()
+        self.addCleanup(mode.stop)
         wait = patch.object(E.ReplyTiming, 'wait', AsyncMock())
         wait.start()
         self.addCleanup(wait.stop)

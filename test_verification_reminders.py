@@ -1,5 +1,6 @@
 """Offline tests. No production credentials, recipients or Telegram requests."""
 import asyncio
+import os
 import sys
 import types
 import unittest
@@ -13,6 +14,9 @@ from aiogram.methods import SendMessage
 
 class ReminderTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        mode = patch.dict(os.environ, ELENA_ACTIVATION_ONLY='0')
+        mode.start()
+        self.addCleanup(mode.stop)
         self.conn = types.SimpleNamespace(fetchrow=AsyncMock(return_value={'attempts': 1}),
             execute=AsyncMock(), fetchval=AsyncMock(), fetch=AsyncMock())
         self.bot = types.SimpleNamespace(send_message=AsyncMock())
