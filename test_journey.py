@@ -200,7 +200,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_verdict_resumes_but_corrected_id_intent_takes_priority(self):
         self.row.update(eligibility_confirmed_at='now', account_kind='existing')
         for status, expected in ((config.VERIFY_TEMPORARY, 'We cannot confirm your status yet'),
-                                 (config.VERIFY_WRONG_LINK, 'We could not confirm access')):
+                                 (config.VERIFY_WRONG_LINK, 'Let’s fix your Pocket IQ registration!')):
             await self.tap('enter_id')
             self.mod._uid_lookup_at.clear()
             with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(status, None))), \
@@ -228,6 +228,60 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.resume())['markup'].inline_keyboard[0][0].url, ref)
         self.assertEqual(self.row['uid'], '123456789')
         self.assertEqual(self.row['access_check_status'], config.VERIFY_WRONG_LINK)
+
+    async def test_unmatched_uid_shows_recovery_artwork_and_accepts_corrected_id(self):
+        self.row['ref_code'] = 'recovery_91'
+        for record in (None, {'campaign_id': 'another-campaign', 'sum_deposits': Decimal('100')}):
+            self.mod._uid_lookup_at.clear()
+            with patch.object(self.mod.panelbot, 'lookup_trader', AsyncMock(return_value=record)), \
+                 patch.object(config, 'REF_LINK', 'https://pocketoption.com/?a=test'):
+                ref = config.ref_url('recovery_91')
+                await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
+                for card in (H.last_screen(self.bot), await self.resume()):
+                    self.assertEqual(card['kind'], 'photo')
+                    self.assertEqual(card['asset'], 'assets/account_recovery.png')
+                    self.assertIn('We couldn’t confirm this account ID', card['body'])
+                    rows = card['markup'].inline_keyboard
+                    self.assertEqual([len(row) for row in rows], [1, 1, 1, 1])
+                    self.assertEqual([row[0].url for row in rows], [ref,
+                        config.ACCOUNT_DELETE_GUIDE_URL, config.SETUP_GUIDE_URL, journey.support_url()])
+                    self.assertEqual([row[0].style for row in rows], ['success', 'primary', 'primary', 'primary'])
+                    self.assertTrue(all(row[0].callback_data is None for row in rows))
+                    self.assertIsNotNone(self.state.state)
+            self.assertFalse(self.row['verified'])
+        # A corrected ID can be sent straight from the recovery card after restart.
+        self.mod._uid_lookup_at.clear()
+        with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(
+                config.VERIFY_GRANTED, Decimal('20')))) as lookup:
+            await self.mod.capture_uid(H.FakeMessage(91, '987654321'), self.bot, self.state)
+        lookup.assert_awaited_once_with(91, '987654321')
+        self.assertTrue(self.row['verified'])
+
+    async def test_recovery_caption_translations_and_missing_artwork_fallback(self):
+        import html
+        import re
+        import localization
+        from xml.etree import ElementTree as ET
+        self.assertIn((journey.RECOVERY_PHOTO, 'jpg'), self.mod.referenced_assets())
+        for ref in ('https://pocketoption.com/?a=test&sub_id=' + 'x' * 1500,
+                    'https://pocketoption.com/?a=test&source="<quoted>"',
+                    'https://pocketoption.com/?a=test&sub_id=' + 'x' * 80):
+            text, rows = journey.unlinked(ref=ref)
+            for language in localization.CODES:
+                rendered = localization.translate_message(text, language)
+                anchor = ET.fromstring('<root>' + rendered + '</root>').find('a')
+                self.assertEqual(anchor.get('href'), ref)
+                plain = html.unescape(re.sub('<[^>]+>', '', rendered))
+                self.assertLessEqual(len(plain.encode('utf-16-le')) // 2, 1024, language)
+                self.assertNotIn('{ref}', rendered)
+                if language != 'en':
+                    self.assertNotIn('Let’s fix your', rendered)
+        with patch.object(self.mod, 'media_missing', return_value=True), \
+             patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(config.VERIFY_WRONG_LINK, None))):
+            await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
+        card = H.last_screen(self.bot)
+        self.assertEqual(card['kind'], 'text')
+        self.assertEqual(len(card['markup'].inline_keyboard), 4)
 
     async def test_access_details_available_before_registration_without_losing_progress(self):
         await self.tap('new')

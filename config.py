@@ -37,6 +37,8 @@ SUPPORT_URL = (SUPPORT.strip() if SUPPORT.strip().startswith(('https://', 'http:
 REVIEWS_URL = os.getenv('REVIEWS_URL', 'https://t.me/goplustrade_reviews').strip()
 COMMUNITY_URL = os.getenv('COMMUNITY_URL', 'https://t.me/goplusaitrader').strip()
 SETUP_GUIDE_URL = os.getenv('SETUP_GUIDE_URL', 'https://youtu.be/uJHBwXZVnNI').strip()
+ACCOUNT_DELETE_GUIDE_URL = os.getenv('ACCOUNT_DELETE_GUIDE_URL',
+    'https://pocketoption.com/blog/en/product-guides/how-to-close-pocket-option-account/').strip()
 # Existing accounts go to the broker, never back through a registration link.
 BROKER_ACCOUNT_URL = os.getenv('BROKER_ACCOUNT_URL', 'https://pocketoption.com/en/login/').strip()
 BROKER_TERMS_URL = 'https://pocketoption.com/en/public-offer/'
