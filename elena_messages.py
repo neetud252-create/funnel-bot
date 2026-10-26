@@ -1,7 +1,10 @@
 """Short chat bubbles. Trusted HTML links are kept intact.
 
 Replies are split on blank lines and long sentences so they arrive as 2-3 short
-messages (never one big block). At most 3 bubbles per reply. No commission note.
+messages (never one big block). At most 3 bubbles per reply.
+
+Follow-up copy applies persuasion levers: reciprocity, commitment, social proof,
+authority, scarcity and loss aversion.
 """
 import re
 from html import escape
@@ -12,29 +15,29 @@ MAX_BUBBLES = 3
 MAX_BUBBLE_CHARS = 180
 
 # ---- first-touch copy (kept for compatibility) ----
-NO_UID = 'Hey 👋 you still have 2 free Pocket IQ analyses — want to try them?'
-UID_HELP = 'You haven’t submitted your Trader ID yet — takes 2 minutes. Need a hand?'
-WRONG_UID = 'That Trader ID didn’t verify. Copy it straight from your Pocket Option profile and send it again.'
-NEW_ACCOUNT = 'New here? Register through our bot link, then send your new Trader ID in Pocket IQ.'
-EXISTING_ACCOUNT = 'Already on Pocket Option? Send your Trader ID in Pocket IQ — I’ll check the link for you.'
-DEPOSIT = 'Your account is linked 🎉 One step left: at least ${amount} in qualifying deposits unlocks full access.'
-DEPOSIT_CHECK = 'Already deposited? Hit recheck in Pocket IQ so we confirm it. Need help with this step?'
+NO_UID = 'Hey 👋 you’ve got 2 free Pocket IQ analyses waiting — they’re on us. Want them?'
+UID_HELP = 'You’re about 2 minutes from done: register through our link, then drop your Trader ID in Pocket IQ.'
+WRONG_UID = 'That Trader ID didn’t verify — easy fix. Copy it straight from your Pocket Option profile and resend.'
+NEW_ACCOUNT = 'New here? Register through our link, then send your new Trader ID in Pocket IQ — most people finish in 2 minutes.'
+EXISTING_ACCOUNT = 'Already on Pocket Option? Send your current Trader ID in Pocket IQ and I’ll check the link for you.'
+DEPOSIT = 'Your account’s linked 🎉 One step left: at least ${amount} in qualifying deposits unlocks full access.'
+DEPOSIT_CHECK = 'Already deposited? Hit recheck in Pocket IQ and I’ll confirm it — don’t leave it hanging.'
 
 # ---- escalation copy: touch 1..4 ----
-INACTIVE_1 = 'Hey 👋 your 2 free analyses are ready — don’t leave them unused.'
-INACTIVE_2 = 'Setup is 2 minutes: register through our link, then send your Trader ID in Pocket IQ.'
-INACTIVE_3 = 'Quick one — full access just needs an account registered through our link. Let’s go 🚀'
-INACTIVE_4 = 'Last nudge 👋 finish setup today and your free analyses are yours.'
+INACTIVE_1 = 'Hey 👋 most people finish this in 2 minutes — you’re nearly there.'
+INACTIVE_2 = 'Your 2 free analyses are still unused. One quick step and they’re yours.'
+INACTIVE_3 = 'Quick one — signals go out daily, don’t miss today’s. 2 minutes to set up.'
+INACTIVE_4 = 'Last nudge 👋 finish today so your free analyses don’t go to waste.'
 
-UID_1 = 'Trader ID step giving you trouble? Copy the number straight from your Pocket Option profile.'
-UID_2 = 'It’s the account registered through our link that unlocks full access — 2 minutes.'
-UID_3 = 'Two minutes to fix it: use our registration link, then submit your new Trader ID in Pocket IQ.'
-UID_4 = 'Last check 👋 submit your Trader ID and full access is one step away.'
+UID_1 = 'Trader ID giving you trouble? Copy it straight from your Pocket Option profile — 10 seconds.'
+UID_2 = 'It’s only the account made through our link that unlocks full access. You’re one step away.'
+UID_3 = 'Two minutes to fix it: use our link, then send the new Trader ID. Most people get it first try.'
+UID_4 = 'Last check 👋 you’ve done the hard part — just resend the ID and you’re in.'
 
-DEPOSIT_1 = 'Heads up — add promo code {code} on Pocket Option for a {pct}% bonus on deposits of ${amount} or more.'
-DEPOSIT_2 = 'A qualifying deposit is real money in your Pocket Option account, not a fee to us. Recheck once done.'
-DEPOSIT_3 = 'With {code} your ${amount} becomes ${total} to trade — same risk, more capital to start.'
-DEPOSIT_4 = 'Last reminder 👋 finish your qualifying deposit and full Pocket IQ access is yours.'
+DEPOSIT_1 = 'Heads up — promo code {code} gives you a {pct}% bonus on deposits of ${amount}+. Same deposit, more capital.'
+DEPOSIT_2 = 'A qualifying deposit is real money in YOUR Pocket Option account — not a fee paid to us.'
+DEPOSIT_3 = 'With {code} your ${amount} becomes ${total} to trade. That’s free capital you’d otherwise miss.'
+DEPOSIT_4 = 'Last reminder 👋 traders with access are taking signals right now — don’t leave yours locked.'
 
 SOURCES = (NO_UID, UID_HELP, WRONG_UID, NEW_ACCOUNT, EXISTING_ACCOUNT, DEPOSIT, DEPOSIT_CHECK,
            INACTIVE_1, INACTIVE_2, INACTIVE_3, INACTIVE_4,
