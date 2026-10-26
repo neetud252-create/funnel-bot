@@ -135,7 +135,7 @@ ADMIN_IDS   = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip(
 ANALYTICS_LINK_BASE = os.getenv("ANALYTICS_LINK_BASE", "https://track.topxtracker.online").strip().rstrip('/')
 
 # Group F verification thresholds.
-MIN_DEPOSIT = Decimal(os.getenv("MIN_DEPOSIT", "50"))
+MIN_DEPOSIT = Decimal(os.getenv("MIN_DEPOSIT", "20"))
 CAMPAIGN_ID = os.getenv("CAMPAIGN_ID", "969716")
 
 # Verification mode. "live" (default) runs the real @AffiliatePocketBot lookup.
@@ -172,6 +172,7 @@ UID_VERIFY_TIMEOUT = int(os.getenv("UID_VERIFY_TIMEOUT", "90"))
 # on a settled answer. These four names are what keeps them apart.
 VERIFY_GRANTED      = "granted"        # campaign matched and the deposit clears
 VERIFY_NEED_DEPOSIT = "need_deposit"   # matched, deposit under MIN_DEPOSIT
+VERIFY_INVALID_UID = "invalid_uid"    # local format failure, not a broker verdict
 VERIFY_WRONG_LINK   = "wrong_link"     # not found, or a different campaign
 VERIFY_TEMPORARY    = "temporary"      # panel unavailable / timeout / flood etc
 

@@ -51,6 +51,9 @@ ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activation_version INTEGER N
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS pending_question TEXT;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS pending_question_at TIMESTAMPTZ;
 ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS consent_prompted_at TIMESTAMPTZ;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS followup_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS sent_reasons TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE elena_sessions ADD COLUMN IF NOT EXISTS activity_until TIMESTAMPTZ;
 """
 
 
@@ -85,31 +88,36 @@ async def save_connection(item):
 async def activity(tg_id):
     # Invalidate a job while the normal handler is still processing this input.
     await execute("""UPDATE elena_sessions SET revision=revision+1,
-        due_at=CASE WHEN status='pending' THEN now()+interval '1 hour' ELSE due_at END
+        activity_until=now()+interval '2 minutes'
         WHERE tg_id=$1""", tg_id)
 
 
 async def observe(tg_id, reason, delay):
     if reason is None:
         await execute("""UPDATE elena_sessions SET reason='ready',status='resolved',
-            due_at=NULL,revision=revision+1 WHERE tg_id=$1""", tg_id)
+            due_at=NULL,activity_until=NULL,revision=revision+1 WHERE tg_id=$1""", tg_id)
         return
-    await execute("""INSERT INTO elena_sessions(tg_id,reason,due_at,sent_count)
-        SELECT $1,$2,now()+$3::double precision*interval '1 second',0
+    await execute("""INSERT INTO elena_sessions(tg_id,reason,due_at,sent_count,followup_version)
+        SELECT $1,$2,now()+$3::double precision*interval '1 second',0,1
         FROM users WHERE tg_id=$1
         ON CONFLICT(tg_id) DO UPDATE SET reason=$2,revision=elena_sessions.revision+1,
         status=CASE WHEN elena_sessions.stopped OR elena_sessions.handoff THEN 'paused'
-          WHEN elena_sessions.reason<>$2 OR elena_sessions.status IN ('pending','awaiting_chat') THEN 'pending'
+          WHEN $2=ANY(elena_sessions.sent_reasons) THEN 'sent'
+          WHEN elena_sessions.followup_version=0 OR elena_sessions.reason<>$2
+            OR elena_sessions.status='awaiting_chat' THEN 'pending'
           ELSE elena_sessions.status END,
-        due_at=CASE WHEN elena_sessions.reason<>$2 OR elena_sessions.status IN ('pending','awaiting_chat')
+        due_at=CASE WHEN elena_sessions.stopped OR elena_sessions.handoff
+            OR $2=ANY(elena_sessions.sent_reasons) THEN NULL
+          WHEN elena_sessions.followup_version=0 OR elena_sessions.reason<>$2
           THEN now()+$3::double precision*interval '1 second' ELSE elena_sessions.due_at END,
-        updated_at=now()""", tg_id, reason, delay)
+        followup_version=1,activity_until=NULL,updated_at=now()""", tg_id, reason, delay)
 
 
 async def incoming(tg_id, connection_id, message_id):
     return await one("""UPDATE elena_sessions SET
         last_business_at=now(),business_connection_id=$2,last_message_id=$3,
-        sent_count=0,status='paused',due_at=NULL,revision=revision+1,updated_at=now()
+        status=CASE WHEN status='awaiting_chat' THEN 'pending' ELSE status END,
+        revision=revision+1,updated_at=now()
         WHERE tg_id=$1 AND (business_connection_id IS DISTINCT FROM $2
           OR last_message_id IS NULL OR last_message_id<$3) RETURNING *""",
         tg_id, connection_id, message_id)
@@ -119,7 +127,7 @@ async def activate(tg_id, connection_id, message_id, reason, delay):
     # Only a just-recorded, authenticated incoming message can activate its own
     # sender. This never updates users.verified, deposits, trials or quotas.
     return await one("""UPDATE elena_sessions SET activated_at=now(),activation_version=$6,
-        activation_opened_at=NULL,activation_attempts=0,activation_retry_at=now(),reason=$4,
+        activation_opened_at=NULL,activation_attempts=0,activation_retry_at=now(),reason=$4,followup_version=1,
         status=CASE WHEN stopped OR handoff THEN 'paused'
                     WHEN $4='ready' THEN 'resolved' ELSE 'pending' END,
         due_at=CASE WHEN stopped OR handoff OR $4='ready' THEN NULL
@@ -230,6 +238,22 @@ async def remember(tg_id, revision, history, reply, nonce):
         RETURNING tg_id""", tg_id, revision, json.dumps(history[-8:], ensure_ascii=False), reply, nonce)
 
 
+async def remember_followup(tg_id, revision, text):
+    # Record delivered outreach so a reply such as 'yes' has conversational context.
+    await execute("""UPDATE elena_sessions SET history=(
+        SELECT COALESCE(jsonb_agg(item ORDER BY n),'[]'::jsonb) FROM (
+            SELECT item,n FROM jsonb_array_elements(
+                CASE WHEN memory_since IS NULL OR memory_since<now()-interval '1 day'
+                    THEN '[]'::jsonb ELSE history END ||
+                jsonb_build_array(jsonb_build_object('role','assistant','content',$3::text)))
+                WITH ORDINALITY AS h(item,n) ORDER BY n DESC LIMIT 8
+        ) recent),
+        memory_since=CASE WHEN memory_since IS NULL OR memory_since<now()-interval '1 day'
+            THEN now() ELSE memory_since END
+        WHERE tg_id=$1 AND revision=$2 AND NOT local_only AND NOT stopped AND NOT handoff""",
+        tg_id, revision, text)
+
+
 async def claim_voice(tg_id, nonce):
     # One attempt per displayed reply; repeated taps cannot trigger duplicate charges.
     return await one("""UPDATE elena_sessions SET voice_sent=TRUE,voice=TRUE,
@@ -242,27 +266,27 @@ async def claim_voice(tg_id, nonce):
 
 async def await_chat(c, job):
     # No send was attempted. Keep counters unchanged and honor newer input.
-    await c.execute("""UPDATE elena_sessions SET status='awaiting_chat',due_at=NULL,
+    await c.execute("""UPDATE elena_sessions SET status='awaiting_chat',
         updated_at=now() WHERE tg_id=$1 AND revision=$2 AND status='pending'""",
         job['tg_id'], job['revision'])
 
 
 async def claim(c, job):
-    return await c.fetchrow("""UPDATE elena_sessions e SET status='sending',attempts=e.attempts+1
+    return await c.fetchrow("""UPDATE elena_sessions e SET status='sending',attempts=e.attempts+1,
+        sent_reasons=array_append(e.sent_reasons,e.reason)
         FROM users u WHERE e.tg_id=$1 AND e.revision=$2 AND e.status='pending'
         AND e.due_at<=now() AND e.tg_id=u.tg_id AND NOT u.verified
         AND NOT u.broadcast_opt_out AND NOT u.broadcast_blocked
-        AND NOT e.stopped AND NOT e.handoff AND e.sent_count+
-          CASE WHEN EXISTS(SELECT 1 FROM verification_reminder_deliveries d
-               WHERE d.tg_id=e.tg_id AND d.status IN ('sent','sending','uncertain')
-               AND d.attempted_at>COALESCE(e.last_business_at,'-infinity'::timestamptz))
-          THEN 1 ELSE 0 END<2
+        AND NOT e.stopped AND NOT e.handoff AND e.followup_version=1
+        AND e.reason IN ('inactive','uid','deposit') AND NOT e.reason=ANY(e.sent_reasons)
+        AND (e.activity_until IS NULL OR e.activity_until<=now())
         AND (SELECT enabled FROM verification_reminder_settings WHERE id=1)
         RETURNING e.*""", job['tg_id'], job['revision'])
 
 
 async def finish(c, job, status, delay=None):
     await c.execute("""UPDATE elena_sessions SET status=$3,
+        sent_reasons=CASE WHEN $3='pending' THEN array_remove(sent_reasons,reason) ELSE sent_reasons END,
         sent_count=sent_count+CASE WHEN $3 IN ('sent','uncertain') THEN 1 ELSE 0 END,
         due_at=CASE WHEN $4::double precision IS NULL THEN NULL
                     ELSE now()+$4::double precision*interval '1 second' END,
@@ -272,11 +296,9 @@ async def finish(c, job, status, delay=None):
 
 async def due(c, admin_ids):
     return await c.fetch("""SELECT e.* FROM elena_sessions e JOIN users u USING(tg_id)
-        WHERE e.status='pending' AND e.due_at<=now() AND e.sent_count+
-          CASE WHEN EXISTS(SELECT 1 FROM verification_reminder_deliveries d
-               WHERE d.tg_id=e.tg_id AND d.status IN ('sent','sending','uncertain')
-               AND d.attempted_at>COALESCE(e.last_business_at,'-infinity'::timestamptz))
-          THEN 1 ELSE 0 END<2
+        WHERE e.status='pending' AND e.due_at<=now() AND e.followup_version=1
+        AND e.reason IN ('inactive','uid','deposit') AND NOT e.reason=ANY(e.sent_reasons)
+        AND (e.activity_until IS NULL OR e.activity_until<=now())
         AND NOT e.stopped AND NOT e.handoff AND NOT u.verified
         AND NOT u.broadcast_opt_out AND NOT u.broadcast_blocked
         AND (NOT (e.tg_id=ANY($1::bigint[]))

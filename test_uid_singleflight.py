@@ -521,7 +521,7 @@ async def main():
           (config.START_DAILY_SIGNALS, config.PREMIUM_DAILY_SIGNALS) == (30, 70),
           str((config.START_DAILY_SIGNALS, config.PREMIUM_DAILY_SIGNALS)))
     check("Premium minimum deposit is $100", config.PREMIUM_MIN_DEPOSIT == 100)
-    check("deposit threshold unchanged", config.MIN_DEPOSIT == Decimal("50"),
+    check("standard deposit threshold is $20", config.MIN_DEPOSIT == Decimal("20"),
           str(config.MIN_DEPOSIT))
     check("the atomic unlock checks the verified deposit",
           "AND $3::numeric >= $4::numeric" in open(

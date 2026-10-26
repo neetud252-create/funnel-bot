@@ -50,7 +50,7 @@ class ActivationOnlyTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E, 'ai_answer', AsyncMock()) as ai, \
              patch.object(E, 'send_chat_reply', AsyncMock()) as chat:
             await E.business_message(self.message('how do I register?'), self.bot)
-        activate.assert_awaited_once_with(42, CONNECTION['connection_id'], 12, 'ready', 1800)
+        activate.assert_awaited_once_with(42, CONNECTION['connection_id'], 12, 'ready', 0)
         deliver.assert_awaited_once_with(self.bot, 42)
         self.bot.send_message.assert_awaited_once()
         self.assertEqual(self.bot.send_message.await_args.args, (42, E.copy.ACTIVATED))

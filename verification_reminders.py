@@ -88,18 +88,16 @@ async def report(conn):
         return ('Verification reminders: OFF (Elena activation-only mode).\n'
                 'Scheduled reminders are disabled, including previously queued deliveries.')
     enabled = await conn.fetchval('SELECT enabled FROM verification_reminder_settings WHERE id=1')
-    count = await conn.fetchval(f'SELECT count(*) FROM users u LEFT JOIN '
-        f'verification_reminder_deliveries d USING(tg_id) WHERE {ELIGIBLE} AND {DUE}',
-        list(config.ADMIN_IDS))
-    rows = await conn.fetch('SELECT status,count(*) AS n FROM verification_reminder_deliveries GROUP BY status')
+    rows = await conn.fetch('SELECT status,count(*) AS n FROM elena_sessions WHERE followup_version=1 GROUP BY status')
     counts = {row['status']: row['n'] for row in rows}
-    return (f'Verification reminders: {"ON" if enabled else "OFF"}\n'
-            'One reminder per user, at least 24 hours after joining.\n'
-            f'Eligible now: {count}\nSent: {counts.get("sent", 0)}\n'
+    return (f'Elena setup reminders: {"ON" if enabled else "OFF"}\n'
+            'No UID: 10 minutes. Wrong UID: 5 minutes. Deposit below threshold: 15 minutes.\n'
+            'One follow-up per condition. Legacy 24-hour campaign disabled.\n'
+            f'Pending: {counts.get("pending", 0)}\nSent: {counts.get("sent", 0)}\n'
             f'Blocked: {counts.get("blocked", 0)}\nFailed: {counts.get("failed", 0)}\n'
             f'Uncertain (not repeated): {counts.get("uncertain", 0)}\n'
             '/remindersoff pauses delivery. /reminderson resumes.\n'
-            '/verificationreminders shows this report and the message.')
+            '/verificationreminders shows this report.')
 
 
 def install(dp, is_admin, open_funnel):
@@ -115,7 +113,7 @@ def install(dp, is_admin, open_funnel):
                 await conn.execute('UPDATE verification_reminder_settings SET enabled=$1,updated_at=now() WHERE id=1',
                                    name == '/reminderson')
             summary = await report(conn)
-        await m.answer(summary + '\n\nMessage:\n' + TEXT)
+        await m.answer(summary)
 
     async def callback(cb, bot, state):
         if not cb.message or cb.message.chat.type != 'private':
@@ -189,21 +187,5 @@ async def run_queue(bot, conn):
 
 
 async def worker(bot):
-    if activation_only():
-        logging.info('Verification reminders disabled; Elena activation-only mode')
-        return
-    while True:
-        try:
-            async with db.pool.acquire() as conn:
-                if not await conn.fetchval('SELECT pg_try_advisory_lock($1::bigint)', LOCK_ID):
-                    await asyncio.sleep(5)
-                    continue
-                try:
-                    await run_queue(bot, conn)
-                finally:
-                    await conn.execute('SELECT pg_advisory_unlock($1::bigint)', LOCK_ID)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logging.exception('Verification reminder worker restarting')
-            await asyncio.sleep(5)
+    # Elena owns setup follow-ups; retain the shared admin stop controls.
+    logging.info('Legacy verification campaign disabled; Elena owns setup follow-ups')

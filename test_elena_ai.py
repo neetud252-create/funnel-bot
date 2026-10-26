@@ -141,7 +141,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model.await_count, 2)
         offer.assert_not_awaited()
         consent.assert_not_awaited()  # Do not fabricate historical user approval.
-        answer = send.await_args.args[2]
+        answer = '\n'.join(c.args[2] for c in send.await_args_list)
         self.assertIn('complete the form', answer)
         self.assertIn('https://pocketoption.com', answer)
         self.assertNotIn(E.copy.CHAT_ASK, answer)
@@ -447,7 +447,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.ai_answer(object(), 42, data, 'Send the registration link')
             url = E.registration_url(data)
-        text = send.await_args.args[2]
+        text = '\n'.join(c.args[2] for c in send.await_args_list)
         self.assertIn('Here are the registration steps.', text)
         self.assertIn('saved-source', text)
         self.assertIn(E.journey.DISCLOSURE, text)
@@ -463,7 +463,7 @@ class AIFlowTests(unittest.IsolatedAsyncioTestCase):
              patch.object(E.ai, 'reply', AsyncMock(return_value={'reply': 'You’re welcome!', 'action': 'none'})), \
              patch.object(E, 'send_business', AsyncMock()) as send:
             await E.ai_answer(object(), 42, user(), 'Thanks')
-        text = send.await_args.args[2]
+        text = '\n'.join(c.args[2] for c in send.await_args_list)
         self.assertEqual(text, 'You’re welcome!')
         self.assertEqual(len(send.await_args.args), 3)
 
