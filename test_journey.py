@@ -242,10 +242,10 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(card['asset'], 'assets/account_recovery.png')
                     self.assertIn('Your Pocket Option account wasn’t registered using my link.', card['body'])
                     rows = card['markup'].inline_keyboard
-                    self.assertEqual([len(row) for row in rows], [1, 1, 1, 1])
+                    self.assertEqual([len(row) for row in rows], [1, 1, 1])
                     self.assertEqual([row[0].url for row in rows], [ref,
-                        config.ACCOUNT_DELETE_GUIDE_URL, config.SETUP_GUIDE_URL, journey.support_url()])
-                    self.assertEqual([row[0].style for row in rows], ['success', 'primary', 'primary', 'primary'])
+                        config.SETUP_GUIDE_URL, journey.support_url()])
+                    self.assertEqual([row[0].style for row in rows], ['success', 'primary', 'primary'])
                     self.assertTrue(all(row[0].callback_data is None for row in rows))
                     self.assertIsNotNone(self.state.state)
             self.assertFalse(self.row['verified'])
@@ -281,7 +281,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
             await self.mod.capture_uid(H.FakeMessage(91, '123456789'), self.bot, self.state)
         card = H.last_screen(self.bot)
         self.assertEqual(card['kind'], 'text')
-        self.assertEqual(len(card['markup'].inline_keyboard), 4)
+        self.assertEqual(len(card['markup'].inline_keyboard), 3)
 
     async def test_access_details_available_before_registration_without_losing_progress(self):
         await self.tap('new')

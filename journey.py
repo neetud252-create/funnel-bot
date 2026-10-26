@@ -321,7 +321,6 @@ def unlinked(premium=False, ref=None):
                           [cb('💬 Ask Support About Access', 'support')], *back('dashboard')]
     return REGISTRATION_RECOVERY.format(ref=referral_link(ref)), [
         [url('🔗 Register & Get Access', ref, True)],
-        [url('🗑 How to Delete Your Account', config.ACCOUNT_DELETE_GUIDE_URL, style='primary')],
         [url('📖 How to register', config.SETUP_GUIDE_URL, style='primary')],
         [url('💬 Support', support_url(), style='primary')]]
 
