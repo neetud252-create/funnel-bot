@@ -1,7 +1,7 @@
 """Short chat bubbles. Trusted HTML links are kept intact.
 
 Replies are split on blank lines and long sentences so they arrive as 2-3 short
-messages (never one big block). At most 3 bubbles per reply.
+messages (never one big block). At most 3 bubbles per reply. No commission note.
 """
 import re
 from html import escape
@@ -16,7 +16,7 @@ NO_UID = 'Hey 👋 you still have 2 free Pocket IQ analyses — want to try them
 UID_HELP = 'You haven’t submitted your Trader ID yet — takes 2 minutes. Need a hand?'
 WRONG_UID = 'That Trader ID didn’t verify. Copy it straight from your Pocket Option profile and send it again.'
 NEW_ACCOUNT = 'New here? Register through our bot link, then send your new Trader ID in Pocket IQ.'
-EXISTING_ACCOUNT = 'Already on Pocket Option? Check with Pocket Option support before making a second account.'
+EXISTING_ACCOUNT = 'Already on Pocket Option? Send your Trader ID in Pocket IQ — I’ll check the link for you.'
 DEPOSIT = 'Your account is linked 🎉 One step left: at least ${amount} in qualifying deposits unlocks full access.'
 DEPOSIT_CHECK = 'Already deposited? Hit recheck in Pocket IQ so we confirm it. Need help with this step?'
 
@@ -116,8 +116,7 @@ def followup(user, reason, registration_url, bot_url, touch=0):
                 return [tr(WRONG_UID), tr(copy.CHAT_UID) + '\n\n' + bot_link]
             if not registration_url or user.get('account_kind') == 'existing':
                 return [tr(WRONG_UID), tr(copy.CHAT_EXISTING) + '\n\n' + bot_link]
-            import journey
-            return [tr(WRONG_UID), tr(NEW_ACCOUNT) + '\n' + reg_link + '\n' + tr(journey.DISCLOSURE),
+            return [tr(WRONG_UID), tr(NEW_ACCOUNT) + '\n' + reg_link,
                     tr(EXISTING_ACCOUNT) + '\n\n' + bot_link]
         body = [UID_1, UID_2, UID_3, UID_4][min(touch, 4) - 1]
         return [tr(body), reg_link + '\n' + bot_link if touch % 2 else bot_link]
