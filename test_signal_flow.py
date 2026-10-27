@@ -21,6 +21,7 @@ import asyncio
 import os
 import sys
 import types
+from unittest.mock import AsyncMock, patch
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 os.chdir(ROOT)
@@ -680,7 +681,11 @@ async def devstart_tests(bot_mod, fake_db, config):
         fake_bot = FakeBot()
         m = FakeMessage(admin, "/devstart")
         state = FakeState(state="Reg:waiting_uid")
-        await bot_mod.cmd_devstart(m, fake_bot, state)
+        # This legacy suite disables the activation gate; its enabled reset/DM
+        # flow is covered in test_devstart_activation.py.
+        with patch.object(bot_mod.elena.store, 'reset_activation', AsyncMock()) as reset:
+            await bot_mod.cmd_devstart(m, fake_bot, state)
+            reset.assert_awaited_once_with(admin)
         row = fake_db._users[admin]
 
         check("verified becomes false", row["verified"] is False, str(row["verified"]))

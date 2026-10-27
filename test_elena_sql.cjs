@@ -14,7 +14,7 @@ def schema(name):
 queries = {}
 for fn in tree('elena_store').body:
     if isinstance(fn, ast.AsyncFunctionDef) and fn.name in ('activity', 'claim', 'due', 'finish', 'await_chat', 'observe', 'incoming',
-            'activate', 'claim_activation', 'activation_opened', 'pending_activations',
+            'activate', 'reset_activation', 'claim_activation', 'activation_opened', 'pending_activations',
             'save_question', 'take_question', 'consent', 'local_only', 'pause', 'claim_ai', 'remember', 'remember_followup', 'claim_voice', 'resume', 'offer_consent'):
         queries[fn.name] = next(n.value for n in ast.walk(fn)
             if isinstance(n, ast.Constant) and isinstance(n.value, str)
@@ -206,6 +206,38 @@ const {schema, queries, version} = JSON.parse(source.stdout);
         assert.equal(retained.activation_version, version, 'Ordinary redeploy does not reset new activation');
         assert.ok(retained.activation_opened_at instanceof Date);
         assert.deepEqual((await db.query('SELECT * FROM users WHERE tg_id IN (901,902) ORDER BY tg_id')).rows, oldUsers);
+        // /devstart restarts one admin only, without accepting their old DM.
+        const otherSessions = (await db.query('SELECT * FROM elena_sessions WHERE tg_id<>901 ORDER BY tg_id')).rows;
+        await db.exec(`UPDATE elena_sessions SET stopped=true,handoff=true,
+            sent_reasons=ARRAY['uid'],history='[{"role":"user","content":"old setup"}]',
+            pending_question='old question' WHERE tg_id=901`);
+        await db.query(queries.reset_activation, [901]);
+        await db.exec(schema); // Restart must not undo the reset.
+        const resetSession = (await db.query('SELECT * FROM elena_sessions WHERE tg_id=901')).rows[0];
+        assert.equal(resetSession.activated_at, null);
+        assert.equal(resetSession.activation_version, 0);
+        assert.equal(resetSession.activation_opened_at, null);
+        assert.equal(resetSession.activation_attempts, 0);
+        assert.equal(resetSession.activation_retry_at, null);
+        assert.equal(resetSession.last_business_at, null);
+        assert.equal(Number(resetSession.last_message_id), 11);
+        assert.equal(resetSession.business_connection_id, 'approved');
+        assert.equal(resetSession.stopped, true);
+        assert.equal(resetSession.handoff, true);
+        assert.deepEqual(resetSession.history, []);
+        assert.deepEqual(resetSession.sent_reasons, []);
+        assert.equal(resetSession.pending_question, null);
+        assert.equal(resetSession.due_at, null);
+        assert.ok(Number(resetSession.revision)>Number(retained.revision));
+        assert.deepEqual((await db.query('SELECT * FROM elena_sessions WHERE tg_id<>901 ORDER BY tg_id')).rows, otherSessions);
+        assert.equal((await claimActivation(901)).rows.length, 0, 'Stale delivery cannot reopen the bot');
+        assert.equal((await db.query(queries.incoming, [901,'approved',11])).rows.length, 0);
+        assert.equal((await activate(901,'approved',11,'ready',0)).rows.length, 0, 'Old DM cannot reactivate');
+        await db.query(queries.incoming, [901,'approved',12]);
+        assert.equal((await activate(901,'approved',12,'ready',0)).rows.length, 1);
+        assert.equal((await claimActivation(901)).rows.length, 1, 'New DM opens the menu again');
+        await activationOpened(901);
+        await db.query(queries.reset_activation, [999999]); // Missing admin session is a safe no-op.
         // Admin accounts may test the customer path after this release activation.
         await db.exec(`INSERT INTO users(tg_id) VALUES(201),(202),(203);
             INSERT INTO elena_sessions(tg_id,reason,due_at,activated_at,activation_version)
