@@ -23,7 +23,7 @@ class Clock:
 
 class TimingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        mode = patch.dict(os.environ, ELENA_ENABLED='1', ELENA_ACTIVATION_ONLY='0')
+        mode = patch.dict(os.environ, ELENA_ENABLED='1', ELENA_ACTIVATION_ENABLED='1', ELENA_ACTIVATION_ONLY='0')
         mode.start()
         self.addCleanup(mode.stop)
 
