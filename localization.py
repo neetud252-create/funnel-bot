@@ -120,7 +120,7 @@ _sources = None
 # Whole templates preserve grammar across HTML emphasis and protect interpolated
 # values (asset names, user searches, URLs, IDs, amounts and AI-generated prose).
 TEMPLATES = {}
-for _template_name in ('interface.json', 'activation.json', 'access.json'):
+for _template_name in ('interface.json', 'activation.json', 'access.json', 'deposit.json'):
     _template_file = Path(__file__).parent / 'locales' / _template_name
     TEMPLATES.update(json.loads(_template_file.read_text(encoding='utf-8')))
 _template_patterns = []

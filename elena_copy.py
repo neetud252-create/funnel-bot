@@ -10,7 +10,7 @@ import journey
 NAME = 'Elina'
 PROMO_CODE = 'YEB789'
 BONUS_MIN_DEPOSIT = 20
-BONUS_PERCENT = 60
+BONUS_PERCENT = 50
 
 LINK_OPEN = 'Open Pocket IQ'
 LINK_REGISTER = '🔗 Registration Link'

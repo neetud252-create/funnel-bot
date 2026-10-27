@@ -79,6 +79,7 @@ OK_STATUS = ("creator", "administrator", "member")
 _photo_cache = {}
 _video_cache = {}
 _signal_tasks = {}
+_deposit_nudge_tasks = {}
 _pair_choice = {}
 _expiry_choice = {}
 # tg_id -> time.monotonic() of that user's last panel lookup. In memory on
@@ -121,7 +122,7 @@ def asset_path(key, ext):
         ext = home_menu.PHOTO_EXT
     elif key == config.UID_GUIDE_PHOTO and ext == 'jpg':
         ext = 'png'
-    elif key in (journey.REGISTER_PHOTO, journey.RECOVERY_PHOTO) and ext == 'jpg':
+    elif key in (journey.REGISTER_PHOTO, journey.RECOVERY_PHOTO, journey.DEPOSIT_PHOTO) and ext == 'jpg':
         ext = 'png'
     elif ext == 'jpg' and key in (*market_signals.DIRECTION_BANNERS.values(),
                                   'trading_type', 'asset_category', 'currency_pair', 'expiration_time', 'menu'):
@@ -321,7 +322,7 @@ def referenced_assets():
     """
     ref = {(activation.PHOTO, 'jpg'), (home_menu.PHOTO, 'jpg'), (home_menu.VIDEO, 'mp4'),
            (config.UID_GUIDE_PHOTO, 'jpg'), (journey.REGISTER_PHOTO, 'jpg'),
-           (journey.RECOVERY_PHOTO, 'jpg')}
+           (journey.RECOVERY_PHOTO, 'jpg'), (journey.DEPOSIT_PHOTO, 'jpg')}
     for s in config.SCREENS.values():
         if s.get("video"):
             ref.add((s["video"], "mp4"))
@@ -459,6 +460,7 @@ async def _user_quota(tg_id):
     return premium, config.daily_limit(premium)
 
 async def wipe(bot, tg_id):
+    _cancel_deposit_nudge(tg_id)
     user = await db.get_user(tg_id)
     if not user:
         return
@@ -491,11 +493,14 @@ async def render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
 
 async def _render(bot, tg_id, media_key, text, kb_rows, is_video=False, *,
                  reply_to_message_id=None, raise_on_error=False, companion_key=None):
+    _cancel_deposit_nudge(tg_id)
     is_home_media = media_key in (home_menu.ANIMATION, home_menu.VIDEO)
     if is_home_media and media_missing(media_key, 'mp4'):
         media_key, is_video = home_menu.PHOTO, False
     kb = build_kb(kb_rows)
     user = await db.get_user(tg_id)
+    if user and user.get('nudge_msg_id'):
+        await _clear_nudge(bot, tg_id)
     if user and user.get('welcome_message_id'):
         await _sync_welcome(bot, tg_id)
     msg_id = user["ui_msg_id"] if user else None
@@ -890,6 +895,48 @@ async def _journey(bot, tg_id, content, media=None, key=None):
     await render(bot, tg_id, media, text, rows, screen_key=key)
 
 
+def _cancel_deposit_nudge(tg_id):
+    task = _deposit_nudge_tasks.pop(tg_id, None)
+    if task and task is not asyncio.current_task():
+        task.cancel()
+
+
+async def _send_deposit_test_nudge(bot, tg_id, screen_id, uid):
+    try:
+        await asyncio.sleep(2)
+        user = await db.get_user(tg_id) or {}
+        if (not _is_admin(tg_id) or user.get('verified') or user.get('uid') != uid
+                or user.get('access_check_status') != config.VERIFY_NEED_DEPOSIT
+                or user.get('ui_msg_id') != screen_id):
+            return
+        message = await bot.send_message(tg_id, journey.DEPOSIT_TEST_URGENCY, parse_mode='HTML')
+        await db.set_nudge_msg(tg_id, message.message_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logging.exception('Admin deposit preview unavailable')
+    finally:
+        if _deposit_nudge_tasks.get(tg_id) is asyncio.current_task():
+            _deposit_nudge_tasks.pop(tg_id, None)
+
+
+async def _show_deposit(bot, tg_id, amount):
+    text, rows = journey.deposit(amount)
+    try:
+        message = await render(bot, tg_id, journey.DEPOSIT_PHOTO, text, rows,
+                               raise_on_error=True, screen_key='deposit_requirements')
+    except Exception:
+        logging.warning('Deposit artwork unavailable; preserving deposit actions')
+        message = await render(bot, tg_id, None, text, rows, screen_key='deposit_requirements')
+    # The owner requested the one-slot message for testing, not a live capacity rule.
+    if message and _is_admin(tg_id):
+        user = await db.get_user(tg_id) or {}
+        if user.get('uid') and not user.get('verified'):
+            _deposit_nudge_tasks[tg_id] = asyncio.create_task(
+                _send_deposit_test_nudge(bot, tg_id, message.message_id, user['uid']))
+    return message
+
+
 async def _open_uid_entry(bot, tg_id, state=None):
     await db.set_setup_stage(tg_id, 'id')
     if state is not None:
@@ -932,7 +979,7 @@ async def _resume_setup(bot, tg_id, state=None):
         # Explicit ID entry takes priority over an earlier failed check.
         await _open_uid_entry(bot, tg_id, state)
     elif user.get('access_check_status') == config.VERIFY_NEED_DEPOSIT and user.get('uid'):
-        await _journey(bot, tg_id, journey.deposit(user['access_check_deposit']), key='deposit_requirements')
+        await _show_deposit(bot, tg_id, user['access_check_deposit'])
     elif user.get('access_check_status') == config.VERIFY_WRONG_LINK:
         await _show_account_recovery(bot, tg_id, state)
     elif user.get('access_check_status') == config.VERIFY_TEMPORARY and user.get('uid'):
@@ -955,6 +1002,11 @@ async def flow_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
     user = await db.get_user(tg_id) or {}
     if action == 'home':
         await _show_home(bot, tg_id)
+    elif action == 'deposit_guide':
+        await _journey(bot, tg_id, (journey.DEPOSIT_HELP,
+            [[journey.url('💳 Make a deposit', config.BROKER_ACCOUNT_URL, True)],
+             [journey.cb('⬅️ Back', 'setup')]]),
+            media=journey.DEPOSIT_PHOTO, key='deposit_guide')
     elif action == 'dashboard':
         await _show_menu(bot, tg_id)
     elif action == 'setup':
@@ -1814,12 +1866,13 @@ async def _show_register(bot, tg_id, state=None):
 
 
 async def _clear_nudge(bot, tg_id):
-    """Clean up a promotion sent before the registration follow-up was removed.
+    """Cancel a pending deposit preview and remove a tracked follow-up.
 
     Best effort throughout: a bot may only delete its own messages, and only
     within 48 hours, so a nudge from an earlier session will fail. Logged at
     debug and swallowed - a failed delete must never break verification.
     """
+    _cancel_deposit_nudge(tg_id)
     try:
         user = await db.get_user(tg_id)
         mid = user["nudge_msg_id"] if user else None
@@ -1895,6 +1948,7 @@ async def _run_verification(bot, tg_id, uid):
     # Immediate ack while we query the panel (can take up to ~20s), then verdict.
     # It stays up across retries, so a transient failure is invisible to the
     # user rather than a verdict that flickers and is replaced.
+    await _clear_nudge(bot, tg_id)
     ack = await bot.send_message(
         tg_id, "\U000023F3 <b>Checking account</b> <code>" + uid + "</code>\U00002026",
         parse_mode="HTML")
@@ -1930,7 +1984,7 @@ async def _run_verification(bot, tg_id, uid):
             await bot.delete_message(chat_id=tg_id, message_id=ack.message_id)
         except Exception:
             pass
-        await _journey(bot, tg_id, journey.deposit(detail), key='deposit_requirements')
+        await _show_deposit(bot, tg_id, detail)
         return status
     if status == config.VERIFY_WRONG_LINK:
         await db.record_access_check(tg_id, status)
