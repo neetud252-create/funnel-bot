@@ -68,7 +68,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.row['setup_stage'], 'deposit')
         self.assertFalse(self.row['verified'])
         await self.mod.home_action(H.FakeCB(91, 'home:access', 1), self.bot, self.state)
-        self.assertIn('$7.66', H.last_screen(self.bot)['body'])
+        self.assertIn('deposit of at least $20', H.last_screen(self.bot)['body'])
 
     async def test_verify_id_opens_immediately_and_resumes_after_restart(self):
         await self.tap('setup')
@@ -138,13 +138,14 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.row.update(uid='123456789', account_kind='existing')
         with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(config.VERIFY_NEED_DEPOSIT, Decimal('12.34')))):
             card = await self.tap('recheck')
-        self.assertIn('$7.66', card['body'])
+        self.assertIn('deposit of at least $20', card['body'])
+        self.assertEqual(self.row['access_check_deposit'], Decimal('12.34'))
         self.assertFalse(self.row['verified'])
         self.assertEqual(self.row['setup_stage'], 'deposit')
         self.assertEqual(card['markup'].inline_keyboard[0][0].url, config.BROKER_ACCOUNT_URL)
         self.mod = H._load_bot()  # No in-memory setup state is required to resume.
         await self.mod._resume_setup(self.bot, 91)
-        self.assertIn('$7.66', self.bot.calls[-1]['body'])
+        self.assertIn('deposit of at least $20', self.bot.calls[-1]['body'])
         with patch.object(self.mod, '_panel_verdict', AsyncMock(return_value=(config.VERIFY_GRANTED, Decimal('50')))) as lookup:
             await self.tap('recheck')
         lookup.assert_awaited_once_with(91, '123456789')
@@ -302,7 +303,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         self.row.update(uid='123456789', setup_stage='id', access_check_status=config.VERIFY_NEED_DEPOSIT,
                         access_check_deposit=Decimal('0'))
         card = await self.tap('register_again')
-        self.assertIn('Your Trader ID is confirmed under our link.', card['body'])
+        self.assertIn('Your Pocket IQ registration is complete!', card['body'])
         self.assertEqual(self.row['uid'], '123456789')
         self.assertFalse(self.row['verified'])
 
@@ -341,7 +342,7 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
         lookup.assert_awaited_once_with(91, '222222222')
         self.assertEqual(self.row['uid'], '222222222')
         self.assertEqual(self.row['setup_stage'], 'deposit')
-        self.assertIn('$20.00 or more', H.last_screen(self.bot)['body'])
+        self.assertIn('deposit of at least $20', H.last_screen(self.bot)['body'])
 
     async def test_registration_artwork_has_caption_room_and_text_fallback(self):
         import html
@@ -384,10 +385,10 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.row['access_check_status'], expected)
                 card = H.last_screen(self.bot)
                 if expected == config.VERIFY_NEED_DEPOSIT:
-                    self.assertIn('Your Trader ID is confirmed under our link.', card['body'])
-                    self.assertIn('$20.00 or more', card['body'])
+                    self.assertIn('Your Pocket IQ registration is complete!', card['body'])
+                    self.assertIn('deposit of at least $20', card['body'])
                     self.assertNotIn('balance is low', card['body'])
-                    self.assertEqual(card['markup'].inline_keyboard[1][0].callback_data, 'flow:recheck')
+                    self.assertEqual(card['markup'].inline_keyboard[3][0].callback_data, 'flow:recheck')
                 else:
                     self.assertIn('Your Pocket IQ access is ready!', card['body'])
                     self.assertTrue(self.row['verified'])
@@ -414,10 +415,10 @@ class JourneyTests(unittest.IsolatedAsyncioTestCase):
                         setup_stage='deposit', access_check_status=config.VERIFY_NEED_DEPOSIT,
                         access_check_deposit=Decimal('12.34'))
         await self.tap('home')
-        self.assertIn('$7.66', (await self.resume())['body'])
+        self.assertIn('deposit of at least $20', (await self.resume())['body'])
         for action in ('setup', 'new'):
             await self.tap(action)
-        self.assertIn('$7.66', H.last_screen(self.bot)['body'])
+        self.assertIn('deposit of at least $20', H.last_screen(self.bot)['body'])
         self.assertEqual(self.row['account_kind'], 'existing')
         self.assertEqual(self.row['uid'], '123456789')
 

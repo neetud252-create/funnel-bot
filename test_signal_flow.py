@@ -847,10 +847,13 @@ async def devstart_tests(bot_mod, fake_db, config):
 
 
 def _is_admin_gated_start(bot_src):
-    # Only start()'s own body: stop at the next handler's decorator, or the
-    # admin commands registered just below it get read as part of /start.
-    body = bot_src.split("async def start(", 1)[1].split("\n@dp.", 1)[0]
-    return "_is_admin" in body or "ADMIN_IDS" in body
+    # Helpers between handlers may be admin-only; inspect start() itself.
+    import ast
+    start = next(node for node in ast.parse(bot_src).body
+                 if isinstance(node, ast.AsyncFunctionDef) and node.name == 'start')
+    return any((isinstance(node, ast.Name) and node.id == '_is_admin')
+               or (isinstance(node, ast.Attribute) and node.attr == 'ADMIN_IDS')
+               for node in ast.walk(start))
 
 
 async def level_tests(bot_mod, fake_db, config, sleeps):

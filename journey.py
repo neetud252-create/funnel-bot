@@ -6,6 +6,7 @@ import config
 
 REGISTER_PHOTO = 'register_account'
 RECOVERY_PHOTO = 'account_recovery'
+DEPOSIT_PHOTO = 'deposit_account'
 
 
 def button(label, action, style=None):
@@ -83,16 +84,19 @@ UID = ('🔍 <b>What is your Pocket Option Trader ID?</b>\n\n'
     'Send your Pocket Option Trader ID as a message here. It contains 5–15 digits.\n'
     'Example: <code>123456789</code>\n\n'
     'Never send a password, login code, recovery code, or payment details.')
-DEPOSIT = ('✅ <b>Your Trader ID is confirmed under our link.</b>\n\n'
-    '💳 <b>A deposit is needed to activate Pocket IQ access.</b>\n\n'
-    'Minimum qualifying deposits for access: <b>${required}</b>\n'
-    'Confirmed qualifying deposits: <b>${confirmed}</b>\n'
-    'Remaining requirement: <b>${remaining}</b>\n\n'
-    'To activate access, deposit <b>${remaining} or more</b> into the same linked '
-    'Pocket Option account. Payments stay in your broker account. '
-    'Depositing does not guarantee trading returns.\n\n'
-    'After depositing, tap I’ve Deposited — Check Again. We will reuse your saved '
-    'Trader ID. You can also finish later; your progress is saved.')
+DEPOSIT = ('✅ <b>Great! Your Pocket IQ registration is complete!</b>\n\n'
+    '🧾 Just one step left — make a <b>deposit of at least ${required}</b> into your Pocket Option account.\n\n'
+    '🎁 Use promo code YEB789 to get a 50% bonus on your first deposit.\n\n'
+    '🚀 Once your deposit is confirmed, Pocket IQ will be ready to activate.\n\n'
+    '👇 Already deposited? Click the <b>“I’ve deposited”</b> button below.')
+# Temporary preview for administrators only; never advertise invented stock to customers.
+DEPOSIT_TEST_URGENCY = ('⚠️ There are only <b>1 activations</b> available for today. '
+    'Hurry up and activate the bot 🚀')
+DEPOSIT_HELP = ('💳 <b>How to Deposit Funds</b>\n\n'
+    '1️⃣ Open your linked Pocket Option account and select <b>Deposit</b>.\n\n'
+    '2️⃣ Enter your deposit amount and promo code <code>YEB789</code>. Check the bonus terms shown in your account.\n\n'
+    '3️⃣ Choose an available payment method and follow the instructions.\n\n'
+    'Return to Pocket IQ and tap <b>“I’ve deposited”</b> to check your saved account ID.')
 READY = ('✅ <b>Your Pocket IQ access is ready!</b>\n\n'
     'Your account and qualifying deposits are confirmed.\n\n'
     'What would you like to do first?')
@@ -188,7 +192,7 @@ TEXTS = {
         'Please contact support for the current destination. No registration or payment has been completed.'),
 }
 SOURCES = (RISK, DISCLOSURE, ACCOUNT_QUESTION, ACCOUNT_UNSURE, REQUIREMENTS,
-           REGISTER, EXISTING, REFERRAL_HELP, UID, DEPOSIT, READY,
+           REGISTER, EXISTING, REFERRAL_HELP, UID, DEPOSIT, DEPOSIT_TEST_URGENCY, DEPOSIT_HELP, READY,
            PENDING, UNLINKED, REGISTRATION_RECOVERY, PREMIUM, PREMIUM_SHORT, *TEXTS.values())
 
 
@@ -292,11 +296,16 @@ def money(value):
 
 def deposit(amount):
     required = config.MIN_DEPOSIT
-    return DEPOSIT.format(required=money(required), confirmed=money(amount),
-        remaining=money(max(required - Decimal(str(amount)), Decimal(0)))), deposit_keyboard()
+    display = str(int(required)) if required == required.to_integral_value() else money(required)
+    return DEPOSIT.format(required=display), deposit_keyboard()
 
 
 def deposit_keyboard(premium=False):
+    if not premium:
+        return [[url('💳 Make a deposit', config.BROKER_ACCOUNT_URL, style='primary')],
+            [button('📖 How to Deposit Funds', 'cb:flow:deposit_guide', 'primary')],
+            [url('💬 Support', support_url(), style='primary')],
+            [cb('✅ I’ve deposited', 'recheck', True)]]
     return [[url('💳 Open Deposit Page', config.BROKER_ACCOUNT_URL, True)],
         [cb('✅ I’ve Deposited — Check Again', 'premium_check' if premium else 'recheck')],
         [cb('📖 Deposit Help', 'payment_help')],
