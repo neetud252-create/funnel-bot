@@ -17,7 +17,7 @@ MAX_BUBBLES = 3
 MAX_BUBBLE_CHARS = 180
 
 # ---- first-touch copy (kept for compatibility) ----
-NO_UID = 'Hey 👋 you’ve got 2 free Pocket IQ analyses waiting — they’re on us. Want them?'
+NO_UID = 'Try the Pocket IQ demo with 1 free signal.'
 UID_HELP = 'You’re about 2 minutes from done: register through our link, then drop your Trader ID in Pocket IQ.'
 WRONG_UID = 'That Trader ID didn’t verify — easy fix. Copy it straight from your Pocket Option profile and resend.'
 NEW_ACCOUNT = 'New here? Register through our link, then send your new Trader ID in Pocket IQ — most people finish in 2 minutes.'
@@ -27,9 +27,9 @@ DEPOSIT_CHECK = 'Already deposited? Hit recheck in Pocket IQ and I’ll confirm 
 
 # ---- escalation copy: touch 1..4 ----
 INACTIVE_1 = 'Hey 👋 most people finish this in 2 minutes — you’re nearly there.'
-INACTIVE_2 = 'Your 2 free analyses are still unused. One quick step and they’re yours.'
+INACTIVE_2 = copy.CHAT_REGISTER
 INACTIVE_3 = 'Quick one — signals go out daily, don’t miss today’s. 2 minutes to set up.'
-INACTIVE_4 = 'Last nudge 👋 finish today so your free analyses don’t go to waste.'
+INACTIVE_4 = copy.CHAT_REGISTER
 
 UID_1 = 'Trader ID giving you trouble? Copy it straight from your Pocket Option profile — 10 seconds.'
 UID_2 = 'It’s only the account made through our link that unlocks full access. You’re one step away.'
@@ -116,7 +116,7 @@ def followup(user, reason, registration_url, bot_url, touch=0):
 
     if reason == 'inactive':
         if touch == 0:
-            return [tr(NO_UID if user.get('free_analyses_remaining') == 2 else copy.HELLO),
+            return [tr(NO_UID if user.get('free_analyses_remaining') == 1 else copy.CHAT_REGISTER),
                     tr(UID_HELP) + '\n\n' + bot_link]
         body = [INACTIVE_1, INACTIVE_2, INACTIVE_3, INACTIVE_4][min(touch, 4) - 1]
         return [tr(body), reg_link + '\n' + bot_link if touch % 2 else reg_link]

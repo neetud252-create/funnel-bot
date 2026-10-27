@@ -13,9 +13,9 @@ TEXT = (
     "Your AI-powered chart analysis assistant.\n\n"
     "📊 <b>Choose an asset. Explore the setup.</b>\n"
     "Select your market, asset, and expiration time to get a candlestick chart and BUY or SELL analysis when live data is available.\n\n"
-    "🎁 <b>Your first two analyses are free.</b>\n"
-    "Try Pocket IQ before deciding whether to set up access.\n\n"
-    "👇 <b>Tap “Try 2 Free Analyses” to get started.</b>"
+    "🎁 <b>Try the demo with 1 free signal.</b>\n"
+    "Then follow the account setup instructions to get full access.\n\n"
+    "👇 <b>Tap “Try Demo” to get started.</b>"
 )
 
 
@@ -28,7 +28,7 @@ def keyboard(user=None):
     access = ('🏠 Open My Dashboard' if user.get('verified') else
               '🚀 Continue Setup' if user.get('uid') or user.get('setup_stage') not in (None, 'new')
               else '🚀 Set Up My Account')
-    trial = '📊 Get Signals' if user.get('verified') else '🎯 Try 2 Free Analyses'
+    trial = '📊 Get Signals' if user.get('verified') else '🎯 Try Demo'
     return [
         [(trial, 'cb:home:test', 'success')],
         [(access, 'cb:home:access', 'primary')],

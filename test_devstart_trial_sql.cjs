@@ -17,6 +17,7 @@ def query(function, marker):
 print(json.dumps(dict(schema=constant('db','SCHEMA') + constant('chart_trial','SCHEMA'),
     reset=constant('db','_RESET_SQL'), limit=constant('chart_trial','LIMIT'),
     usage=query('_status','AND quota_date IS NULL'),
+    delivered=query('consume',"AND quota_date IS NULL AND status='used'"),
     pending=query('consume',"WHERE token=$1 AND status='pending'"))))
 `], {encoding:'utf8'});
 if (source.status !== 0) throw Error(source.stderr);
@@ -27,6 +28,7 @@ const sql = JSON.parse(source.stdout);
     const rows = async (query, args=[]) => (await db.query(query, args)).rows;
     const remaining = async id => Math.max(0, sql.limit - Number((await rows(sql.usage,[id]))[0].count));
     try {
+        assert.equal(sql.limit, 1, 'The demo permits exactly one lifetime signal');
         await db.exec(sql.schema);
         await db.exec(`
             INSERT INTO users(tg_id,uid,verified,deposit,signals_used_today,last_reset_date,
@@ -43,6 +45,8 @@ const sql = JSON.parse(source.stdout);
         const otherSlots = await rows('SELECT * FROM chart_trial_slots WHERE tg_id=102');
         const before = await rows('SELECT * FROM users WHERE tg_id=101');
         assert.equal(await remaining(101), 0);
+        assert.ok(Number((await rows(sql.delivered,[101]))[0].count) >= sql.limit,
+            'Historic users cannot receive another pending demo result');
 
         // A slot-reset failure must roll back the account reset as well.
         await db.exec(`CREATE FUNCTION reject_reset() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -55,7 +59,7 @@ const sql = JSON.parse(source.stdout);
         await db.exec('DROP TRIGGER fail_reset ON chart_trial_slots');
 
         assert.deepEqual(await rows(sql.reset,[101]), [{tg_id:101}]);
-        assert.equal(await remaining(101), 2, 'Both lifetime free signals are available again');
+        assert.equal(await remaining(101), 1, 'The lifetime demo signal is available again');
         const user = (await rows('SELECT * FROM users WHERE tg_id=101'))[0];
         assert.equal(user.verified, false);
         assert.equal(user.uid, null);
@@ -73,12 +77,12 @@ const sql = JSON.parse(source.stdout);
             'Old Telegram requests remain deduplicated');
         await db.exec(`INSERT INTO chart_trial_slots(token,tg_id,message_id,status,expires_at)
             VALUES('fresh',101,5,'used',now())`);
-        assert.equal(await remaining(101), 1);
+        assert.equal(await remaining(101), 0);
         await rows(sql.reset,[101]);
-        assert.equal(await remaining(101), 2, 'Each explicit devstart restores two, without accumulating credit');
+        assert.equal(await remaining(101), 1, 'Each explicit devstart restores one, without accumulating credit');
         assert.deepEqual(await rows(sql.reset,[999]), []);
         assert.deepEqual(await rows('SELECT * FROM users WHERE tg_id=102'), other);
         assert.deepEqual(await rows('SELECT * FROM chart_trial_slots WHERE tg_id=102'), otherSlots);
-        console.log('PASS: two free signals restored, repeated reset, stale reservations/replays blocked, atomic rollback, other users and preferences preserved.');
+        console.log('PASS: one demo signal restored, repeated reset, stale reservations/replays blocked, atomic rollback, other users and preferences preserved.');
     } finally { await db.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

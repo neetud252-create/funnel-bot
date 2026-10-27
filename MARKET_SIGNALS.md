@@ -5,6 +5,15 @@ trial button, and the dashboard's Get Signals button) use:
 
 Market (OTC / FIN) → Category → Asset → Expiration → Chart and BUY/SELL analysis.
 
+Unverified users enter through **Try Demo** and receive **one lifetime signal**.
+That result includes the setup instructions and **Get Full Access** button, which
+opens the existing account setup and verification flow. Further signals require
+verified access. Existing lifetime usage is preserved: users who already received
+one or more previews have no demo signals left. Browsing assets remains available.
+The limit is checked when reserving and delivering a signal under the user lock;
+old buttons, concurrent requests, restarts and daily resets cannot add demo credit.
+Failed analyses and confirmed delivery failures retain the existing refund rules.
+
 Screens use the existing trading_type, asset_category and currency_pair banners.
 Asset pages have six items in two columns, a page indicator with previous/next
 arrows, and a full-width red Back button. The 57 OTC currency pairs retain the

@@ -183,7 +183,7 @@ def keyboard(reason='inactive', *, invitation=False, user=None):
                 [button('Continue Setup', url=link('setup'))]]
     else:
         choices = {
-            'inactive': [('🎁 Try 2 Free Analyses', 'signals'), ('Continue Setup', 'account')],
+            'inactive': [('🎁 Try Demo', 'signals'), ('Continue Setup', 'account')],
             'registration': [('✅ I Created an Account — Check ID', 'uid'), ('📖 Guide', 'guide')],
             'uid': [('📍 Where Is My Trader ID?', 'uid'), ('🔄 Check Again', 'recheck')],
             'temporary': [('🔄 Check Again', 'recheck'), ('📖 Guide', 'guide')],

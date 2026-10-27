@@ -1459,7 +1459,7 @@ async def nav(cb: CallbackQuery, bot: Bot, state: FSMContext):
         await state.clear()
 
 async def _require_signal_verification(bot, tg_id, cb=None):
-    # Only the shared analysis trial grants unverified signals (two lifetime slots).
+    # Only the shared demo grants unverified signals (one lifetime slot).
     # Old/manual buttons must not unlock a separate, daily-resetting allowance.
     user = await db.get_user(tg_id)
     if user and user.get("verified"):

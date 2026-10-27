@@ -17,7 +17,7 @@ and queued reminders cannot send messages while automation is disabled.
 `/status` and `/verificationreminders` report manual mode; `/reminderson` cannot
 override it. No customer records are deleted or reset by this change.
 
-UID/deposit verification, trading access, two free analyses and `/devstart` quota
+UID/deposit verification, trading access, one demo signal and `/devstart` quota
 reset are unchanged. `/devstart` now returns to the welcome screen directly.
 Keep `OPENAI_API_KEY`: it is shared with chart analysis.
 
@@ -39,7 +39,7 @@ The existing 4/5/6-second pacing uses a single eight-second reply budget.
 
 After activation, Elena schedules one follow-up per condition:
 
-- No submitted UID: 10 minutes. Mention two free analyses only if both remain.
+- No submitted UID: 10 minutes. Mention the demo signal only if it remains.
 - Invalid-format or unmatched UID: 5 minutes. Explain the check, use the configured
   referral link for new accounts, and direct existing-account issues to the broker.
 - Confirmed qualifying deposits below $20: 15 minutes. Recheck before delivery.

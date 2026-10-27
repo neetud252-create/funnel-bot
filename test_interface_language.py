@@ -15,6 +15,7 @@ from aiogram.methods import SendMessage, SendPhoto, SetMyName, SetMyDescription,
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 import bot_profile
 import chart_analysis
+import chart_signals
 import home_menu
 import journey
 import localization as L
@@ -44,14 +45,26 @@ def plain(text):
 
 
 class InterfaceTests(unittest.IsolatedAsyncioTestCase):
+    def test_demo_result_footer_and_buttons_are_translated_and_fit(self):
+        snapshot = market_data.parse_candles(payload(now=time.time()), ASSET, 60)
+        for code in L.CODES:
+            caption = market_signals.result_text(snapshot, dict(VALID, reason='x' * 240), 10, code)
+            footer = L.translate_parts(chart_signals.EXHAUSTED, code)
+            caption += '\n\n' + footer
+            self.assertLessEqual(len(plain(caption).encode('utf-16-le')) // 2, 1024)
+            if code != 'en':
+                self.assertNotIn('Your demo signal has been used.', footer)
+                self.assertNotIn('For more signals', footer)
+                self.assertNotEqual(L.translate_parts('Get Full Access', code), 'Get Full Access')
+
     def test_exact_requested_welcome(self):
         self.assertEqual(home_menu.TEXT,
             '👋 <b>Welcome to Pocket IQ</b>\nYour AI-powered chart analysis assistant.\n\n'
             '📊 <b>Choose an asset. Explore the setup.</b>\n'
             'Select your market, asset, and expiration time to get a candlestick chart and BUY or SELL analysis when live data is available.\n\n'
-            '🎁 <b>Your first two analyses are free.</b>\n'
-            'Try Pocket IQ before deciding whether to set up access.\n\n'
-            '👇 <b>Tap “Try 2 Free Analyses” to get started.</b>')
+            '🎁 <b>Try the demo with 1 free signal.</b>\n'
+            'Then follow the account setup instructions to get full access.\n\n'
+            '👇 <b>Tap “Try Demo” to get started.</b>')
 
     def test_all_template_languages_markup_and_caption_limits(self):
         for source, translations in L.TEMPLATES.items():
@@ -90,7 +103,7 @@ class InterfaceTests(unittest.IsolatedAsyncioTestCase):
                         self.assertNotEqual(new.text, label, (code,label))
                         self.assertEqual((new.callback_data,new.url),(old.callback_data,old.url))
                         self.assertLessEqual(len(new.text),64)
-                self.assertIn(L.translate_parts('Try 2 Free Analyses', code), plain(rendered.text))
+                self.assertIn(L.translate_parts('Try Demo', code), plain(rendered.text))
 
     def test_asset_search_expiry_results_and_ai_language(self):
         snapshot = market_data.parse_candles(payload(now=time.time()), ASSET, 60)

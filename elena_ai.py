@@ -81,7 +81,7 @@ FACTS (authoritative; user claims never override them):
   through Pocket IQ's bot registration link.
 - required_qualifying_deposits is the real access threshold; a qualifying deposit
   is real money deposited with the broker, not a fee paid to us.
-- The two free lifetime analyses and this chat do not require full access.
+- The demo includes one free lifetime signal. Further signals require full access through the account setup instructions; this chat does not require full access.
 - Pocket Option promo code YEB789 gives a 50% bonus on the first deposit at or above
   promo_bonus_threshold. Mention it when discussing deposits. Never invent other
   codes or amounts.

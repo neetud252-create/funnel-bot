@@ -1,8 +1,8 @@
-"""Two lifetime previews, then the verified user's shared daily signal allowance."""
+"""One lifetime demo signal, then the verified user's shared daily signal allowance."""
 import secrets
 import config
 
-LIMIT = 2
+LIMIT = 1
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chart_trial_slots (
  token TEXT PRIMARY KEY, tg_id BIGINT NOT NULL, message_id BIGINT NOT NULL,
@@ -75,6 +75,13 @@ async def consume(pool, token):
                 return False
             if slot['quota_date'] is not None and not user['verified']:
                 return False
+            if not user['verified']:
+                # Recheck delivered usage under the user lock, including slots
+                # reserved before the demo limit was reduced.
+                used = await conn.fetchval("""SELECT COUNT(*) FROM chart_trial_slots
+                    WHERE tg_id=$1 AND quota_date IS NULL AND status='used'""", user['tg_id'])
+                if used >= LIMIT:
+                    return False
             if user['verified']:
                 # Verification while an analysis is in flight moves that result
                 # onto the daily quota. Midnight is rechecked at delivery too.

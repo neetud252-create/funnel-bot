@@ -37,7 +37,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             patch.object(data, 'enabled', return_value=True),
             patch.object(data, 'feed', return_value=self.feed),
             patch.object(flow.api, 'configured', return_value=True),
-            patch.object(flow.trial, 'status', AsyncMock(return_value=(False, 2))),
+            patch.object(flow.trial, 'status', AsyncMock(return_value=(True, 30))),
             patch.object(flow.trial, 'reserve', AsyncMock(return_value=(None, 'slot'))),
             patch.object(flow.trial, 'consume', AsyncMock(return_value=True)),
             patch.object(flow.trial, 'release', AsyncMock()),
@@ -87,6 +87,31 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Tentative bias', self.render.await_args.args[3])
             self.assertEqual(self.render.await_args.kwargs['companion_key'],
                              'signal_buy' if direction=='BUY' else 'signal_sell')
+
+    async def test_demo_result_requires_full_access_and_old_button_cannot_repeat(self):
+        flow.trial.status.return_value = (False, 1)
+        async def consume(*args):
+            flow.trial.status.return_value = (False, 0)
+            return True
+        flow.trial.consume.side_effect = consume
+        await self.analyse()
+        self.assertIn('BUY', self.render.await_args.args[3])
+        self.assertIn(flow.chart_signals.EXHAUSTED, self.render.await_args.args[3])
+        self.assertEqual(self.render.await_args.args[4], flow.ACCESS)
+        self.assertEqual(flow.ACCESS[0][0][1], 'cb:home:access')
+        await self.analyse()
+        self.assertEqual(self.render.await_args.args[3], flow.chart_signals.EXHAUSTED)
+        flow.trial.reserve.assert_awaited_once()
+        flow.api.analyse.assert_awaited_once()
+        flow.trial.consume.assert_awaited_once()
+
+    async def test_demo_exhausted_during_delivery_shows_access_instructions(self):
+        flow.trial.status.side_effect = [(False, 1), (False, 0)]
+        flow.trial.consume.return_value = False
+        await self.analyse()
+        self.assertEqual(self.render.await_args.args[3], flow.chart_signals.EXHAUSTED)
+        self.assertFalse(any(call.kwargs.get('screen_key') == 'market_result'
+                             for call in self.render.await_args_list))
 
     async def test_invalid_strategy_result_never_fabricates_or_consumes(self):
         for result in (dict(VALID, direction=None), dict(VALID, direction='WAIT'),
