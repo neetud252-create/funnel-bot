@@ -29,7 +29,7 @@ async def main():
                 assert db._users[tg_id]['verified'] is True
             else:
                 assert bot.calls[-1]['asset'] == 'assets/home_banner_loop.mp4'
-                assert 'first two analyses are free' in bot.calls[-1]['body']
+                assert 'Try the demo with 1 free signal' in bot.calls[-1]['body']
                 buttons = [b for row in bot.calls[-1]['markup'].inline_keyboard for b in row]
                 assert any(b.callback_data == 'home:test' for b in buttons)
                 assert any(b.callback_data == 'home:access' for b in buttons)

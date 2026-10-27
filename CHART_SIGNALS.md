@@ -59,11 +59,10 @@ returns the existing localized busy message with New Analysis, without retrying
 quota errors or switching to a paid fallback. Google may have different daily reset times
 from the bot's local UTC counters.
 
-Unverified users have **two lifetime free BUY/SELL signals**. The database's
+Unverified users have **one lifetime demo BUY/SELL signal**. The database's
 existing `users.verified` flag unlocks subsequent analysis; submitting an ID or
-tapping a button is not verification. Results keep the blue New Analysis and green
-Back buttons. After the second result, New Analysis opens the exhausted-trial screen
-with Get Bot Access. Both callback entry points and uploads check the limit.
+tapping a button is not verification. The demo result shows the access instructions
+and Get Full Access button. Both callback entry points and uploads check the limit.
 `/start`, a new day, Back and redeploying cannot reset it.
 The older/manual signal flow requires the same stored verification flag at entry
 and again before delivering a result. Old buttons, Premium status and token

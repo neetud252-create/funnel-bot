@@ -4,7 +4,9 @@ This updates the existing aiogram bot. There is no Mini App or second polling se
 
 ```mermaid
 flowchart TD
-  Home[Pocket IQ welcome animation and home menu] --> Trial[Two free lifetime chart analyses]
+  Home[Pocket IQ welcome animation and home menu] --> Trial[Try Demo - one lifetime signal]
+  Trial --> FullAccess[Get Full Access - follow account setup instructions]
+  FullAccess --> Kind
   Home --> Learn[How it works / Reviews / Community / Tools / Support]
   Home --> Kind{Already have a Pocket Option account?}
   Kind -->|No| Register[Account banner / Tracked link / Numeric UID instructions]
@@ -23,7 +25,7 @@ flowchart TD
   Check -->|Not linked| Help[Correct ID / Support; no duplicate account]
 ```
 
-Home has Try 2 Free Analyses; Set Up My Account (or Continue Setup / Open My Dashboard);
+Home has Try Demo; Set Up My Account (or Continue Setup / Open My Dashboard);
 How It Works; Reviews; Support; Community; Tools & FAQ; Language.
 Both account answers open the same registration card with three full-width buttons:
 Create New Account (green), I Created an Account — Check ID (blue), and Back (red).

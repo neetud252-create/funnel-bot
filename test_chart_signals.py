@@ -502,7 +502,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.bot = types.SimpleNamespace(download=AsyncMock(side_effect=download))
         self.patches = [patch.dict(os.environ, CHART_UI_TEST_COPY=''),
             patch.object(api, 'configured', return_value=True),
-            patch.object(trial, 'status', AsyncMock(return_value=(False, 2))),
+            patch.object(trial, 'status', AsyncMock(return_value=(False, 1))),
             patch.object(trial, 'reserve', AsyncMock(return_value=(None, 'trial-token'))),
             patch.object(trial, 'consume', AsyncMock(return_value=True)),
             patch.object(trial, 'release', AsyncMock()),
@@ -598,7 +598,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         trial.status.return_value = (False, 1)
         await flow.open_screen(cb, self.bot, self.state, self.render)
         self.assertIsNone(await self.state.get_state())
-        self.assertIn('1 of 2', self.render.await_args.args[3])
+        self.assertIn('1 of 1', self.render.await_args.args[3])
         self.assertIn('Results are not guaranteed.', self.render.await_args.args[3])
         self.assertEqual(self.render.await_args.args[4], flow.UPLOAD)
         trial.status.return_value = (True, 30)
@@ -662,16 +662,17 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('(tentative)', text)
         self.assertNotIn('WAIT', text)
 
-    async def test_second_result_gates_new_analysis_and_expired_reservation_cannot_send(self):
+    async def test_demo_result_gates_new_analysis_and_expired_reservation_cannot_send(self):
         trial.status.return_value = (False, 0)
         await flow.receive(message(), self.bot, self.state, self.render)
-        self.assertEqual([b[1] for row in self.render.await_args.args[4] for b in row], ['cb:chart:upload', 'cb:flow:explain', 'cb:home:access', 'cb:home:back'])
+        self.assertEqual(self.render.await_args.args[4], flow.ACCESS)
+        self.assertIn(flow.EXHAUSTED, self.render.await_args.args[3])
         self.assertNotIn('Remaining Signals:', self.render.await_args.args[3])
         await self.open()
         self.assertEqual(self.render.await_args.args[3], flow.EXHAUSTED)
         self.assertEqual(self.render.await_args.args[4], flow.ACCESS)
         self.assertIsNone(await self.state.get_state())
-        trial.status.return_value = (False, 2)
+        trial.status.return_value = (False, 1)
         await self.open()
         trial.consume.return_value = False
         self.render.reset_mock()

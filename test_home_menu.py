@@ -21,7 +21,7 @@ async def main():
     assert [b.style for row in rows for b in row] == [
         'success', 'primary', 'primary', 'primary', 'danger', 'danger', 'primary', 'danger']
     assert [[b.text for b in row] for row in rows] == [
-        ['🎯 Try 2 Free Analyses'], ['🚀 Set Up My Account'],
+        ['🎯 Try Demo'], ['🚀 Set Up My Account'],
         ['📖 How It Works', '📢 Community'], ['⭐ Reviews', '💬 Support'],
         ['🧰 Tools & FAQ'], ['🌐 Language']]
     for progress in ({'uid': '123456789'}, {'setup_stage': 'requirements'}):

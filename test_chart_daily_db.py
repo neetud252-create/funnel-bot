@@ -111,7 +111,7 @@ async def main():
                 await c.execute('UPDATE users SET verified=false WHERE tg_id=13')
             assert not await trial.consume(pool, revoked)
             await trial.release(pool, revoked)
-            assert await trial.status(pool, 13) == (False, 2)
+            assert await trial.status(pool, 13) == (False, 1)
             # Zero allowance must not allow one signal on a stale date.
             async with pool.acquire() as c:
                 await c.execute('UPDATE users SET last_reset_date=NULL WHERE tg_id=11')

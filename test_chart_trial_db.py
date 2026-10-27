@@ -28,20 +28,28 @@ async def main():
                 signals_used_today INT NOT NULL DEFAULT 0, last_reset_date DATE)''')
             await conn.execute(trial.SCHEMA)
             await conn.execute('INSERT INTO users (tg_id, verified) VALUES (11,false),(12,false),(13,true)')
-        assert await trial.status(pool, 11) == (False, 2)
-        # Five simultaneous requests can hold only two slots, even across connections.
+        assert await trial.status(pool, 11) == (False, 1)
+        # Five simultaneous requests can hold only one slot, even across connections.
         reserved = await asyncio.gather(*(trial.reserve(pool, 11, n) for n in range(5)))
         tokens = [token for blocked, token in reserved if blocked is None]
-        assert len(tokens) == 2 and all(tokens)
-        assert sum(blocked == 'trial' for blocked, _ in reserved) == 3
+        assert len(tokens) == 1 and all(tokens)
+        assert sum(blocked == 'trial' for blocked, _ in reserved) == 4
         assert await trial.status(pool, 11) == (False, 0)
         for token in tokens:
             assert await trial.consume(pool, token)
+        # A second reservation left over from the former two-signal allowance
+        # must not deliver after the one-signal policy takes effect.
+        async with pool.acquire() as conn:
+            await conn.execute("""INSERT INTO chart_trial_slots
+                (token,tg_id,message_id,status,expires_at)
+                VALUES ('legacy-pending',11,98,'pending',clock_timestamp()+INTERVAL '3 minutes')""")
+        assert not await trial.consume(pool, 'legacy-pending')
+        await trial.release(pool, 'legacy-pending')
         # A released pending slot (invalid image/error) is available, but a used slot is not.
         blocked, free = await trial.reserve(pool, 12, 20)
         assert blocked is None
         await trial.release(pool, free)
-        assert await trial.status(pool, 12) == (False, 2)
+        assert await trial.status(pool, 12) == (False, 1)
         assert (await trial.reserve(pool, 12, 20))[0] == 'busy'  # Replay suppressed.
         await trial.release(pool, tokens[0])
         assert await trial.status(pool, 11) == (False, 0)
@@ -60,7 +68,7 @@ async def main():
         async with pool.acquire() as conn:
             await conn.execute("UPDATE chart_trial_slots SET expires_at=clock_timestamp()-INTERVAL '1 second' WHERE token=$1", pending)
         assert not await trial.consume(pool, pending)
-        assert await trial.status(pool, 12) == (False, 2)
+        assert await trial.status(pool, 12) == (False, 1)
         # Stored verification moves requests to the daily allowance.
         blocked, token = await trial.reserve(pool, 13, 30)
         assert blocked is None and token
@@ -73,7 +81,7 @@ async def main():
         async with pool.acquire() as conn:
             await conn.execute('UPDATE users SET verified=false WHERE tg_id=11')
         assert await trial.status(pool, 11) == (False, 1)
-        print('PASS: actual Postgres concurrency, two lifetime slots, replay, restart, expiry, refunds and verification')
+        print('PASS: actual Postgres concurrency, one lifetime demo slot, replay, restart, expiry, refunds and verification')
     finally:
         if pool:
             await pool.close()

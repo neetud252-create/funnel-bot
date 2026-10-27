@@ -17,13 +17,13 @@ import config
 import localization
 
 INTRO = ('📸 <b>Try Pocket IQ chart analysis</b>\n\n'
-         'Free analyses remaining: <b>{left} of 2</b>. No deposit is needed to try.\n\n'
+         'Demo signals remaining: <b>{left} of 1</b>. No deposit is needed to try.\n\n'
          'Upload a clear chart screenshot to see the trend and momentum. '
          'AI predictions can be wrong. Results are not guaranteed.')
 VERIFIED = ('🤖 <b>Pocket IQ AI Chart Analysis</b>\n\n'
             'Your account is verified. Tap Upload Chart to analyse your screenshot.')
-EXHAUSTED = ('🔒 <b>Your 2 free signals have been used.</b>\n\n'
-             'You can review access requirements, read the guide, or contact support.')
+EXHAUSTED = ('🔒 <b>Your demo signal has been used.</b>\n\n'
+             'For more signals, tap Get Full Access and follow the account setup instructions.')
 PROMPT = ('🔲 AI Chart Analyzer\n\n'
           '📊 Send your trading chart screenshot.\n'
           'AI will describe the chart and provide an uncertain directional interpretation.\n\n'
@@ -59,7 +59,7 @@ VERIFIED_BACK = [[('🔙 Back', 'cb:home:access', 'success')]]
 HELP = [[('📖 Screenshot Guide', 'cb:flow:screenshot'), ('💬 Support', 'cb:flow:support')]]
 UPLOAD = [[('📸 Upload Chart', 'cb:chart:upload', 'primary')], *HELP, *BACK]
 NEW_ANALYSIS = [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]
-ACCESS = [[('🚀 View Access Requirements', 'cb:home:access', 'success')], *HELP, *BACK]
+ACCESS = [[('🚀 Get Full Access', 'cb:home:access', 'success')], *HELP, *BACK]
 _inflight = set()
 
 
@@ -232,6 +232,10 @@ async def receive(m, bot, state, render):
                     await state.clear()
                     await render(bot, tg_id, None, MESSAGES['limit'] + await usage_text(tg_id), VERIFIED_BACK)
                     return
+                if not verified and not left:
+                    await state.clear()
+                    await render(bot, tg_id, None, EXHAUSTED, ACCESS)
+                    return
                 raise api.AnalysisError('service')
             consumed = True
             usage = await usage_text(tg_id)
@@ -244,7 +248,8 @@ async def receive(m, bot, state, render):
                 delivery_attempted = True
                 result_rows = NEW_ANALYSIS[:1] + [[('📖 Understand This Result', 'cb:flow:explain')]]
                 if not usage:
-                    result_rows += [[('🚀 View Access Requirements', 'cb:home:access')]]
+                    text += '\n\n' + localization.translate_parts(EXHAUSTED, language)
+                    result_rows = ACCESS[:-1]
                 await render(bot, tg_id, None, text, result_rows + back,
                              reply_to_message_id=m.message_id, raise_on_error=True, screen_key='chart_result')
             except (TelegramBadRequest, TelegramForbiddenError):

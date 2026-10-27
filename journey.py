@@ -169,9 +169,9 @@ TEXTS = {
         '<b>Tentative:</b> confirmation is incomplete or evidence is mixed.\n\n'
         'A tentative result means the setup was not confirmed. Waiting is an option.\n\n' + RISK),
     'faq': ('❓ <b>Frequently asked questions</b>\n\n'
-        '<b>Do I need a deposit to try it?</b> No. Two free lifetime analyses are available on assets with connected data.\n\n'
+        '<b>Do I need a deposit to try it?</b> No. The demo includes 1 free lifetime signal on assets with connected data. Follow the account setup instructions for full access.\n\n'
         '<b>Does the bot trade for me?</b> No. It analyses market candles and shows a chart.\n\n'
-        '<b>How do I get started?</b> Tap Try 2 Free Analyses and choose your market, asset, and expiration time.\n\n'
+        '<b>How do I get started?</b> Tap Try Demo and choose your market, asset, and expiration time.\n\n'
         '<b>When do daily limits reset?</b> Midnight UTC.\n\n'
         '<b>Already registered?</b> Use your existing account and ask support about access.'),
     'risks': 'ℹ️ <b>Risks & referrals</b>\n\n' + RISK + '\n\n' + DISCLOSURE + '\n\n'
@@ -203,7 +203,7 @@ def screen(name, user=None):
     contact = url('💬 Contact Support', support_url(), True)
     rows = {
         'how': [[button('▶️ Watch Tutorial', 'cb:go:guide')],
-                [button('📊 Get Signals' if user.get('verified') else '🎯 Try Free Analysis',
+                [button('📊 Get Signals' if user.get('verified') else '🎯 Try Demo',
                         'cb:home:test', 'success')], [cb('❓ FAQs', 'faq')]],
         'reviews': [[url('⭐ Read Community Reviews', config.REVIEWS_URL, True)],
                     [cb('📊 Signal Results', 'results')], [cb('💬 Ask a Question', 'support')]],

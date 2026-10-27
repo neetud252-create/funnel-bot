@@ -27,7 +27,7 @@ DIRECTION_BANNERS = {'BUY': 'signal_buy', 'SELL': 'signal_sell'}
 BACK = [[('⬅️ Home', 'cb:home:back', 'danger')]]
 RETRY = [[('📊 Choose Asset', 'cb:market:open', 'primary')],
          *BACK]
-ACCESS = [[('🚀 View Access Requirements', 'cb:home:access', 'success')],
+ACCESS = [[('🚀 Get Full Access', 'cb:home:access', 'success')],
           [('📊 Browse Assets', 'cb:market:open', 'primary')],
           [('💬 Support', 'cb:flow:support')], *BACK]
 MESSAGES = {
@@ -356,14 +356,20 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, 
         snapshot.require_fresh()
         caption = result_text(snapshot, result, expiry, language, expiry_unit=expiry_unit)
         if not await trial.consume(db.pool, token):
-            raise api.AnalysisError('limit')
+            if not await allowed(tg_id, bot, render):
+                return
+            raise api.AnalysisError('service')
         consumed = True
+        verified, _ = await trial.status(db.pool, tg_id)
         if not await active():
             return
         rows = [[('🔄 New Analysis', expiry_callback(entry.key, expiry, expiry_unit), 'success')],
                 [('⏱ Change Expiration', f'cb:market:a:{entry.key}', 'primary')],
                 [('📊 Change Asset', 'cb:market:open', 'primary')],
                 *BACK]
+        if not verified:
+            caption += '\n\n' + localization.translate_parts(chart_signals.EXHAUSTED, language)
+            rows = ACCESS
         try:
             delivery_attempted = True
             await render(bot, tg_id, BufferedInputFile(png, filename='pocket-iq-chart.png'),
