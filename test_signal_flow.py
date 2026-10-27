@@ -685,7 +685,7 @@ async def devstart_tests(bot_mod, fake_db, config):
         # flow is covered in test_devstart_activation.py.
         with patch.object(bot_mod.elena.store, 'reset_activation', AsyncMock()) as reset:
             await bot_mod.cmd_devstart(m, fake_bot, state)
-            reset.assert_awaited_once_with(admin)
+            reset.assert_not_awaited()
         row = fake_db._users[admin]
 
         check("verified becomes false", row["verified"] is False, str(row["verified"]))

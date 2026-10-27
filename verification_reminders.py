@@ -11,7 +11,7 @@ from aiogram.exceptions import (
 )
 import config
 import db
-from elena_mode import activation_only
+from elena_mode import activation_only, enabled as automation_enabled
 
 TEXT = (
     "Hi! Your Pocket IQ verification is still incomplete.\n\n"
@@ -84,6 +84,9 @@ def keyboard():
 
 
 async def report(conn):
+    if not automation_enabled():
+        return ('Verification reminders: OFF (manual support).\n'
+                'Elena automation and previously queued deliveries are disabled.')
     if activation_only():
         return ('Verification reminders: OFF (Elena activation-only mode).\n'
                 'Scheduled reminders are disabled, including previously queued deliveries.')
@@ -105,8 +108,8 @@ def install(dp, is_admin, open_funnel):
         if m.chat.type != 'private' or not is_admin(m.from_user.id):
             return
         name = (m.text or '').split()[0].split('@')[0]
-        if name == '/reminderson' and activation_only():
-            await m.answer('Reminders stay OFF while Elena activation-only mode is enabled.')
+        if name == '/reminderson' and (not automation_enabled() or activation_only()):
+            await m.answer('Reminders stay OFF while Elena automatic support is disabled.')
             return
         async with db.pool.acquire() as conn:
             if name in ('/reminderson', '/remindersoff'):
@@ -133,7 +136,7 @@ def install(dp, is_admin, open_funnel):
 
 
 async def send_one(bot, conn, tg_id):
-    if activation_only():
+    if not automation_enabled() or activation_only():
         return 0
     # Admission is rechecked immediately before each send, including after a 429.
     claim = await conn.fetchrow(CLAIM, list(config.ADMIN_IDS), tg_id)
@@ -170,7 +173,7 @@ async def send_one(bot, conn, tg_id):
 
 
 async def run_queue(bot, conn):
-    if activation_only():
+    if not automation_enabled() or activation_only():
         return
     await conn.execute("UPDATE verification_reminder_deliveries SET status='uncertain' WHERE status='sending'")
     logging.info('Verification reminders ready; one per user after 24h; /verificationreminders')
@@ -188,4 +191,4 @@ async def run_queue(bot, conn):
 
 async def worker(bot):
     # Elena owns setup follow-ups; retain the shared admin stop controls.
-    logging.info('Legacy verification campaign disabled; Elena owns setup follow-ups')
+    logging.info('Legacy verification campaign disabled')

@@ -34,7 +34,7 @@ import activation
 import chart_trial
 from activation import USERNAME, BOT_USERNAME
 from elena_timing import ReplyTiming
-from elena_mode import activation_only
+from elena_mode import activation_only, enabled
 
 LOCK_ID = 8790198820
 _locks = weakref.WeakValueDictionary()
@@ -84,10 +84,6 @@ def user_lock(tg_id):
 
 def checking(tg_id):
     return tg_id in _checking
-
-
-def enabled():
-    return os.getenv('ELENA_ENABLED', '1').lower() in ('1', 'true', 'yes', 'on')
 
 
 def typing_delay(part):
@@ -255,6 +251,8 @@ def basic_answer(user, value):
 
 
 async def allow_ai(bot, tg_id, user):
+    if not enabled() or activation_only():
+        return
     if not await store.consent(tg_id):
         return  # A concurrent Stop/operator takeover must not be undone by consent.
     pending = await store.take_question(tg_id)
@@ -265,6 +263,8 @@ async def allow_ai(bot, tg_id, user):
 
 
 async def resume_chat(bot, tg_id, user, session):
+    if not enabled() or activation_only():
+        return
     if session['stopped'] or session['handoff']:
         session = await store.resume(tg_id, session['revision'])
         if not session:
@@ -284,6 +284,8 @@ async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True
     Bubbles are sent OUTSIDE the AI reply budget so the link bubble can never be
     cancelled by the reply deadline.
     """
+    if not enabled() or activation_only():
+        return False
     parts = messages.bubbles(text)
     if not parts:
         return False
@@ -311,7 +313,7 @@ async def send_chat_reply(bot, tg_id, text, timing, *, revision=None, guard=True
 
 
 async def ai_answer(bot, tg_id, user, value, *, timing=None):
-    if activation_only():
+    if not enabled() or activation_only():
         return
     timing = timing or ReplyTiming.start()
     # Grace window covers the inter-bubble gaps so the link is always delivered.
@@ -404,7 +406,7 @@ async def _ai_answer(bot, tg_id, user, value, timing):
 
 
 async def voice_reply(bot, tg_id, nonce, language):
-    if activation_only():
+    if not enabled() or activation_only():
         return
     claimed = await store.claim_voice(tg_id, nonce)
     if not claimed:
@@ -424,8 +426,10 @@ async def voice_reply(bot, tg_id, nonce, language):
 
 
 async def active_connection(bot):
+    if not enabled():
+        return None
     saved = await store.connection()
-    if not enabled() or not saved or not saved['enabled'] or not saved['can_reply']:
+    if not saved or not saved['enabled'] or not saved['can_reply']:
         return None
     try:
         current = await bot.get_business_connection(saved['connection_id'])
@@ -474,7 +478,7 @@ async def refresh(tg_id):
 
 
 async def send_business(bot, tg_id, text, markup=None, *, activation_confirmation=False):
-    if activation_only() and not activation_confirmation:
+    if not enabled() or (activation_only() and not activation_confirmation):
         return False
     connection = await active_connection(bot)
     session = await store.session(tg_id)
@@ -488,6 +492,8 @@ async def send_business(bot, tg_id, text, markup=None, *, activation_confirmatio
 
 async def send_proof(bot, tg_id, language='en'):
     """Send the accuracy screenshot (user winning run). Silent if the file is absent."""
+    if not enabled() or activation_only():
+        return False
     path = proof_file()
     if not path:
         logging.info('Elina proof screenshot not found; checked %s',
@@ -517,6 +523,8 @@ async def send_proof(bot, tg_id, language='en'):
 
 
 async def connection_changed(event):
+    if not enabled():
+        return
     saved = await store.connection()
     if saved:
         if event.user.id != saved['owner_id']:
@@ -662,6 +670,9 @@ async def confirm_activation(bot, tg_id, user):
 
 
 async def callback(cb, bot):
+    if not enabled():
+        await cb.answer()
+        return
     if not cb.message or cb.message.chat.type != 'private' or cb.from_user.id != cb.message.chat.id:
         await cb.answer()
         return
@@ -750,7 +761,7 @@ async def callback(cb, bot):
 
 
 async def open_elena(message, bot):
-    if message.chat.type != 'private':
+    if not enabled() or message.chat.type != 'private':
         return
     connected = await active_connection(bot)
     await message.answer(copy.INVITE if connected else copy.OFFLINE,
@@ -759,6 +770,11 @@ async def open_elena(message, bot):
 
 async def status_command(message):
     if message.chat.type != 'private' or message.from_user.id not in config.ADMIN_IDS:
+        return
+    if not enabled():
+        await message.answer('Support: manual replies at @' + USERNAME
+            + '\nElena activation, automatic replies, voice and follow-ups: OFF'
+            + '\n/start opens Pocket IQ directly.')
         return
     connection = await store.connection()
     ready = bool(connection and connection['enabled'] and connection['can_reply'])
@@ -834,7 +850,7 @@ class ActivityMiddleware:
 
 
 async def send_job(bot, conn, job):
-    if activation_only():
+    if not enabled() or activation_only():
         return
     tg_id = job['tg_id']
     if activation.enabled() and not activation.current(job):
@@ -911,6 +927,9 @@ async def send_job(bot, conn, job):
 
 
 async def worker(bot):
+    if not enabled():
+        logging.info('Elena automation disabled; manual support; no activation or follow-ups')
+        return
     if not activation_only() and os.getenv('ELENA_STARTUP_CHECK') == '1':
         try:
             connection = await active_connection(bot)

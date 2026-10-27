@@ -1,5 +1,9 @@
-"""Shared switch for Elena's activation-only operation."""
+"""Shared switches for optional Elena automation; manual support is the default."""
 import os
+
+
+def enabled():
+    return os.getenv('ELENA_ENABLED', '0').lower() in ('1', 'true', 'yes', 'on')
 
 
 def activation_only():

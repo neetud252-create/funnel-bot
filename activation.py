@@ -6,6 +6,7 @@ import config
 import db
 import elena_copy as copy
 import elena_store as store
+from elena_mode import enabled as automation_enabled
 
 USERNAME = 'elitecsupport'
 BOT_USERNAME = 'goplusaitrader_bot'
@@ -16,8 +17,7 @@ _open_interface = None
 
 
 def enabled():
-    return all(os.getenv(key, '1').lower() in ('1', 'true', 'yes', 'on')
-               for key in ('ELENA_ENABLED', 'ELENA_ACTIVATION_ENABLED'))
+    return automation_enabled() and os.getenv('ELENA_ACTIVATION_ENABLED', '0').lower() in ('1', 'true', 'yes', 'on')
 
 
 def chat_url(*, draft=None):
