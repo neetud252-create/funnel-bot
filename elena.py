@@ -4,8 +4,10 @@ Only @elitecsupport may attach. A different chat/account cannot select another
 customer by UID. Owner-enabled AI conversation respects customer opt-outs.
 Elina is the single support channel; links are always attached when asked.
 Human pacing: read pause, typing indicator, length-scaled beat, varied bubbles.
+Accuracy / win-rate questions also send the proof screenshot from assets/.
 """
 import asyncio
+import glob
 import logging
 import os
 import random
@@ -51,9 +53,25 @@ TYPING_CAP = float(os.getenv('ELENA_TYPING_CAP', '7'))
 # Extra grace so the inter-bubble gaps never cancel the link bubble.
 SEND_GRACE = float(os.getenv('ELENA_SEND_GRACE', '30'))
 
-# Accuracy screenshot sent on request.
-PROOF_PATH = os.getenv('ELENA_PROOF_IMAGE', 'assets/accuracy.png')
-ACCURACY_RE = re.compile(r'(?i)accura|win.?rate|percent|success|hit.?rate|proof|result')
+# Accuracy / win-rate proof screenshot. First existing file wins; if none of the
+# exact names exist we glob assets/ for anything accuracy/win/proof/result shaped.
+_configured_proof = os.getenv('ELENA_PROOF_IMAGE', '').strip()
+PROOF_CANDIDATES = ([_configured_proof] if _configured_proof else []) + [
+    'assets/accuracy.png', 'assets/accuracy.jpg', 'assets/accuracy.jpeg',
+    'assets/accuracy.webp', 'assets/winrate.png', 'assets/winrate.jpg',
+    'assets/win_rate.png', 'assets/win-rate.png', 'assets/proof.png',
+    'assets/proof.jpg', 'assets/results.png', 'assets/result.png',
+    'accuracy.png', 'accuracy.jpg', 'accuracy.png'.replace('.png', '.jpeg'),
+]
+PROOF_GLOBS = ('assets/accuracy*', 'assets/win*', 'assets/proof*',
+               'assets/result*', 'accuracy*', 'win*')
+PROOF_CAPTION = os.getenv('ELENA_PROOF_CAPTION', '').strip()
+
+# Accuracy / win-rate / proof triggers (multi-language, plus any bare "NN%").
+ACCURACY_RE = re.compile(
+    r'(?i)(\baccura\w*|\bwin\s?-?\s?rate\b|\bwinrate\b|\bhit\s?-?\s?rate\b|\bpercent\w*|'
+    r'\bsuccess\s?-?\s?rate\b|\bproof\b|\bresults?\b|\bprofitable\b|\bwins\b|\d{1,3}\s?%|'
+    r'सटीक|정확|دقت|doğruluk|akurasi|độ chính xác|准确|正確|نسبة|دقة)')
 
 # If the user asks for the link, always attach it even if the model said "none".
 LINK_REQUEST = re.compile(r'(?i)\b(link|register|registration|sign.?up|referral|join|refer)\b')
@@ -72,12 +90,27 @@ def typing_delay(part):
     return max(BUBBLE_MIN, min(1.5 + len(part) / TYPING_CPS, TYPING_CAP))
 
 
-async def typing_action(bot, tg_id):
-    """Show 'typing…' so the pause is not dead air."""
+def proof_file():
+    """First existing proof screenshot, or None. Never raises."""
+    for path in PROOF_CANDIDATES:
+        if path and os.path.isfile(path):
+            return path
+    for pattern in PROOF_GLOBS:
+        try:
+            found = sorted(p for p in glob.glob(pattern) if os.path.isfile(p))
+        except Exception:
+            found = []
+        if found:
+            return found[0]
+    return None
+
+
+async def typing_action(bot, tg_id, action='typing'):
+    """Show 'typing…' / 'uploading photo…' so the pause is not dead air."""
     try:
         connection = await active_connection(bot)
         if connection:
-            await bot.send_chat_action(tg_id, 'typing',
+            await bot.send_chat_action(tg_id, action,
                                        business_connection_id=connection['connection_id'])
     except Exception:
         logging.warning('Elina typing indicator unavailable')
@@ -205,11 +238,11 @@ def basic_answer(user, value):
                          'uid' if existing else 'register')
     if re.search(r'\b(uid|id|trader)\b|wrong|rejected|गलत|पहचान|شناخت', value):
         return chat_text(user, copy.CHAT_UID, 'uid')
-    if re.search(r'accura|win.?rate|percent|%|success|hit.?rate|सटीक|정확|دقت|doğruluk|akurasi|độ chính xác', value):
+    if ACCURACY_RE.search(value):
         return chat_text(user, copy.CHAT_ACCURACY + '\n\n' + copy.CHAT_ACCURACY_2)
     if re.search(r'signal|analysis|trade|trading|сигнал|सिग्नल|সিগন্যাল|اشار|tín hiệu|sinyal|señal|إشار', value):
         return chat_text(user, copy.CHAT_SIGNALS, 'signals')
-    if re.search(r'deposit|withdraw|payment|deposite|जमा|جمع|ডিপোজিট|nạp|çekim|плат|депозит|إيداع|سحب', value):
+    if re.search(r'deposit|withdraw|payment|deposite|जमा|जमा|ডিপোজিট|nạp|çekim|плат|депозит|إيداع|سحب', value):
         return chat_text(user, copy.CHAT_PAYMENT, 'deposit')
     if re.search(r'guide|tutorial|video|गाइड|руковод|hướng dẫn|panduan|guía|دليل', value):
         return chat_text(user, copy.CHAT_SIGNALS, 'guide')
@@ -287,7 +320,6 @@ async def ai_answer(bot, tg_id, user, value, *, timing=None):
 async def _ai_answer(bot, tg_id, user, value, timing):
     claimed, result, history = None, None, []
     language = user.get('language', 'en')
-    proof = bool(ACCURACY_RE.search(value or ''))
     processing = timing.processing_remaining()
     if processing > 0:
         try:
@@ -305,11 +337,18 @@ async def _ai_answer(bot, tg_id, user, value, timing):
             or latest['stopped'] or latest['handoff'] or latest.get('local_only')):
         return
     if not result:
+        local = basic_answer(user, value)
         await send_chat_reply(bot, tg_id,
-            copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + basic_answer(user, value),
+            copy.text(copy.CHAT_UNAVAILABLE, language) + '\n\n' + local,
             timing, revision=latest['revision'], requires_ai=True)
+        if ACCURACY_RE.search(value or ''):
+            await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
+            await send_proof(bot, tg_id, language)
         return
     action = result['action']
+    # Send the proof screenshot on any accuracy / win-rate question, and also
+    # whenever the reply itself quotes a percentage.
+    proof = bool(ACCURACY_RE.search(value or '')) or bool(re.search(r'\b\d{1,3}\s?%', result['reply']))
     # Hard guarantee: attach the registration link whenever one is asked for,
     # or whenever the model talks about a link but chose action "none".
     if action == 'none' and (LINK_REQUEST.search(value or '')
@@ -326,6 +365,9 @@ async def _ai_answer(bot, tg_id, user, value, timing):
             body += '\n\n' + copy.text(copy.PAUSED, language)
         # 'support': nothing appended — no "paused / team will help" notice.
         await send_chat_reply(bot, tg_id, body, timing, guard=False)
+        if proof:
+            await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
+            await send_proof(bot, tg_id, language)
         return
     nonce = secrets.token_hex(4)
     history += [{'role': 'user', 'content': ai.private_text(user, value)},
@@ -345,7 +387,7 @@ async def _ai_answer(bot, tg_id, user, value, timing):
         logging.info('Elina link delivered=%s; registration_url_present=%s', sent, bool(url))
         if proof:
             await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
-            await send_proof(bot, tg_id)
+            await send_proof(bot, tg_id, language)
         return
     delivered = await send_chat_reply(bot, tg_id, chat_text(user, result['reply'], action, generated=True),
                                       timing, revision=claimed['revision'], requires_ai=True)
@@ -353,7 +395,7 @@ async def _ai_answer(bot, tg_id, user, value, timing):
         logging.info('Elina AI reply delivered; action=%s', action)
         if proof:
             await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
-            await send_proof(bot, tg_id)
+            await send_proof(bot, tg_id, language)
 
 
 async def voice_reply(bot, tg_id, nonce, language):
@@ -439,22 +481,33 @@ async def send_business(bot, tg_id, text, markup=None, *, activation_confirmatio
     return True
 
 
-async def send_proof(bot, tg_id):
-    """Send the accuracy screenshot once, when the file exists."""
-    if not os.path.exists(PROOF_PATH):
-        logging.info('Elina proof screenshot missing at %s', PROOF_PATH)
+async def send_proof(bot, tg_id, language='en'):
+    """Send the accuracy screenshot (user winning run). Silent if the file is absent."""
+    path = proof_file()
+    if not path:
+        logging.info('Elina proof screenshot not found; checked %s',
+                     ', '.join(PROOF_CANDIDATES[:4]))
         return False
     connection = await active_connection(bot)
     if not connection:
         return False
     try:
-        with open(PROOF_PATH, 'rb') as image:
-            await bot.send_photo(tg_id, BufferedInputFile(image.read(), filename='accuracy.png'),
-                                 business_connection_id=connection['connection_id'])
-        logging.info('Elina proof screenshot delivered')
+        with open(path, 'rb') as image:
+            payload = image.read()
+    except Exception:
+        logging.warning('Elina proof screenshot unreadable at %s', path)
+        return False
+    try:
+        await typing_action(bot, tg_id, 'upload_photo')
+        await asyncio.sleep(random.uniform(READ_MIN, READ_MAX))
+        caption = PROOF_CAPTION or copy.text(copy.CHAT_PROOF, language)
+        await bot.send_photo(tg_id, BufferedInputFile(payload, filename=os.path.basename(path)),
+                             caption=caption, parse_mode='HTML',
+                             business_connection_id=connection['connection_id'])
+        logging.info('Elina proof screenshot delivered; file=%s', path)
         return True
     except Exception:
-        logging.warning('Elina proof screenshot unavailable')
+        logging.warning('Elina proof screenshot send failed')
         return False
 
 
@@ -582,7 +635,12 @@ async def business_message(message, bot):
         if value and not session.get('local_only') and ai.configured():
             await ai_answer(bot, tg_id, user, value, timing=timing)
         else:
-            await send_chat_reply(bot, tg_id, basic_answer(user, value), timing, revision=session['revision'])
+            local = basic_answer(user, value)
+            await send_chat_reply(bot, tg_id, local, timing, revision=session['revision'])
+            # Local/opted-out path still gets the proof on an accuracy question.
+            if ACCURACY_RE.search(value or ''):
+                await asyncio.sleep(random.uniform(BUBBLE_MIN, BUBBLE_MAX))
+                await send_proof(bot, tg_id, language)
 
 
 async def confirm_activation(bot, tg_id, user):
@@ -699,18 +757,21 @@ async def status_command(message):
         return
     connection = await store.connection()
     ready = bool(connection and connection['enabled'] and connection['can_reply'])
+    proof = proof_file()
     if activation_only():
         await message.answer('Elina account: @' + USERNAME + '\nTelegram connection: '
             + ('connected' if ready else 'not connected')
             + '\nMode: activation only'
             + '\nActivation confirmation and Pocket IQ menu handoff: enabled'
-            + '\nChat replies, AI, voice and scheduled reminders: disabled')
+            + '\nChat replies, AI, voice and scheduled reminders: disabled'
+            + '\nProof screenshot: ' + (proof or 'MISSING'))
         return
     await message.answer('Elina account: @' + USERNAME + '\nTelegram connection: '
         + ('connected' if ready else 'not connected')
         + '\nFollow-up chain: no UID 10m/30m/3h/24h/48h; wrong UID 5m/1h/6h/24h/48h; deposit 15m/1h/6h/24h/72h'
         + '\nAI replies: ' + ('configured; direct replies enabled' if ai.configured() else 'OPENAI_API_KEY missing')
         + '\nVoice: optional /voice command; AI-generated'
+        + '\nProof screenshot: ' + (proof or 'MISSING — upload assets/accuracy.png')
         + '\nConnect Pocket IQ in Elina’s Telegram Settings > Chat Automation.'
         + '\nUsers must message Elina before she can reply from that account.'
         + '\n/remindersoff pauses scheduled reminders; /reminderson resumes them.')
@@ -852,7 +913,8 @@ async def worker(bot):
                 reminders = await probe.fetchval('SELECT enabled FROM verification_reminder_settings WHERE id=1')
             logging.info('Elina startup check: business_connected=%s; registration_link=%s; minimum_deposit=%s',
                          bool(connection), bool(registration_url({})), config.MIN_DEPOSIT)
-            logging.info('Elina startup check: scheduled_reminders=%s', reminders)
+            logging.info('Elina startup check: scheduled_reminders=%s; proof_screenshot=%s',
+                         reminders, proof_file() or 'MISSING')
             result = await ai.reply({'language': 'en', 'setup_stage': 'new'}, 'Hi', [], authorized=True)
             logging.info('Elina startup check: openai_reply=%s; model=%s', bool(result), ai.MODEL)
         except Exception as exc:
@@ -865,7 +927,8 @@ async def worker(bot):
                     continue
                 try:
                     await conn.execute("UPDATE elena_sessions SET status='uncertain',sent_count=sent_count+1 WHERE status='sending'")
-                    logging.info('Elina assistant ready; account=@%s; activation_only=%s', USERNAME, activation_only())
+                    logging.info('Elina assistant ready; account=@%s; activation_only=%s; proof=%s',
+                                 USERNAME, activation_only(), proof_file() or 'MISSING')
                     while True:
                         await conn.execute("UPDATE elena_sessions SET history='[]'::jsonb,reply_text=NULL,reply_nonce=NULL,memory_since=NULL,revision=revision+1 WHERE memory_since<now()-interval '1 day'")
                         await conn.execute("UPDATE elena_sessions SET pending_question=NULL,pending_question_at=NULL WHERE pending_question_at<now()-interval '1 day'")
