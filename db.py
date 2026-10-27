@@ -3,7 +3,17 @@ import json
 import logging
 import asyncpg
 
-DB_URL = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+# Accept whatever Railway's Postgres plugin injects, not just DATABASE_URL.
+_RAW = (os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+        or os.getenv("DATABASE_PRIVATE_URL") or os.getenv("DATABASE_PUBLIC_URL")
+        or os.getenv("PGDATABASE_URL") or "")
+if not _RAW:
+    _keys = ", ".join(sorted(os.environ)) or "(none)"
+    raise RuntimeError(
+        "DATABASE_URL is not set. Railway -> the service running bot.py -> "
+        "Variables -> New Variable -> DATABASE_URL (or Add Reference -> Postgres). "
+        "Env keys visible: " + _keys)
+DB_URL = _RAW.replace("postgresql+asyncpg://", "postgresql://")
 pool: asyncpg.Pool | None = None
 
 SCHEMA = """
@@ -91,6 +101,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_code_at TIMESTAMPTZ;
 -- For the reverse lookup (every user who arrived on one code). The forward
 -- lookup needs no index: it is get_user(), which already returns the whole row.
 CREATE INDEX IF NOT EXISTS users_ref_code_idx ON users (ref_code);
+
+-- Broadcast opt-out. Written by set_notifications below and read by the
+-- broadcast sweep and by elena.py's send_job guard, which is why it must exist
+-- even on a database that never ran the broadcast module's own migrations.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS broadcast_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS broadcast_blocked BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS traders (
     trader_id  TEXT PRIMARY KEY,
