@@ -1249,7 +1249,7 @@ async def gift_start(cb: CallbackQuery, bot: Bot, state: FSMContext):
 # Deliberately NOT a second /unverify. /unverify undoes the verification stamp
 # and keeps the uid, which is what you want to re-test the verification step on
 # its own. /devstart additionally clears the uid, the daily quota, the tier and
-# every message-tracking id, for testing the funnel from its first screen. The
+# Elena activation, for testing the funnel from its first screen. The
 # split lives in db.py (unverify vs reset_user); neither command reimplements
 # the other.
 
@@ -1261,32 +1261,31 @@ async def cmd_devstart(m: Message, bot: Bot, state: FSMContext):
     if not _is_admin(tg_id):
         logging.warning("non-admin %s tried /devstart", tg_id)
         return
-    # Order matters, twice over. wipe() reads ui_msg_id and album_ids and
-    # _clear_nudge() reads nudge_msg_id; both have to run BEFORE the reset nulls
-    # those columns, or the messages they point at are stranded in the chat with
-    # nothing left to identify them by.
-    await wipe(bot, tg_id)
-    await _clear_nudge(bot, tg_id)
-    if not await db.reset_user(tg_id):
-        # No row yet - nothing to reset, and start() below creates one via
-        # touch_user anyway, which is the state a reset would have produced.
-        logging.info("/devstart: no existing row for %s, starting clean", tg_id)
-    # In-memory session state for this user only. A countdown left running would
-    # deliver a signal onto the fresh gate screen and spend a quota the reset
-    # just cleared; a stale _uid_lookup_at would make the first account ID of
-    # the new run bounce off the per-user panel cooldown.
-    task = _signal_tasks.pop(tg_id, None)
-    if task:
-        task.cancel()
-    # A verification still running from the previous run would clear its own
-    # entry later and could report a verdict onto the fresh funnel, so it is
-    # cancelled here with the other per-user tasks.
-    inflight = _verify_inflight.pop(tg_id, None)
-    if inflight and not inflight["task"].done():
-        inflight["task"].cancel()
-    _pair_choice.pop(tg_id, None)
-    _expiry_choice.pop(tg_id, None)
-    _uid_lookup_at.pop(tg_id, None)
+    # Use the same lock order as a DM: Elena first, then the bot's menu lock.
+    # Finish older replies/menu delivery before resetting, so they cannot reopen
+    # the interface after the new activation gate appears.
+    async with elena.user_lock(tg_id), _welcome_locks.setdefault(tg_id, asyncio.Lock()):
+        pending = []
+        task = _signal_tasks.pop(tg_id, None)
+        if task and not task.done():
+            pending.append(task)
+        inflight = _verify_inflight.pop(tg_id, None)
+        if inflight and not inflight["task"].done():
+            pending.append(inflight["task"])
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        # These read the old message IDs, so remove the UI before resetting them.
+        await wipe(bot, tg_id)
+        await _clear_nudge(bot, tg_id)
+        await elena.store.reset_activation(tg_id)
+        if not await db.reset_user(tg_id):
+            # start() creates the row for a first-time admin.
+            logging.info("/devstart: no existing row for %s, starting clean", tg_id)
+        _pair_choice.pop(tg_id, None)
+        _expiry_choice.pop(tg_id, None)
+        _uid_lookup_at.pop(tg_id, None)
     logging.info("/devstart: reset tg_id=%s to a new-user state", tg_id)
     # Hand off to the real /start rather than repeating it. The row now reads
     # unverified, so start() takes its gate branch - and if the entry screen

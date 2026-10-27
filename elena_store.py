@@ -71,6 +71,20 @@ async def session(tg_id):
     return await one('SELECT * FROM elena_sessions WHERE tg_id=$1', tg_id)
 
 
+async def reset_activation(tg_id):
+    """Restart one admin's activation test without replaying their previous DM."""
+    # Keep the connection and message cursor for incoming() deduplication, and
+    # retain opt-out/handoff preferences. Invalidate previously claimed jobs.
+    await execute("""UPDATE elena_sessions SET
+        activated_at=NULL,activation_version=0,activation_opened_at=NULL,
+        activation_attempts=0,activation_retry_at=NULL,last_business_at=NULL,
+        reason='inactive',status='awaiting_chat',due_at=NULL,activity_until=NULL,
+        sent_count=0,attempts=0,sent_reasons='{}',followup_version=0,
+        history='[]'::jsonb,memory_since=NULL,reply_text=NULL,reply_nonce=NULL,
+        voice_sent=FALSE,pending_question=NULL,pending_question_at=NULL,
+        revision=revision+1,updated_at=now() WHERE tg_id=$1""", tg_id)
+
+
 async def connection():
     return await one('SELECT * FROM elena_connection WHERE id=1')
 

@@ -77,6 +77,11 @@ ACCURACY_RE = re.compile(
 LINK_REQUEST = re.compile(r'(?i)\b(link|register|registration|sign.?up|referral|join|refer)\b')
 
 
+def user_lock(tg_id):
+    """Serialize a customer's replies, activation delivery and admin reset."""
+    return _locks.setdefault(tg_id, asyncio.Lock())
+
+
 def checking(tg_id):
     return tg_id in _checking
 
@@ -561,7 +566,7 @@ async def business_message(message, bot):
             await send_business(bot, tg_id, copy.text(copy.STOPPED, user.get('language', 'en')))
         # human/support: no notice
         return
-    lock = _locks.setdefault(tg_id, asyncio.Lock())
+    lock = user_lock(tg_id)
     async with lock:
         user = await db.get_user(tg_id)
         if not user:
@@ -700,7 +705,7 @@ async def callback(cb, bot):
         else:
             await bot.send_message(tg_id, text)
         return
-    lock = _locks.setdefault(tg_id, asyncio.Lock())
+    lock = user_lock(tg_id)
     async with lock:
         session = await store.session(tg_id)
         if not session:
@@ -934,10 +939,11 @@ async def worker(bot):
                         await conn.execute("UPDATE elena_sessions SET pending_question=NULL,pending_question_at=NULL WHERE pending_question_at<now()-interval '1 day'")
                         if activation.enabled():
                             for pending in await store.pending_activations(conn):
-                                await activation.deliver(bot, pending['tg_id'])
+                                async with user_lock(pending['tg_id']):
+                                    await activation.deliver(bot, pending['tg_id'])
                         jobs = [] if activation_only() else await store.due(conn, config.ADMIN_IDS)
                         for job in jobs:
-                            lock = _locks.setdefault(job['tg_id'], asyncio.Lock())
+                            lock = user_lock(job['tg_id'])
                             async with lock:
                                 await send_job(bot, conn, job)
                             await asyncio.sleep(1.1)
