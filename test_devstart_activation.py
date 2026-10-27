@@ -49,7 +49,15 @@ async def main():
             sessions[uid]['activation_opened_at'] = 'new'
 
     connection = dict(connection_id='approved', owner_id=99001, enabled=True, can_reply=True)
+    original_reset_user = db.reset_user
+
+    async def reset_user(uid):
+        if uid == admin:
+            assert state.state is None, 'Old analysis session must close before free quota resets'
+        return await original_reset_user(uid)
+
     with patch.object(E.store, 'session', side_effect=session), \
+         patch.object(db, 'reset_user', side_effect=reset_user), \
          patch.object(E.store, 'reset_activation', side_effect=reset) as reset_call, \
          patch.object(E.store, 'connection', AsyncMock(return_value=connection)), \
          patch.object(E.store, 'incoming', side_effect=incoming), \

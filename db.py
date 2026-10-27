@@ -603,13 +603,13 @@ async def set_tokens(tg_id: int, amount: int):
 # interchangeable: unverify() undoes only the verification stamp and keeps the
 # uid so the same account id can be re-sent immediately, which is what you want
 # when re-testing the verification step alone. reset_user() additionally clears
-# the uid, the daily quota, the tier and disposable message-tracking ids, which is
-# what you want when testing the funnel from the very first screen.
+# the uid, the daily and free quotas, the tier and disposable message-tracking
+# ids, for testing the funnel from the very first screen.
 # The persistent welcome reference is retained so /devstart cannot duplicate pins.
 
 # Deliberately a single statement: in Postgres that is its own transaction, so
-# the row can never be left half-reset (uid cleared but still verified, say) by
-# a crash or a dropped connection partway through. Every column named here is
+# the account and analysis slots can never be left half-reset by a crash or a
+# dropped connection partway through. Every user column named here is
 # set to the same value the SCHEMA defaults give a fresh row.
 #
 # last_checked and verified_at go with verified/deposit - set_verified writes
@@ -622,6 +622,7 @@ async def set_tokens(tg_id: int, amount: int):
 # already-attributed, so the re-test would never store the id it is checking.
 # attempts is untouched: it is declared in SCHEMA but read and written nowhere.
 _RESET_SQL = """
+    WITH reset_account AS (
     UPDATE users
        SET verified           = FALSE,
            verified_at        = NULL,
@@ -646,9 +647,19 @@ _RESET_SQL = """
            last_checked       = NULL
      WHERE tg_id = $1
     RETURNING tg_id
+    ), reset_slots AS (
+        UPDATE chart_trial_slots
+           SET status = 'released'
+         WHERE tg_id IN (SELECT tg_id FROM reset_account)
+           AND status <> 'released'
+    )
+    SELECT tg_id FROM reset_account
 """
 
 async def reset_user(tg_id: int):
+    # Release this admin's old slots to restore both free previews and invalidate
+    # pending work. Keep tokens/message IDs so stale deliveries and replays stay
+    # blocked, including late refunds against a freshly reset daily allowance.
     # The WHERE is what keeps this to a single row - no caller can widen it.
     # Returns False when there is no such user, so a reset on an unknown tg_id
     # is reported rather than silently looking like it worked.

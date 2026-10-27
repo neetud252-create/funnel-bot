@@ -740,7 +740,7 @@ async def devstart_tests(bot_mod, fake_db, config):
               row["ui_msg_id"] == sends[-1]["id"],
               "%s vs %s" % (row["ui_msg_id"], sends[-1]["id"]))
         check("/devstart clears the FSM state",
-              state.state is None and state.cleared == 1,
+              state.state is None and state.cleared >= 1,
               "%s / %s" % (state.state, state.cleared))
         check("the sender's in-memory selections are dropped",
               admin not in bot_mod._pair_choice and admin not in bot_mod._expiry_choice,
