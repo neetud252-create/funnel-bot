@@ -719,7 +719,7 @@ async def _show_activation_gate(bot, tg_id):
         if not await activation.required(tg_id):
             # The DM may arrive while this /start or stale button is waiting.
             message = await _show_current_interface(bot, tg_id)
-            if message:
+            if message and activation.enabled():
                 await elena.store.activation_opened(tg_id)
             return message
         try:
@@ -741,6 +741,8 @@ async def _show_current_interface(bot, tg_id):
 
 
 async def _open_from_elena(bot, tg_id):
+    if not activation.enabled():
+        return False
     lock = _welcome_locks.setdefault(tg_id, asyncio.Lock())
     async with lock:
         session = await elena.store.session(tg_id)
@@ -1333,7 +1335,8 @@ async def cmd_devstart(m: Message, bot: Bot, state: FSMContext):
         # These read the old message IDs, so remove the UI before resetting them.
         await wipe(bot, tg_id)
         await _clear_nudge(bot, tg_id)
-        await elena.store.reset_activation(tg_id)
+        if activation.enabled():
+            await elena.store.reset_activation(tg_id)
         if not await db.reset_user(tg_id):
             # start() creates the row for a first-time admin.
             logging.info("/devstart: no existing row for %s, starting clean", tg_id)
@@ -1342,7 +1345,7 @@ async def cmd_devstart(m: Message, bot: Bot, state: FSMContext):
         _uid_lookup_at.pop(tg_id, None)
     logging.info("/devstart: reset tg_id=%s to a new-user state", tg_id)
     # Hand off to the real /start rather than repeating it. The row now reads
-    # unverified, so start() takes its gate branch - and if the entry screen
+    # unverified, so start() opens the current welcome flow - if the entry screen
     # ever changes again, /devstart follows it with no edit here.
     await start(m, bot, state)
 
@@ -2366,7 +2369,7 @@ async def main():
     activation_gate = activation.GateMiddleware()
     dp.message.outer_middleware(activation_gate)
     dp.callback_query.outer_middleware(activation_gate)
-    logging.info('Elena activation gate ready; enabled=%s; required version=%s; all earlier access requires reactivation',
+    logging.info('Elena contact gate enabled=%s; required version=%s',
                  activation.enabled(), elena.store.ACTIVATION_VERSION)
     bot.session.middleware(localization.OutboundMiddleware())
     logging.info('Localization ready: 12 languages; saved per user')

@@ -2,7 +2,29 @@
 
 Account: **@elitecsupport**. Pocket IQ bot: **@goplusaitrader_bot**.
 
-## Current flow: OpenAI conversation and three follow-ups (2026-10-27)
+## Current flow: manual support (2026-10-28)
+
+Elena automation and the compulsory contact step are disabled. `/start` opens
+the existing welcome screen for unverified users and the main menu for verified
+users, without asking anyone to message @elitecsupport. Support chats are answered
+manually by the owner. Existing Support links still point to that account.
+
+Production flags: `ELENA_ENABLED=0`, `ELENA_ACTIVATION_ENABLED=0`,
+`ELENA_ACTIVATION_ONLY=1`, `ELENA_STARTUP_CHECK=0`. The first two flags also default
+to off when absent. No activation confirmations, automatic menu handoffs, AI or
+voice replies, connection probes, or scheduled follow-ups run. Old help buttons
+and queued reminders cannot send messages while automation is disabled.
+`/status` and `/verificationreminders` report manual mode; `/reminderson` cannot
+override it. No customer records are deleted or reset by this change.
+
+UID/deposit verification, trading access, two free analyses and `/devstart` quota
+reset are unchanged. `/devstart` now returns to the welcome screen directly.
+Keep `OPENAI_API_KEY`: it is shared with chart analysis.
+
+The sections below document retired automation. They do not describe the current
+production flow and must not be used as instructions to re-enable it.
+
+## Previous flow: OpenAI conversation and three follow-ups (2026-10-27)
 
 Production uses `ELENA_ACTIVATION_ONLY=0` and `MIN_DEPOSIT=20`. The default
 activation-only switch remains available as a rollback. `ELENA_STARTUP_CHECK=1`

@@ -53,7 +53,7 @@ class Followups(unittest.IsolatedAsyncioTestCase):
     async def test_stop_between_bubbles_stops_remaining_messages(self):
         job=session()
         bot=SimpleNamespace(send_message=AsyncMock())
-        with patch.dict(os.environ,ELENA_ACTIVATION_ONLY='0'), \
+        with patch.dict(os.environ,ELENA_ENABLED='1',ELENA_ACTIVATION_ONLY='0'), \
              patch.object(E,'active_connection',AsyncMock(return_value=CONNECTION)), \
              patch.object(E.db,'get_user',AsyncMock(return_value=user())), \
              patch.object(E.store,'claim',AsyncMock(return_value=job)), \
@@ -67,7 +67,7 @@ class Followups(unittest.IsolatedAsyncioTestCase):
         job=session()
         bot=SimpleNamespace(send_message=AsyncMock(side_effect=[True,TelegramRetryAfter(
             method=SendMessage(chat_id=42,text='x'),message='slow',retry_after=5)]))
-        with patch.dict(os.environ,ELENA_ACTIVATION_ONLY='0'), \
+        with patch.dict(os.environ,ELENA_ENABLED='1',ELENA_ACTIVATION_ONLY='0'), \
              patch.object(E,'active_connection',AsyncMock(return_value=CONNECTION)), \
              patch.object(E.db,'get_user',AsyncMock(return_value=user())), \
              patch.object(E.store,'claim',AsyncMock(return_value=job)), \

@@ -14,7 +14,7 @@ from aiogram.methods import SendMessage
 
 class ReminderTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        mode = patch.dict(os.environ, ELENA_ACTIVATION_ONLY='0')
+        mode = patch.dict(os.environ, ELENA_ENABLED='1', ELENA_ACTIVATION_ONLY='0')
         mode.start()
         self.addCleanup(mode.stop)
         self.conn = types.SimpleNamespace(fetchrow=AsyncMock(return_value={'attempts': 1}),
