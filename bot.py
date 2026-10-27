@@ -1300,8 +1300,8 @@ async def gift_start(cb: CallbackQuery, bot: Bot, state: FSMContext):
 #
 # Deliberately NOT a second /unverify. /unverify undoes the verification stamp
 # and keeps the uid, which is what you want to re-test the verification step on
-# its own. /devstart additionally clears the uid, the daily quota, the tier and
-# Elena activation, for testing the funnel from its first screen. The
+# its own. /devstart additionally clears the uid, the daily and free quotas,
+# the tier and Elena activation, for testing the funnel from its first screen. The
 # split lives in db.py (unverify vs reset_user); neither command reimplements
 # the other.
 
@@ -1317,6 +1317,8 @@ async def cmd_devstart(m: Message, bot: Bot, state: FSMContext):
     # Finish older replies/menu delivery before resetting, so they cannot reopen
     # the interface after the new activation gate appears.
     async with elena.user_lock(tg_id), _welcome_locks.setdefault(tg_id, asyncio.Lock()):
+        # Invalidate any chart/market analysis session before restoring its quota.
+        await state.clear()
         pending = []
         task = _signal_tasks.pop(tg_id, None)
         if task and not task.done():
