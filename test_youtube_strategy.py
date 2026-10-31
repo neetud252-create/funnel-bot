@@ -27,6 +27,7 @@ def rule(text):
     return {'condition': text, 'source_quote': text}
 RULES = {'usable': True, 'name': 'EMA 20 cross', 'summary': 'Trade a completed cross on the five minute chart.',
          'limitations': 'The EMA period and completed candle must be visible.',
+         'indicators': [{'kind': 'EMA', 'period': 20, 'source_quote': 'Show a five minute chart with EMA 20.'}],
          'requirements': [rule('Show a five minute chart with EMA 20.')],
          'buy_rules': [rule('Buy when a completed candle crosses above EMA 20.')],
          'sell_rules': [rule('Sell when a completed candle crosses below EMA 20.')],
@@ -100,6 +101,32 @@ class RulesTests(unittest.TestCase):
             with self.assertRaisesRegex(api.AnalysisError, '^strategy_saved$'):
                 yt.decode_saved(value)
 
+    def test_previous_saved_strategies_remain_readable_and_v2_checks_indicators(self):
+        legacy = copy.deepcopy(SAVED)
+        legacy['version'] = 'youtube-rules-v1'
+        del legacy['rules']['indicators']
+        self.assertEqual(yt.decode_saved(legacy), legacy)
+        legacy['version'] = yt.VERSION
+        with self.assertRaisesRegex(api.AnalysisError, '^strategy_saved$'):
+            yt.decode_saved(legacy)
+        for field, value in (('period', 0), ('period', True), ('period', 50.5),
+                             ('period', 501), ('kind', 'execute'),
+                             ('source_quote', 'This is not in the lesson.')):
+            rules = copy.deepcopy(RULES)
+            rules['indicators'][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(api.AnalysisError):
+                yt.validate_strategy(rules, TRANSCRIPT)
+
+    def test_caption_typography_is_normalized_without_accepting_changed_words(self):
+        rules = copy.deepcopy(RULES)
+        rules['avoid_rules'] = [rule("Don't trade a flat EMA.")]
+        transcript = TRANSCRIPT + ' Don’t trade a flat EMA.'
+        self.assertEqual(yt.validate_strategy(rules, transcript), rules)
+        rules['avoid_rules'][0]['source_quote'] = "Don't trade a rising EMA."
+        with self.assertRaises(api.AnalysisError) as caught:
+            yt.validate_strategy(rules, transcript)
+        self.assertEqual(caught.exception.detail, 'strategy_quote')
+
     def test_preview_and_result_escape_output_and_remove_bias_boilerplate(self):
         saved = copy.deepcopy(SAVED);saved['rules']['name']='<b>Untrusted</b>'
         text = flow.summary(saved, 'en')
@@ -113,6 +140,40 @@ class RulesTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_repair_recovers_core_rules_and_reserves_a_second_request(self):
+        for detail in ('unusable', 'quote'):
+            rejected = copy.deepcopy(RULES)
+            if detail == 'unusable':
+                rejected['usable'] = False
+            else:
+                rejected['buy_rules'][0]['source_quote'] = 'not actually stated by this speaker'
+            request = AsyncMock(side_effect=[rejected, copy.deepcopy(RULES)])
+            async def structured(body, validator, **kwargs):
+                return validator(await request(copy.deepcopy(body)))
+            reserve = AsyncMock()
+            with patch.object(api, 'structured_request', structured):
+                result = await yt.generate(TRANSCRIPT, VIDEO, 'en', before_retry=reserve)
+            self.assertEqual(result['rules'], RULES)
+            self.assertEqual(request.await_count, 2)
+            reserve.assert_awaited_once()
+            feedback = request.await_args.args[0]['contents'][0]['parts'][1]['text']
+            self.assertIn('validation_feedback', feedback)
+
+    async def test_repair_is_bounded_and_cannot_bypass_budget_or_grounding(self):
+        rejected = dict(RULES, usable=False)
+        request = AsyncMock(return_value=rejected)
+        async def structured(body, validator, **kwargs):
+            return validator(await request())
+        with patch.object(api, 'structured_request', structured):
+            with self.assertRaisesRegex(api.AnalysisError, '^strategy_rules$'):
+                await yt.generate(TRANSCRIPT, VIDEO, 'en')
+            self.assertEqual(request.await_count, 2)
+            request.reset_mock()
+            with self.assertRaisesRegex(api.AnalysisError, '^limit$'):
+                await yt.generate(TRANSCRIPT, VIDEO, 'en',
+                                  before_retry=AsyncMock(side_effect=api.AnalysisError('limit')))
+            request.assert_awaited_once()
+
     async def test_extraction_and_chart_use_each_configured_provider(self):
         for provider in ('gemini', 'openai'):
             seen = []
@@ -204,6 +265,17 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         await flow.action(self.cb('strategy:default'), self.bot, self.state, self.render)
         self.assertIsNone(self.saved[11])
         self.assertIsNone((await self.state.get_data())['chart_strategy'])
+
+    async def test_activation_opens_live_markets_when_available(self):
+        import market_data
+        import market_signals
+        await self.open();await self.import_video()
+        token = (await self.state.get_data())['strategy_token']
+        with patch.object(market_data, 'enabled', return_value=True):
+            await flow.action(self.cb('strategy:use:' + token), self.bot, self.state, self.render)
+        self.assertEqual(self.saved[11], SAVED)
+        self.assertEqual(await self.state.get_state(), market_signals.Market.browsing.state)
+        self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_type')
 
     async def test_unavailable_captions_accept_multipart_transcript(self):
         yt.fetch_transcript.side_effect = api.AnalysisError('transcript')

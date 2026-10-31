@@ -94,6 +94,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         flow.api.analyse.return_value = dict(SIGNAL, strategy_name=SAVED['rules']['name'])
         await self.analyse()
         self.assertEqual(flow.api.analyse.await_args.kwargs['strategy'], SAVED)
+        self.assertEqual(flow.market_chart.render.call_args.kwargs['indicators'], SAVED['rules']['indicators'])
+        self.assertIn('EMA(20)=', flow.api.analyse.await_args.args[2])
         self.assertIn(SAVED['rules']['name'], self.render.await_args.args[3])
         flow.trial.consume.assert_awaited_once_with(None, 'slot')
 

@@ -20,6 +20,7 @@ import market_chart
 import market_data as data
 import market_catalog as catalog
 import youtube_strategy
+import strategy_indicators
 
 PAGE_SIZE = 6
 EXPIRIES = tuple(range(1, 11))
@@ -344,14 +345,17 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, 
         snapshot = await data.feed().candles(entry.live.key, period)
         if not await active():
             return
-        png = await asyncio.to_thread(market_chart.render, snapshot)
+        indicators = saved_strategy['rules'].get('indicators', []) if saved_strategy else []
+        chart_options = {'indicators': indicators} if indicators else {}
+        png = await asyncio.to_thread(market_chart.render, snapshot, **chart_options)
         if not await active():
             return
         blocked = await api.reserve(db.pool, tg_id)
         if blocked:
             raise api.AnalysisError(blocked)
         try:
-            context = (f'Asset: {snapshot.asset.symbol}. Candle timeframe: {period} seconds. '
+            context = (strategy_indicators.context(snapshot.candles, indicators) +
+                       f'Asset: {snapshot.asset.symbol}. Candle timeframe: {period} seconds. '
                        f'User-selected expiration: {expiry} {"seconds" if expiry_unit == "s" else "minutes"}. This is a requested horizon, '
                        f'not proof that an entry is confirmed or an optimal expiry. '
                        f'All candles shown are completed OHLC bars, sourced from {snapshot.source}. '

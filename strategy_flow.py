@@ -49,7 +49,8 @@ def keyboard(*, build=False, preview=None):
         rows.append([('✅ Use Strategy', 'cb:strategy:use:' + preview, 'success')])
     if build:
         rows.append([('⚙️ Generate Strategy', 'cb:strategy:build', 'primary')])
-    rows.extend([[('📊 New Analysis', 'cb:strategy:upload', 'primary')],
+    rows.extend([[('📊 Get Signals', 'cb:market:open', 'primary')],
+                 [('📸 Upload Chart', 'cb:strategy:upload', 'primary')],
                  [('↩️ Default Strategy', 'cb:strategy:default', 'primary')], *signals.BACK])
     return rows
 
@@ -273,7 +274,12 @@ async def save_and_upload(cb, bot, state, render, saved):
         if await state.get_data() != before:
             await cb.answer()
             return
-        await signals.open_screen(cb, bot, state, render, upload=True)
+        import market_data
+        if market_data.enabled(uid):
+            import market_signals
+            await market_signals.open_screen(cb, bot, state, render)
+        else:
+            await signals.open_screen(cb, bot, state, render, upload=True)
     except Exception as exc:
         logging.warning('Strategy save failed: type=%s', type(exc).__name__)
         await cb.answer(signals.MESSAGES['service'], show_alert=True)

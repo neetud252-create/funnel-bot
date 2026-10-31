@@ -7,13 +7,15 @@ import asyncio
 import copy
 import hashlib
 import json
+import logging
 import re
 import time
+import unicodedata
 from urllib.parse import parse_qs, urlsplit
 
 import chart_analysis as api
 
-VERSION = 'youtube-rules-v1'
+VERSION = 'youtube-rules-v2'
 MAX_TRANSCRIPT_CHARS = 60000
 MAX_TRANSCRIPT_BYTES = MAX_TRANSCRIPT_CHARS * 4
 FETCH_SECONDS = 35
@@ -126,10 +128,16 @@ def text_schema(limit):
 
 
 RULE_SCHEMA = object_schema({'condition': text_schema(180), 'source_quote': text_schema(300)})
+INDICATOR_SCHEMA = object_schema({
+    'kind': {'type': 'string', 'enum': ['EMA', 'RSI']},
+    'period': {'type': 'integer', 'minimum': 2, 'maximum': 500},
+    'source_quote': text_schema(300),
+})
 RULE_LIMITS = {'requirements': 3, 'buy_rules': 4, 'sell_rules': 4, 'avoid_rules': 3}
 STRATEGY_SCHEMA = object_schema({
     'usable': {'type': 'boolean'}, 'name': text_schema(70),
     'summary': text_schema(180), 'limitations': text_schema(200),
+    'indicators': {'type': 'array', 'items': INDICATOR_SCHEMA, 'maxItems': 4},
     **{field: {'type': 'array', 'items': RULE_SCHEMA, 'maxItems': limit}
        for field, limit in RULE_LIMITS.items()},
 })
@@ -148,10 +156,26 @@ choice in summary. Keep necessary conditions together, never silently omit them
 to fit the limits. avoid_rules are disqualifiers: ANY one blocks an entry.
 Leave a direction's array empty if no rule for that direction is taught.
 usable=true only if at least one complete entry can be assessed from a trading
-chart screenshot with visible indicators and enough history. Any required live
-tick feed, hidden settings, external news, missing on-screen-only explanation,
-contradiction or vague entry rules makes usable=false. Do not substitute a
-different strategy. Explain the limitation. A transcript alone is not a chart
+chart with visible indicators and enough history. Recover the main, consistently
+taught setup even if the speaker digresses, loses an example trade, or gives an
+isolated conflicting example. Prefer repeatedly stated rules over an isolated
+aside; disclose that choice in limitations. Qualitative candle confirmation,
+pullbacks, rejection and sideways-market filters can remain qualitative visual
+conditions. Do not invent numeric thresholds for them or silently discard them.
+For example, a lesson consistently teaching price above/below EMA 50 with RSI 14
+above/below 50 is usable even if a later aside conflicts; retain its candle and
+sideways filters, disclose the conflict and leave an unspecified 'near 50' band
+qualitative. This example is NOT a default: never add EMA/RSI to another lesson.
+Reject only when no coherent entry remains, its essential parameters are absent,
+or it requires unavailable news/ticks/hidden data. Do not substitute a different
+strategy. Distinguish an ambiguous secondary detail from a missing core rule.
+indicators lists only EMA/RSI periods explicitly specified in this lesson, each
+with an exact supporting quote. Never confuse an RSI level with its period.
+Other required indicators stay in requirements and need an uploaded screenshot.
+Live EMA/RSI use closing prices, EMA alpha=2/(period+1), Wilder RSI; if the lesson
+requires other input/smoothing, leave that indicator out and keep the requirement
+for screenshots. Note unspecified indicator inputs as default close in limitations.
+A transcript alone is not a chart
 and cannot produce a current trade. Ignore promotions, claimed win rates,
 martingale, stake sizes and profit guarantees; never repeat them as evidence.
 Name and summary describe the extracted strategy, not the video's actual title
@@ -159,16 +183,40 @@ Name and summary describe the extracted strategy, not the video's actual title
 """
 
 
-def validate_strategy(result, transcript=None):
+def _quote_text(text):
+    # Caption providers and models can use different typography for the same
+    # words. Normalize that only; never fuzzy-match or remove words/numbers.
+    return ' '.join(unicodedata.normalize('NFKC', text).translate(str.maketrans(
+        {'’': "'", '‘': "'", '“': '"', '”': '"', '–': '-', '—': '-'})).split()).casefold()
+
+
+def validate_strategy(result, transcript=None, *, legacy=False):
     try:
-        if not isinstance(result, dict) or set(result) != set(STRATEGY_SCHEMA['required']):
+        required = set(STRATEGY_SCHEMA['required']) - ({'indicators'} if legacy else set())
+        if not isinstance(result, dict) or set(result) != required:
             raise ValueError()
         if type(result['usable']) is not bool:
             raise ValueError()
         for field, limit in (('name', 70), ('summary', 180), ('limitations', 200)):
             if not isinstance(result[field], str) or not result[field].strip() or len(result[field]) > limit:
                 raise ValueError()
-        source = normalize_transcript(transcript).casefold() if transcript is not None else None
+        source = _quote_text(normalize_transcript(transcript)) if transcript is not None else None
+        indicators = result.get('indicators', [])
+        if not isinstance(indicators, list) or len(indicators) > 4:
+            raise ValueError()
+        seen_indicators = set()
+        for indicator in indicators:
+            if (not isinstance(indicator, dict) or set(indicator) != {'kind', 'period', 'source_quote'}
+                    or indicator['kind'] not in ('EMA', 'RSI') or type(indicator['period']) is not int
+                    or not 2 <= indicator['period'] <= 500):
+                raise ValueError()
+            key = (indicator['kind'], indicator['period'])
+            quote = indicator['source_quote']
+            if (key in seen_indicators or not isinstance(quote, str) or not 8 <= len(quote) <= 300):
+                raise ValueError()
+            if source is not None and _quote_text(quote) not in source:
+                raise api.AnalysisError('strategy_rules', 'strategy_quote')
+            seen_indicators.add(key)
         for field, limit in RULE_LIMITS.items():
             rules = result[field]
             if not isinstance(rules, list) or len(rules) > limit:
@@ -180,16 +228,18 @@ def validate_strategy(result, transcript=None):
                 for key, bound in (('condition', 180), ('source_quote', 300)):
                     if not isinstance(rule[key], str) or not rule[key].strip() or len(rule[key]) > bound:
                         raise ValueError()
-                quote = ' '.join(rule['source_quote'].split()).casefold()
+                quote = _quote_text(rule['source_quote'])
                 condition = rule['condition'].strip().casefold()
-                if len(quote) < 8 or condition in seen or (source is not None and quote not in source):
+                if len(quote) < 8 or condition in seen:
                     raise ValueError()
+                if source is not None and quote not in source:
+                    raise api.AnalysisError('strategy_rules', 'strategy_quote')
                 seen.add(condition)
         if not result['usable'] or not (result['buy_rules'] or result['sell_rules']):
-            raise api.AnalysisError('strategy_rules')
+            raise api.AnalysisError('strategy_rules', 'strategy_unusable')
         return result
     except (KeyError, ValueError, TypeError) as exc:
-        raise api.AnalysisError('strategy_rules') from exc
+        raise api.AnalysisError('strategy_rules', 'strategy_fields') from exc
 
 
 async def generate(transcript, video, language, *, before_retry=None, transport=None, origin='captions'):
@@ -205,8 +255,25 @@ async def generate(transcript, video, language, *, before_retry=None, transport=
                              'candidateCount': 1, 'responseMimeType': 'application/json',
                              'responseJsonSchema': STRATEGY_SCHEMA},
     }
-    rules = await api.structured_request(body, lambda value: validate_strategy(value, transcript),
-                                       transport=transport, before_retry=before_retry)
+    for attempt in range(2):
+        try:
+            rules = await api.structured_request(body, lambda value: validate_strategy(value, transcript),
+                                                transport=transport, before_retry=before_retry)
+            break
+        except api.AnalysisError as exc:
+            logging.warning('Strategy extraction rejected: attempt=%s code=%s detail=%s',
+                            attempt + 1, str(exc), exc.detail)
+            if attempt or str(exc) != 'strategy_rules':
+                raise
+            # One budgeted repair pass, without putting rejected model text in
+            # the system prompt or bypassing the source-grounding validator.
+            if before_retry is not None:
+                await before_retry()
+            body['contents'][0]['parts'].append({'text': json.dumps({
+                'validation_feedback': exc.detail,
+                'request': 'Re-extract the coherent core. Copy short contiguous quotes exactly. '
+                           'Keep essential filters; explain secondary contradictions in limitations. '
+                           'If there truly is no complete entry, return usable=false.'})})
     return {'version': VERSION, 'video_id': video, 'origin': origin,
             'transcript_sha256': hashlib.sha256(transcript.encode()).hexdigest(), 'rules': rules}
 
@@ -217,10 +284,10 @@ def decode_saved(value):
     try:
         if isinstance(value, str):
             value = json.loads(value)
-        if (not isinstance(value, dict) or value.get('version') != VERSION
+        if (not isinstance(value, dict) or value.get('version') not in (VERSION, 'youtube-rules-v1')
                 or not isinstance(value.get('video_id'), str) or not VIDEO_ID.fullmatch(value['video_id'])):
             raise ValueError()
-        validate_strategy(value['rules'])
+        validate_strategy(value['rules'], legacy=value['version'] == 'youtube-rules-v1')
         return value
     except (KeyError, TypeError, ValueError, api.AnalysisError) as exc:
         # A broken custom strategy must not silently select the built-in one.
@@ -275,7 +342,7 @@ def chart_request(data, language, context, strategy):
     body['systemInstruction']['parts'][0]['text'] = CHART_INSTRUCTIONS + '\nProse language: ' + api.LANGUAGES.get(language, 'English')
     # Do not put generated rules into the privileged system instructions.
     body['contents'][0]['parts'][0]['text'] = json.dumps({
-        'strategy': strategy['rules'], 'chart_context': context[:500]}, ensure_ascii=False)
+        'strategy': strategy['rules'], 'chart_context': context[:1500]}, ensure_ascii=False)
     body['generationConfig']['responseJsonSchema'] = signal_schema(strategy)
     return body
 

@@ -87,6 +87,7 @@ REJECTION_REASONS = frozenset((
     'direction', 'chart_type', 'field_text', 'invalidation', 'setup', 'checks',
     'evidence', 'unreadable', 'contradictory_direction', 'insufficient_evidence',
     'http_status', 'transport', 'timeout',
+    'strategy_quote', 'strategy_unusable', 'strategy_fields',
 ))
 
 

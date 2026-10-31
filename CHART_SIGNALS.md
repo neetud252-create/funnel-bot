@@ -46,12 +46,19 @@ The configured chart provider (`CHART_PROVIDER=gemini` or `openai`) extracts a
 bounded JSON rule set: prerequisites, BUY conditions, SELL conditions, conditions
 to avoid, and limitations. Every rule contains an excerpt validated against the
 transcript. Missing rules are not invented or mirrored from the other direction.
-Lessons that cannot supply a complete strategy assessable from a screenshot are
-rejected. These checks constrain output but do not prove the model interpreted
+The importer selects the consistently taught core setup and discloses isolated
+contradictions in limitations. Qualitative candle confirmation and sideways filters
+remain qualitative; no numeric thresholds are invented for them. Unusable output
+or a quotation/field validation failure gets one additional extraction attempt,
+reserved against the same budget. Source validation still applies on that retry.
+Only typography/whitespace differences are normalized in source quotations.
+Lessons that cannot supply a coherent entry assessable from a chart are rejected.
+These checks constrain output but do not prove the model interpreted
 the lesson or screenshot correctly; accuracy has not been measured.
 
-Users review the summary and tap **Use Strategy** to activate it and open the
-chart uploader. **Default Strategy** restores the original strategy. One active
+Users review the summary and tap **Use Strategy** to activate it and open live
+market selection when available, otherwise the chart uploader. The importer also
+offers **Get Signals** and **Upload Chart**. **Default Strategy** restores the original strategy. One active
 strategy per Telegram user is persisted in `users.chart_strategy` (an idempotent,
 additive JSONB migration applied by `db.connect`). It includes rules, source video
 ID, transcript hash, caption/pasted provenance and rule-format version. Full
@@ -61,9 +68,13 @@ Existing active strategies survive restarts and failed replacement imports.
 
 Custom chart requests snapshot that user's strategy into the upload session.
 Live asset analysis also loads that user's saved strategy for each request.
-Generated asset charts contain OHLC candles; if a rule requires an indicator
-that is not displayed, it cannot match. The strategy uploader accepts screenshots
-with the necessary indicators. Existing market and expiry navigation is preserved.
+New imports record explicitly stated EMA/RSI periods in version 2. Existing version
+1 saved strategies remain readable. Live charts plot requested close-price EMA
+(SMA-seeded, alpha=2/(n+1)) and Wilder RSI below the completed OHLC candles. The
+latest computed values are also supplied as chart context. Missing warm-up history
+fails without consuming a signal; indicators never use future or invented bars.
+Other indicators or nonstandard inputs still require an uploaded screenshot.
+Existing market and expiry navigation is preserved.
 They do not include the built-in level-reaction instructions. Model-generated
 rules and transcript content remain untrusted user data, never system instructions
 or executable Python. Signals require all prerequisites and all conditions for
@@ -73,7 +84,9 @@ chart produces an error/retry screen without consuming a signal. There is no
 fallback to an unrelated directional estimate. Results identify the strategy.
 
 Imports share the durable API request budget and concurrency gate; they never
-consume a delivered-signal allowance. Every model retry reserves another request.
+consume a delivered-signal allowance. Every model retry, including the single
+extraction repair, reserves another request. Rejection logs contain only safe
+reason codes, never transcript or model-response text.
 Screenshot signals retain the existing trial/verified quota and refund behavior.
 Back, `/start`, another import or a language change suppress late import results;
 stale preview buttons cannot activate a discarded strategy.
