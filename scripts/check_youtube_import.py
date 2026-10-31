@@ -50,22 +50,32 @@ async def check_signal(saved):
         await market_data.close()
 
 
-async def main(video, *, signal=False):
+async def main(video, *, signal=False, saved_strategy=False):
     import asyncpg
     import db
     pool = await asyncpg.create_pool(db.DB_URL, min_size=1, max_size=1)
     try:
         async with pool.acquire() as conn:
             await conn.execute(youtube_source.SCHEMA)
-        text, origin = await youtube_source.load(video, 'en', pool=pool)
-        saved = await youtube_strategy.generate(text, video, 'en', origin=origin)
+        if saved_strategy:
+            async with pool.acquire() as conn:
+                value = await conn.fetchval('''SELECT chart_strategy FROM users
+                    WHERE chart_strategy->>'video_id'=$1 LIMIT 1''', video)
+            saved = youtube_strategy.decode_saved(value)
+            if saved is None:
+                raise api.AnalysisError('strategy_saved')
+            origin, characters = 'saved_strategy', None
+        else:
+            text, origin = await youtube_source.load(video, 'en', pool=pool)
+            saved = await youtube_strategy.generate(text, video, 'en', origin=origin)
+            characters = len(text)
         rules = saved['rules']
         if video == 'JXGAW2LXAaA':
             assert rules['buy_rules'] and rules['sell_rules']
             assert {('EMA', 50), ('RSI', 14)}.issubset(
                 {(item['kind'], item['period']) for item in rules['indicators']})
-        print('YOUTUBE_IMPORT_CHECK', {
-            'ok': True, 'origin': origin, 'characters': len(text),
+        print('YOUTUBE_STRATEGY_CHECK' if saved_strategy else 'YOUTUBE_IMPORT_CHECK', {
+            'ok': True, 'origin': origin, 'characters': characters,
             'buy_rules': len(rules['buy_rules']), 'sell_rules': len(rules['sell_rules']),
             'indicators': [(item['kind'], item['period']) for item in rules['indicators']],
         }, flush=True)
@@ -80,13 +90,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('video')
     parser.add_argument('--signal', action='store_true', help='Also analyse a real live chart without sending it')
+    parser.add_argument('--saved-strategy', action='store_true', help='Read an existing active strategy for this video')
     args = parser.parse_args()
     if not youtube_strategy.VIDEO_ID.fullmatch(args.video):
         raise SystemExit('Provide exactly one public YouTube video ID')
     logging.basicConfig(level=logging.INFO)
     logging.getLogger('httpx').setLevel(logging.WARNING)
     try:
-        asyncio.run(main(args.video, signal=args.signal))
+        asyncio.run(main(args.video, signal=args.signal, saved_strategy=args.saved_strategy))
     except Exception as exc:
         print('YOUTUBE_IMPORT_CHECK', {'ok': False, 'type': type(exc).__name__,
               'code': str(exc) if isinstance(exc, api.AnalysisError) else 'failed'}, flush=True)

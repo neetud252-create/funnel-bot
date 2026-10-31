@@ -120,6 +120,8 @@ prints only safe counts. It sends no Telegram messages and changes no user strat
 Add `--signal` to also analyse a fresh live asset chart, validate the BUY/SELL
 result and format the actual Telegram caption without sending it or consuming
 any user's allowance. Direction repair shares the original 90-second deadline.
+Use `--saved-strategy --signal` to exercise an already activated strategy for
+that video instead of re-importing it; this reads rules without modifying a user.
 The source-cache recovery tests are in `test_youtube_source.py`.
 
 ## Existing chart flow
