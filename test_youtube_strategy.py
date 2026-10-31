@@ -213,6 +213,12 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             reserve.assert_awaited_once()
             feedback = request.await_args.args[0]['contents'][0]['parts'][1]['text']
             self.assertIn('validation_feedback', feedback)
+            if detail == 'quote':
+                data = json.loads(feedback)
+                self.assertEqual(data['rejected_candidate'], rejected)
+                self.assertEqual(data['invalid_quote_fields'], ['buy_rules[0].source_quote'])
+                self.assertNotIn('not actually stated by this speaker',
+                    request.await_args.args[0]['systemInstruction']['parts'][0]['text'])
 
     async def test_repair_is_bounded_and_cannot_bypass_budget_or_grounding(self):
         rejected = dict(RULES, usable=False)
