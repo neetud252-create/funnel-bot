@@ -32,14 +32,17 @@ YouTube video ID is passed to the caption library; arbitrary URLs are not fetche
 
 The importer reads available captions, preferring the user's language, then
 English, then another available source language. It uses the pinned
-`youtube-transcript-api==1.2.4` dependency. Missing/disabled captions, private or
-unavailable videos, and retrieval failures offer a manual transcript fallback:
+`youtube-transcript-api==1.2.4` dependency. If caption retrieval fails and the
+existing `GEMINI_API_KEY` is configured, a bounded Gemini Interactions API request
+reads the public YouTube video and returns strategy notes. These notes are labeled
+**Video analysis**, never presented as verbatim captions. Set
+`YOUTUBE_VIDEO_FALLBACK=false` to disable that extra model request. Unavailable
+video content or failure of both sources offers a manual transcript fallback:
 paste text in multiple messages or send a UTF-8 `.txt`, then **Generate Strategy**.
 Transcripts are limited to 60,000 characters and never silently truncated.
-This reads captions; it does not watch video frames or transcribe audio.
 The library documents that YouTube can block cloud IPs, so automatic retrieval
-is not guaranteed on Railway. No proxy credentials or paid caption service are
-required or automatically enabled. See the
+is not guaranteed on Railway. The video-reading fallback uses the existing
+Gemini account and its usage charges; no proxy or caption subscription is added. See the
 [caption library documentation](https://github.com/jdepoix/youtube-transcript-api).
 
 The configured chart provider (`CHART_PROVIDER=gemini` or `openai`) extracts a
@@ -61,8 +64,11 @@ market selection when available, otherwise the chart uploader. The importer also
 offers **Get Signals** and **Upload Chart**. **Default Strategy** restores the original strategy. One active
 strategy per Telegram user is persisted in `users.chart_strategy` (an idempotent,
 additive JSONB migration applied by `db.connect`). It includes rules, source video
-ID, transcript hash, caption/pasted provenance and rule-format version. Full
-transcripts are not stored in Postgres or logs. Unfinished transcripts/previews
+ID, transcript hash, caption/pasted/video-analysis provenance and rule-format
+version. Successfully retrieved public video sources are cached in
+`youtube_sources` for seven days, with a maximum of 1,000 entries. Expired sources
+are not served and are purged on the next cache write. Pasted transcripts are
+never written to this shared cache; source text is never logged. Unfinished transcripts/previews
 live only in the existing FSM; leaving the flow or restarting discards them.
 Existing active strategies survive restarts and failed replacement imports.
 
@@ -85,7 +91,7 @@ fallback to an unrelated directional estimate. Results identify the strategy.
 
 Imports share the durable API request budget and concurrency gate; they never
 consume a delivered-signal allowance. Every model retry, including the single
-extraction repair, reserves another request. Rejection logs contain only safe
+extraction repair and the video-reading fallback, reserves another request. Rejection logs contain only safe
 reason codes, never transcript or model-response text.
 Screenshot signals retain the existing trial/verified quota and refund behavior.
 Back, `/start`, another import or a language change suppress late import results;
@@ -94,13 +100,17 @@ stale preview buttons cannot activate a discarded strategy.
 Both provider adapters support text-only extraction and image analysis with
 separate schemas. OpenAI uses the existing Responses API, `store=false`, and
 [strict structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
-No model selection, billing setting or API key is changed by the feature.
+No existing chart-model selection, billing setting or API key is changed by the feature.
 
 Offline checks: `python -m unittest test_youtube_strategy test_chart_signals
 test_chart_openai test_chart_progress`, plus `python test_localization.py`,
 `python test_home_menu.py` and `python test_signal_flow.py`. Live YouTube retrieval,
 live provider interpretation and the PostgreSQL migration require environment
 integration checks; mocked tests do not establish those services' availability.
+`python scripts/check_youtube_import.py JXGAW2LXAaA` performs an opt-in real import
+using the deployment environment, verifies BUY/SELL rules and EMA 50/RSI 14, and
+prints only safe counts. It sends no Telegram messages and changes no user strategy.
+The source-cache recovery tests are in `test_youtube_source.py`.
 
 ## Existing chart flow
 The strategy requires readable price history, not a specific broker layout.

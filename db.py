@@ -181,6 +181,8 @@ async def connect():
     pool = await asyncpg.create_pool(DB_URL, min_size=1, max_size=5)
     async with pool.acquire() as c:
         await c.execute(SCHEMA)
+        import youtube_source
+        await c.execute(youtube_source.SCHEMA)
         # If the drop above did not apply (constraint created under a different
         # name), every second claimer of a uid would hit UniqueViolationError
         # inside save_uid_only and be shown MSG_UID_ERROR. Say so loudly at boot

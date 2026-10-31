@@ -102,6 +102,7 @@ def _fetch(video, language):
         raise
     except Exception as exc:
         # Third-party errors can include URLs and full response bodies.
+        logging.warning('YouTube caption retrieval failed: type=%s', type(exc).__name__)
         raise api.AnalysisError('transcript') from exc
 
 
@@ -246,8 +247,11 @@ async def generate(transcript, video, language, *, before_retry=None, transport=
     if not isinstance(video, str) or not VIDEO_ID.fullmatch(video):
         raise api.AnalysisError('video_url')
     transcript = normalize_transcript(transcript)
+    source_instructions = ('\nThe source below is AI-generated video-analysis notes, not verbatim captions. '
+                           'source_quote cites these notes only. State this provenance in limitations; '
+                           'do not call the quotes original speech.' if origin == 'video_analysis' else '')
     body = {
-        'systemInstruction': {'parts': [{'text': EXTRACT_INSTRUCTIONS + '\nProse language: ' +
+        'systemInstruction': {'parts': [{'text': EXTRACT_INSTRUCTIONS + source_instructions + '\nProse language: ' +
                                                 api.LANGUAGES.get(language, 'English')}]},
         'contents': [{'role': 'user', 'parts': [{'text': json.dumps({'transcript': transcript}, ensure_ascii=False)}]}],
         'generationConfig': {'maxOutputTokens': api.MAX_OUTPUT_TOKENS,

@@ -11,6 +11,7 @@ import chart_analysis as api
 import chart_signals as signals
 import localization
 import youtube_strategy as strategies
+import youtube_source
 
 PROMPT = ('📺 <b>Make Strategy</b>\n\n'
           'Send a YouTube trading strategy video link. The bot reads its captions and extracts entry rules for your chart screenshots.')
@@ -29,6 +30,7 @@ LABELS = ('Make Strategy', 'Default Strategy', 'Generate Strategy', 'Use Strateg
           'Strategy Preview', 'Active Strategy', 'Requirements', 'BUY rules', 'SELL rules',
           'Avoid entries', 'Limitations', 'Source video', 'Pasted transcript', 'Video captions',
           'No rules supplied', 'Strategy: {name}',
+          'Video analysis',
           'Review the rules, then tap Use Strategy. Accuracy has not been verified.')
 SOURCES = (PROMPT, *MESSAGES.values(), *LABELS)
 
@@ -68,7 +70,8 @@ def summary(saved, language, *, active=False):
     lines.extend(['\n<b>' + tr('Limitations', language) + '</b>', html.escape(rules['limitations']),
                   '<a href="https://www.youtube.com/watch?v=' + saved['video_id'] + '">' +
                   tr('Source video', language) + '</a> · ' +
-                  tr('Pasted transcript' if saved.get('origin') == 'pasted' else 'Video captions', language)])
+                  tr({'pasted': 'Pasted transcript', 'video_analysis': 'Video analysis'}.get(
+                      saved.get('origin'), 'Video captions'), language)])
     if not active:
         lines.append('\n' + tr('Review the rules, then tap Use Strategy. Accuracy has not been verified.', language))
     return '\n'.join(lines)
@@ -136,7 +139,7 @@ async def build(event, bot, state, render, *, video=None, transcript=None):
         origin = 'pasted' if transcript is not None else 'captions'
         if transcript is None:
             await state.update_data(strategy_video=video)
-            transcript = await strategies.fetch_transcript(video, language)
+            transcript, origin = await youtube_source.load(video, language, pool=db.pool, before_request=retry)
         if not await active():
             return
         saved = await strategies.generate(transcript, video, language, before_retry=retry, origin=origin)

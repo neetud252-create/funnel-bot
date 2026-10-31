@@ -231,7 +231,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.render = AsyncMock()
         self.bot = types.SimpleNamespace(download=AsyncMock())
         signals._inflight.clear()
-        self.patches = [patch.object(yt, 'get_active', AsyncMock(side_effect=active)),
+        self.patches = [patch.dict('os.environ', {'GEMINI_API_KEY': ''}),
+                        patch.object(yt, 'get_active', AsyncMock(side_effect=active)),
                         patch.object(yt, 'fetch_transcript', AsyncMock(return_value=TRANSCRIPT)),
                         patch.object(yt, 'generate', AsyncMock(return_value=copy.deepcopy(SAVED))),
                         patch.object(api, 'configured', return_value=True),
@@ -288,6 +289,19 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(yt.generate.await_args.kwargs['origin'], 'pasted')
         self.assertIn(TRANSCRIPT[:90], yt.generate.await_args.args[0])
         self.db.set_chart_strategy.assert_not_awaited()
+
+    async def test_video_fallback_reserves_request_and_keeps_source_label(self):
+        yt.fetch_transcript.side_effect = api.AnalysisError('transcript')
+        with patch.object(flow.youtube_source, 'video_reading_configured', return_value=True), \
+             patch.object(flow.youtube_source, 'read_video', AsyncMock(return_value=TRANSCRIPT)):
+            await self.open();await self.import_video()
+        self.assertEqual(await self.state.get_state(), flow.Strategy.preview.state)
+        self.assertEqual(yt.generate.await_args.kwargs['origin'], 'video_analysis')
+        self.assertEqual(api.reserve.await_count, 2)
+        self.assertTrue(api.reserve.await_args.kwargs['retry'])
+        preview = dict(SAVED, origin='video_analysis')
+        self.assertIn('Video analysis', flow.summary(preview, 'en'))
+        self.assertNotIn('Video captions', flow.summary(preview, 'en'))
 
     async def test_cancellation_duplicate_import_and_expired_preview(self):
         started, release = asyncio.Event(), asyncio.Event()
