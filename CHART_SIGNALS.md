@@ -83,11 +83,18 @@ Other indicators or nonstandard inputs still require an uploaded screenshot.
 Existing market and expiry navigation is preserved.
 They do not include the built-in level-reaction instructions. Model-generated
 rules and transcript content remain untrusted user data, never system instructions
-or executable Python. Signals require all prerequisites and all conditions for
-exactly one supported direction, no disqualifier, and two distinct observations.
-A missing indicator, unmet condition, conflicting BUY/SELL entries or unreadable
-chart produces an error/retry screen without consuming a signal. There is no
-fallback to an unrelated directional estimate. Results identify the strategy.
+or executable Python. Every readable chart with sufficient evidence returns BUY
+or SELL. A complete entry takes priority; otherwise the model weighs observable
+strategy conditions, then completed price structure and net progress, and finally
+the latest completed non-flat candle/segment if needed. Missing conditions and
+conflicts stay truthful in the checklist and are explained in the reason. Such
+outputs are directional estimates, not confirmed entries from the video. The code
+computes `entry_confirmed` separately and rejects a direction contradicting a
+complete entry. At least two distinct observations and an invalidation are still
+required. Unreadable inputs, stale/missing data, provider failures and exhausted
+allowances remain errors, never fabricated directions. A readable null-direction
+response gets one budgeted repair using the same image and strategy. Results
+identify the strategy; existing saved strategies use this behavior without reimport.
 
 Imports share the durable API request budget and concurrency gate; they never
 consume a delivered-signal allowance. Every model retry, including the single
@@ -110,6 +117,9 @@ integration checks; mocked tests do not establish those services' availability.
 `python scripts/check_youtube_import.py JXGAW2LXAaA` performs an opt-in real import
 using the deployment environment, verifies BUY/SELL rules and EMA 50/RSI 14, and
 prints only safe counts. It sends no Telegram messages and changes no user strategy.
+Add `--signal` to also analyse a fresh live asset chart, validate the BUY/SELL
+result and format the actual Telegram caption without sending it or consuming
+any user's allowance. Direction repair shares the original 90-second deadline.
 The source-cache recovery tests are in `test_youtube_source.py`.
 
 ## Existing chart flow

@@ -99,15 +99,30 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(SAVED['rules']['name'], self.render.await_args.args[3])
         flow.trial.consume.assert_awaited_once_with(None, 'slot')
 
-    async def test_unmet_custom_strategy_does_not_charge_or_fall_back(self):
+    async def test_custom_strategy_service_failure_does_not_charge(self):
         from test_youtube_strategy import SAVED
         self.db._users[11] = dict(self.db._fresh_row(), chart_strategy=SAVED)
-        flow.api.analyse.side_effect = flow.api.AnalysisError('strategy_match')
+        flow.api.analyse.side_effect = flow.api.AnalysisError('service')
         await self.analyse()
         flow.api.analyse.assert_awaited_once()
         flow.trial.consume.assert_not_awaited()
         flow.trial.release.assert_awaited_once_with(None, 'slot', delivery_rejected=False)
-        self.assertEqual(self.render.await_args.args[3], flow.chart_signals.MESSAGES['strategy_match'])
+        self.assertEqual(self.render.await_args.args[3], flow.chart_signals.MESSAGES['service'])
+
+    async def test_incomplete_custom_entries_deliver_buy_and_sell_with_one_slot(self):
+        from test_youtube_strategy import SAVED, SIGNAL
+        self.db._users[11] = dict(self.db._fresh_row(), chart_strategy=SAVED)
+        for direction in ('BUY', 'SELL'):
+            flow.trial.consume.reset_mock()
+            flow.api.analyse.return_value = flow.youtube_strategy.validate_signal(dict(SIGNAL,
+                direction=direction, requirements=[False], buy_rules=[False], avoid_rules=[True],
+                reason='Entry confirmation is missing; completed price movement favors ' + direction), SAVED)
+            await self.analyse()
+            self.assertEqual(self.render.await_args.kwargs['screen_key'], 'market_result')
+            self.assertEqual(self.render.await_args.kwargs['companion_key'], 'signal_' + direction.lower())
+            self.assertIn('Entry confirmation is missing', self.render.await_args.args[3])
+            self.assertIn(direction, self.render.await_args.args[3])
+            flow.trial.consume.assert_awaited_once_with(None, 'slot')
 
     async def test_demo_result_requires_full_access_and_old_button_cannot_repeat(self):
         flow.trial.status.return_value = (False, 1)

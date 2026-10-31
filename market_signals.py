@@ -241,7 +241,7 @@ async def open_picker(bot, tg_id, state, render):
 
 def result_text(snapshot, result, expiry=1, language='en', *, expiry_unit='m', strategy=None):
     # Keep the validated direction and concrete reason without generic bias labels.
-    # Custom strategies must still meet their own complete entry checklist.
+    # Incomplete custom entries retain an evidence-based BUY/SELL direction.
     direction = result.get('direction')
     if strategy is not None:
         youtube_strategy.validate_signal({key: result[key] for key in youtube_strategy.signal_schema(strategy)['required']

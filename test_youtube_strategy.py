@@ -77,22 +77,33 @@ class RulesTests(unittest.TestCase):
         with self.assertRaisesRegex(api.AnalysisError, '^transcript_size$'):
             yt.normalize_transcript('x' * (yt.MAX_TRANSCRIPT_CHARS + 1))
 
-    def test_custom_entry_gates_every_condition_and_both_directions(self):
-        self.assertEqual(yt.validate_signal(copy.deepcopy(SIGNAL), SAVED)['direction'], 'BUY')
+    def test_custom_entries_preserve_both_directions_and_truthful_confirmation(self):
+        self.assertTrue(yt.validate_signal(copy.deepcopy(SIGNAL), SAVED)['entry_confirmed'])
         sell = dict(SIGNAL, direction='SELL', buy_rules=[False], sell_rules=[True])
         self.assertEqual(yt.validate_signal(sell, SAVED)['direction'], 'SELL')
-        for fields in ({'requirements': [False]}, {'avoid_rules': [True]},
-                       {'buy_rules': [False]}, {'sell_rules': [True]},
-                       {'buy_rules': []}, {'buy_rules': [1]}, {'evidence': ['x', ' X ']}):
+        for direction in ('BUY', 'SELL'):
+            for fields in ({'requirements': [False]}, {'avoid_rules': [True]},
+                           {'buy_rules': [False]}, {'sell_rules': [True]}):
+                with self.subTest(direction=direction, fields=fields):
+                    result = yt.validate_signal(dict(SIGNAL, direction=direction, **fields), SAVED)
+                    self.assertEqual(result['direction'], direction)
+                    self.assertFalse(result['entry_confirmed'])
+                    for key, value in fields.items():
+                        self.assertEqual(result[key], value)
+        for fields in ({'buy_rules': []}, {'buy_rules': [1]}, {'evidence': ['x', ' X ']},
+                       {'direction': 'SELL'}, {'direction': 'WAIT'}, {'invalidation': None}):
             with self.subTest(fields=fields), self.assertRaises(api.AnalysisError):
                 yt.validate_signal(dict(SIGNAL, **fields), SAVED)
-        with self.assertRaisesRegex(api.AnalysisError, '^strategy_match$'):
+        with self.assertRaisesRegex(api.AnalysisError, '^response$') as caught:
             yt.validate_signal(dict(SIGNAL, direction=None, buy_rules=[False]), SAVED)
+        self.assertEqual(caught.exception.detail, 'direction')
         with self.assertRaisesRegex(api.AnalysisError, '^chart$'):
             yt.validate_signal(dict(SIGNAL, direction=None, chart_readable=False), SAVED)
-        # An empty SELL side can never turn into a vacuously true SELL signal.
+        # A one-sided lesson never falsely confirms the side with no entry rules.
         one_sided = copy.deepcopy(SAVED);one_sided['rules']['sell_rules']=[]
         self.assertEqual(yt.validate_signal(dict(SIGNAL, sell_rules=[]), one_sided)['direction'], 'BUY')
+        estimate = yt.validate_signal(dict(SIGNAL, direction='SELL', buy_rules=[False], sell_rules=[]), one_sided)
+        self.assertFalse(estimate['entry_confirmed'])
 
     def test_persisted_rules_validate_and_never_silently_fall_back(self):
         self.assertEqual(yt.decode_saved(json.dumps(SAVED)), SAVED)
@@ -140,6 +151,50 @@ class RulesTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_direction_repair_shares_the_original_analysis_deadline(self):
+        async def slow(*args, **kwargs):
+            await asyncio.sleep(0.1)
+        with patch.object(api, 'TOTAL_TIMEOUT_SECONDS', 0.01), \
+             patch.object(api, 'structured_request', slow):
+            with self.assertRaisesRegex(api.AnalysisError, '^service$') as caught:
+                await api.analyse(IMAGE, 'en', strategy=SAVED)
+        self.assertEqual(caught.exception.detail, 'timeout')
+
+    async def test_null_direction_repairs_once_with_same_strategy_and_budget(self):
+        for provider in ('gemini', 'openai'):
+            attempts = []
+            def handler(req):
+                attempts.append(json.loads(req.content))
+                value = dict(SIGNAL, buy_rules=[False], direction=None if len(attempts) == 1 else 'SELL')
+                return httpx.Response(200, json=envelope(value, provider))
+            reserve = AsyncMock()
+            with patch.dict(os.environ, CHART_PROVIDER=provider, GEMINI_API_KEY='fake', OPENAI_API_KEY='fake'):
+                result = await api.analyse(IMAGE, 'en', strategy=SAVED, before_retry=reserve,
+                                           transport=httpx.MockTransport(handler))
+            self.assertEqual(result['direction'], 'SELL')
+            self.assertFalse(result['entry_confirmed'])
+            self.assertEqual(len(attempts), 2)
+            reserve.assert_awaited_once()
+            self.assertIn('validation_feedback', json.dumps(attempts[1]))
+            self.assertIn(RULES['name'], json.dumps(attempts[1]))
+
+    async def test_null_repair_cannot_repeat_or_bypass_cancellation_and_budget(self):
+        count = 0
+        def handler(req):
+            nonlocal count
+            count += 1
+            return httpx.Response(200, json=response(dict(SIGNAL, direction=None, buy_rules=[False])))
+        with patch.dict(os.environ, CHART_PROVIDER='gemini', GEMINI_API_KEY='fake'):
+            with self.assertRaisesRegex(api.AnalysisError, '^response$'):
+                await api.analyse(IMAGE, 'en', strategy=SAVED, transport=httpx.MockTransport(handler))
+            self.assertEqual(count, 2)
+            for code in ('limit', 'cancelled'):
+                count = 0
+                with self.assertRaisesRegex(api.AnalysisError, '^' + code + '$'):
+                    await api.analyse(IMAGE, 'en', strategy=SAVED, transport=httpx.MockTransport(handler),
+                                      before_retry=AsyncMock(side_effect=api.AnalysisError(code)))
+                self.assertEqual(count, 1)
+
     async def test_repair_recovers_core_rules_and_reserves_a_second_request(self):
         for detail in ('unusable', 'quote'):
             rejected = copy.deepcopy(RULES)
@@ -398,7 +453,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await bot.session.close()
 
-    async def test_custom_strategy_reaches_chart_provider_and_no_match_refunds(self):
+    async def test_custom_strategy_reaches_chart_provider_and_service_failure_refunds(self):
         self.saved[11]=SAVED
         await signals.open_screen(self.cb('chart:upload'),self.bot,self.state,self.render,upload=True)
         async def download(media,destination,**kw):
@@ -407,12 +462,31 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(signals.trial,'reserve',AsyncMock(return_value=(None,'slot'))), \
              patch.object(signals.trial,'consume',AsyncMock()) as consume, \
              patch.object(signals.trial,'release',AsyncMock()) as release, \
-             patch.object(api,'analyse',AsyncMock(side_effect=api.AnalysisError('strategy_match'))) as analyse:
+             patch.object(api,'analyse',AsyncMock(side_effect=api.AnalysisError('service'))) as analyse:
             await signals.receive(message(),self.bot,self.state,self.render)
             self.assertEqual(analyse.await_args.kwargs['strategy'],SAVED)
             consume.assert_not_awaited()
             release.assert_awaited_once_with(None,'slot')
-            self.assertEqual(self.render.await_args.args[3],signals.MESSAGES['strategy_match'])
+            self.assertEqual(self.render.await_args.args[3],signals.MESSAGES['service'])
+
+    async def test_uploaded_custom_chart_delivers_incomplete_buy_and_sell(self):
+        self.saved[11] = SAVED
+        async def download(media, destination, **kw):
+            destination.write(IMAGE)
+        self.bot.download.side_effect = download
+        for direction in ('BUY', 'SELL'):
+            await signals.open_screen(self.cb('chart:upload'), self.bot, self.state, self.render, upload=True)
+            result = yt.validate_signal(dict(SIGNAL, direction=direction, buy_rules=[False],
+                reason='Pullback confirmation is missing; recent completed price movement favors ' + direction), SAVED)
+            with patch.object(signals.trial, 'reserve', AsyncMock(return_value=(None, 'slot'))), \
+                 patch.object(signals.trial, 'consume', AsyncMock(return_value=True)) as consume, \
+                 patch.object(signals.trial, 'release', AsyncMock()), \
+                 patch.object(api, 'analyse', AsyncMock(return_value=result)):
+                await signals.receive(message(), self.bot, self.state, self.render)
+                self.assertEqual(self.render.await_args.kwargs['screen_key'], 'chart_result')
+                self.assertIn(direction, self.render.await_args.args[3])
+                self.assertIn('Pullback confirmation is missing', self.render.await_args.args[3])
+                consume.assert_awaited_once_with(None, 'slot')
 
 
 if __name__ == '__main__':

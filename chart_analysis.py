@@ -387,9 +387,8 @@ def usage_counts(payload, selected):
 async def analyse(data, language, context='', *, transport=None, before_retry=None, strategy=None):
     if strategy is not None:
         import youtube_strategy
-        body = youtube_strategy.chart_request(data, language, context, strategy)
-        return await structured_request(body, lambda result: youtube_strategy.validate_signal(result, strategy),
-                                        transport=transport, before_retry=before_retry)
+        return await youtube_strategy.analyse_chart(data, language, context, strategy,
+                                                   transport=transport, before_retry=before_retry)
     payload = await request_response(data, language, context, transport=transport, before_retry=before_retry)
     try:
         if provider() == 'openai':
