@@ -35,7 +35,7 @@ class DepositTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card['body'],
             '✅ <b>Great! Your Pocket IQ registration is complete!</b>\n\n'
             '🧾 Just one step left — make a <b>deposit of at least $20</b> into your Pocket Option account.\n\n'
-            '🎁 Use promo code YEB789 to get a 50% bonus on your first deposit.\n\n'
+            '🎁 Use promo code 50START to get a 50% bonus on your first deposit.\n\n'
             '🚀 Once your deposit is confirmed, Pocket IQ will be ready to activate.\n\n'
             '👇 Already deposited? Click the <b>“I’ve deposited”</b> button below.')
         rows = card['markup'].inline_keyboard
@@ -113,7 +113,7 @@ class DepositTests(unittest.IsolatedAsyncioTestCase):
             await self.B._show_deposit(self.bot, self.customer, 0)
         card = H.last_screen(self.bot)
         self.assertEqual(card['kind'], 'text')
-        self.assertIn('YEB789', card['body'])
+        self.assertIn('50START', card['body'])
         self.assertEqual(card['markup'].inline_keyboard[-1][0].callback_data, 'flow:recheck')
 
 

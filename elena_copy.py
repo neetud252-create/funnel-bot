@@ -8,7 +8,7 @@ import journey
 
 # ---- brand / offer ----
 NAME = 'Elina'
-PROMO_CODE = 'YEB789'
+PROMO_CODE = '50START'
 BONUS_MIN_DEPOSIT = 20
 BONUS_PERCENT = 50
 

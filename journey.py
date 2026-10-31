@@ -87,7 +87,7 @@ UID = ('🔍 <b>What is your Pocket Option Trader ID?</b>\n\n'
     'Never send a password, login code, recovery code, or payment details.')
 DEPOSIT = ('✅ <b>Great! Your Pocket IQ registration is complete!</b>\n\n'
     '🧾 Just one step left — make a <b>deposit of at least ${required}</b> into your Pocket Option account.\n\n'
-    '🎁 Use promo code YEB789 to get a 50% bonus on your first deposit.\n\n'
+    '🎁 Use promo code 50START to get a 50% bonus on your first deposit.\n\n'
     '🚀 Once your deposit is confirmed, Pocket IQ will be ready to activate.\n\n'
     '👇 Already deposited? Click the <b>“I’ve deposited”</b> button below.')
 # Temporary preview for administrators only; never advertise invented stock to customers.
@@ -95,7 +95,7 @@ DEPOSIT_TEST_URGENCY = ('⚠️ There are only <b>1 activations</b> available fo
     'Hurry up and activate the bot 🚀')
 DEPOSIT_HELP = ('💳 <b>How to Deposit Funds</b>\n\n'
     '1️⃣ Open your linked Pocket Option account and select <b>Deposit</b>.\n\n'
-    '2️⃣ Enter your deposit amount and promo code <code>YEB789</code>. Check the bonus terms shown in your account.\n\n'
+    '2️⃣ Enter your deposit amount and promo code <code>50START</code>. Check the bonus terms shown in your account.\n\n'
     '3️⃣ Choose an available payment method and follow the instructions.\n\n'
     'Return to Pocket IQ and tap <b>“I’ve deposited”</b> to check your saved account ID.')
 READY = ('✅ <b>Your Pocket IQ access is ready!</b>\n\n'
