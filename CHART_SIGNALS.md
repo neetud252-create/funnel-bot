@@ -1,23 +1,95 @@
 # Historical screenshot analysis implementation
 
-**Superseded 2026-10-24:** the public bot now uses asset selection and generated
-candle charts. Screenshot handlers are not installed. See
+The main signal flow uses asset selection and generated candle charts. The
+**Make Strategy** flow additionally supports chart screenshots. See
 [MARKET_SIGNALS.md](MARKET_SIGNALS.md) for the current flow and data permissions.
-The notes below document the retained provider and historical upload code.
+The notes below document the shared provider, strategy importer and upload code.
 
 Home → Test Signals → trial screen with remaining signals → Test Signals → upload
 one chart photo/image document → analysis replying to that image. Results show
-Trend, Momentum, BUY/SELL Prediction and Timer in the compact reference layout.
-Prediction uses the owner's level-reaction strategy. Incomplete or conflicting
-confirmation adds a translated `(tentative)` suffix; an unreadable chart produces
-an upload-retry error, not a signal. Reason and invalidation remain in the validated
-provider response but are not displayed as extra paragraphs. Timer displays the
+Trend, Momentum, BUY/SELL Prediction, Timer and a concise Reason.
+Prediction uses the owner's level-reaction strategy unless the user activates a
+YouTube strategy. Results no longer add `(tentative)` or the generic “Tentative
+bias” sentence. Specific missing confirmation remains in the reason. An unreadable
+chart produces an upload-retry error, not a signal. Invalidation remains in the
+validated provider response. Timer displays the
 observed chart candle interval (for example, `1m` becomes `1 minute`), not an expiry
 recommendation; the upload screen explains this. An unreadable interval stays
 `Not visible`. The trial screen shows the remaining lifetime allowance and
 explains that predictions may be wrong. The obsolete `CHART_UI_TEST_COPY`
 environment variable is ignored; it cannot enable a fabricated accuracy claim.
 See `GO_PLUS_FLOW.md` for the current menus and account setup journey.
+
+## YouTube strategies
+
+Use **Make Strategy** below **Set Up My Account** in the welcome menu or in the
+verified dashboard, or `/strategy`. The persistent Start Here card includes the
+same full-width row below Account Setup and refreshes through the existing
+welcome synchronization. A video link pasted from home, the asset
+browser or the chart uploader also opens the importer. Supported
+links include watch, youtu.be, Shorts, live and embed URLs. Only a validated
+YouTube video ID is passed to the caption library; arbitrary URLs are not fetched.
+
+The importer reads available captions, preferring the user's language, then
+English, then another available source language. It uses the pinned
+`youtube-transcript-api==1.2.4` dependency. Missing/disabled captions, private or
+unavailable videos, and retrieval failures offer a manual transcript fallback:
+paste text in multiple messages or send a UTF-8 `.txt`, then **Generate Strategy**.
+Transcripts are limited to 60,000 characters and never silently truncated.
+This reads captions; it does not watch video frames or transcribe audio.
+The library documents that YouTube can block cloud IPs, so automatic retrieval
+is not guaranteed on Railway. No proxy credentials or paid caption service are
+required or automatically enabled. See the
+[caption library documentation](https://github.com/jdepoix/youtube-transcript-api).
+
+The configured chart provider (`CHART_PROVIDER=gemini` or `openai`) extracts a
+bounded JSON rule set: prerequisites, BUY conditions, SELL conditions, conditions
+to avoid, and limitations. Every rule contains an excerpt validated against the
+transcript. Missing rules are not invented or mirrored from the other direction.
+Lessons that cannot supply a complete strategy assessable from a screenshot are
+rejected. These checks constrain output but do not prove the model interpreted
+the lesson or screenshot correctly; accuracy has not been measured.
+
+Users review the summary and tap **Use Strategy** to activate it and open the
+chart uploader. **Default Strategy** restores the original strategy. One active
+strategy per Telegram user is persisted in `users.chart_strategy` (an idempotent,
+additive JSONB migration applied by `db.connect`). It includes rules, source video
+ID, transcript hash, caption/pasted provenance and rule-format version. Full
+transcripts are not stored in Postgres or logs. Unfinished transcripts/previews
+live only in the existing FSM; leaving the flow or restarting discards them.
+Existing active strategies survive restarts and failed replacement imports.
+
+Custom chart requests snapshot that user's strategy into the upload session.
+Live asset analysis also loads that user's saved strategy for each request.
+Generated asset charts contain OHLC candles; if a rule requires an indicator
+that is not displayed, it cannot match. The strategy uploader accepts screenshots
+with the necessary indicators. Existing market and expiry navigation is preserved.
+They do not include the built-in level-reaction instructions. Model-generated
+rules and transcript content remain untrusted user data, never system instructions
+or executable Python. Signals require all prerequisites and all conditions for
+exactly one supported direction, no disqualifier, and two distinct observations.
+A missing indicator, unmet condition, conflicting BUY/SELL entries or unreadable
+chart produces an error/retry screen without consuming a signal. There is no
+fallback to an unrelated directional estimate. Results identify the strategy.
+
+Imports share the durable API request budget and concurrency gate; they never
+consume a delivered-signal allowance. Every model retry reserves another request.
+Screenshot signals retain the existing trial/verified quota and refund behavior.
+Back, `/start`, another import or a language change suppress late import results;
+stale preview buttons cannot activate a discarded strategy.
+
+Both provider adapters support text-only extraction and image analysis with
+separate schemas. OpenAI uses the existing Responses API, `store=false`, and
+[strict structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+No model selection, billing setting or API key is changed by the feature.
+
+Offline checks: `python -m unittest test_youtube_strategy test_chart_signals
+test_chart_openai test_chart_progress`, plus `python test_localization.py`,
+`python test_home_menu.py` and `python test_signal_flow.py`. Live YouTube retrieval,
+live provider interpretation and the PostgreSQL migration require environment
+integration checks; mocked tests do not establish those services' availability.
+
+## Existing chart flow
 The strategy requires readable price history, not a specific broker layout.
 It accepts candlestick/OHLC, Heikin Ashi, line, area and Renko chart inputs from
 any market, including OTC. Missing asset/timeframe labels do not by themselves

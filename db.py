@@ -41,6 +41,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS eligibility_confirmed_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_check_status TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_check_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS access_check_deposit NUMERIC(12,2);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS chart_strategy JSONB;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 -- Backfill for users verified before verified_at existed. set_verified wrote
 -- last_checked at the moment of verification, so it is the best record we have.
@@ -289,6 +291,15 @@ async def set_notifications(tg_id, enabled):
     # Shared opt-out governs both existing broadcasts and verification reminders.
     async with pool.acquire() as c:
         await c.execute('UPDATE users SET broadcast_opt_out=$2 WHERE tg_id=$1', tg_id, not enabled)
+
+
+async def set_chart_strategy(tg_id: int, strategy):
+    import youtube_strategy
+    value = youtube_strategy.decode_saved(strategy)
+    async with pool.acquire() as c:
+        await c.execute('''INSERT INTO users (tg_id, chart_strategy) VALUES ($1, $2::jsonb)
+            ON CONFLICT (tg_id) DO UPDATE SET chart_strategy=EXCLUDED.chart_strategy''',
+                        tg_id, json.dumps(value, ensure_ascii=False) if value is not None else None)
 
 async def set_language(tg_id: int, language: str):
     from localization import CODES

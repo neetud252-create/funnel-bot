@@ -25,6 +25,7 @@ def keyboard(user=None):
     return [
         [('📊 Get Signals' if verified else '🎯 Try Demo', 'cb:home:test', 'success')],
         [('🏠 My Dashboard' if verified else '🚀 Account Setup', 'cb:home:access', 'primary')],
+        [('📺 Make Strategy', 'cb:strategy:open', 'primary')],
         [('📖 How It Works', 'cb:flow:how', 'primary'), ('📢 Community', 'cb:flow:community', 'primary')],
         [('⭐ Reviews', 'cb:flow:reviews', 'danger'), ('💬 Support', 'cb:flow:support', 'danger')],
     ]

@@ -1048,11 +1048,12 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
         "Unlock Premium":   "primary",
         "Telegram channel": "primary",
         "YouTube channel":  "primary",
+        "Make Strategy":    "primary",
     }
     for label, want in WANT_STYLES.items():
         check("style: %-17s -> %s" % (label, want),
               styles.get(label) == want, repr(styles.get(label)))
-    check("all six main-menu buttons are primary (blue)",
+    check("all main-menu buttons are primary (blue)",
           all(s == "primary" for s in styles.values()), str(styles))
     check("no button is left green, red or unstyled",
           not any(s in ("success", "danger", None) for s in styles.values()),
@@ -1071,12 +1072,12 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     check("icon_custom_emoji_id is a declared Bot API field too",
           "icon_custom_emoji_id" in _IKB.model_fields)
 
-    check("the six required buttons are present, in order",
+    check("the seven required buttons are present, in order",
           [l for l in labels] == ["Get a signal", "Unlock Premium", "My level",
                                   "Support",
-                                  "Telegram channel", "YouTube channel"],
+                                  "Telegram channel", "YouTube channel", "Make Strategy"],
           str(labels))
-    check("the menu is now six rows", len(menu_kb) == 6, str(len(menu_kb)))
+    check("the menu is now seven rows", len(menu_kb) == 7, str(len(menu_kb)))
 
     # --- message-text custom emoji entities ---------------------------------
     # Not button icons: these live in the screen captions and only render
@@ -1428,11 +1429,11 @@ async def level_tests(bot_mod, fake_db, config, sleeps):
     built = bot_mod.build_kb(menu_kb)
     flat = [b for row in built.inline_keyboard for b in row]
     check("build_kb forwards style onto every rendered button",
-          [b.style for b in flat] == ["primary"] * 6,
+          [b.style for b in flat] == ["primary"] * 7,
           str([b.style for b in flat]))
     check("build_kb forwards the YouTube icon id",
           any(b.icon_custom_emoji_id == "5897969921182142023" for b in flat))
-    check("no button was dropped for a bad URL", len(flat) == 6, str(len(flat)))
+    check("no button was dropped for a bad URL", len(flat) == 7, str(len(flat)))
 
     _fresh_user(fake_db, tg_id)
     fake_db._users[tg_id]['uid'] = '123456789'

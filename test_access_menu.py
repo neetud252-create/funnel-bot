@@ -251,7 +251,7 @@ def main():
     check("the menu screen's keyboard is unchanged",
           [row[0][0] for row in config.SCREENS["menu"]["kb"]]
           == ["Get a signal", "Unlock Premium", "My level", "Support",
-              "Telegram channel", "YouTube channel"],
+              "Telegram channel", "YouTube channel", "Make Strategy"],
           str([row[0][0] for row in config.SCREENS["menu"]["kb"]]))
     check("the results screen's keyboard is unchanged",
           [row[0][0] for row in config.SCREENS["results"]["kb"]]

@@ -297,7 +297,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(strategy.confirmed_setup(result), chart_type in ('candlestick', 'ohlc'))
                     if chart_type not in ('candlestick', 'ohlc'):
                         self.assertEqual(result['setup'], 'directional_' + direction.lower())
-                        self.assertIn('(tentative)', flow.result_text(result, 'en'))
+                        self.assertNotIn('(tentative)', flow.result_text(result, 'en'))
         for chart_type in ('line', 'area', 'heikin_ashi', 'renko'):
             self.assertIn(chart_type, strategy.INSTRUCTIONS)
         self.assertIn('not a balance curve or an oscillator', strategy.INSTRUCTIONS)
@@ -359,14 +359,14 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['direction'], 'BUY')
             self.assertEqual(result['setup'], 'directional_buy')
             self.assertEqual(result['checks'], checks)
-            self.assertIn('(tentative)', flow.result_text(result, 'en'))
+            self.assertNotIn('(tentative)', flow.result_text(result, 'en'))
         unreadable = dict(VALID, direction=None, setup='unreadable', invalidation=None,
                           checks=dict(VALID['checks'], chart_readable=False))
         with self.assertRaisesRegex(api.AnalysisError, '^chart$'):
             api.parse_response(response(unreadable))
         for language in localization.CODES[1:]:
             rendered = flow.result_text(dict(VALID, setup='directional_buy'), language)
-            self.assertIn(localization.translate_parts('(tentative)', language), rendered)
+            self.assertNotIn(localization.translate_parts('(tentative)', language), rendered)
             self.assertNotIn('(tentative)', rendered)
             self.assertNotIn('WAIT', rendered)
         self.assertNotIn('WAIT', json.dumps(api.RESULT_SCHEMA))
@@ -442,7 +442,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         rendered = flow.result_text(VALID, 'en')
         self.assertNotIn('(tentative)', rendered)
         self.assertIn('- <b>Timer:</b> 1 minute', rendered)
-        self.assertNotIn(VALID['reason'], rendered)
+        self.assertIn(VALID['reason'], rendered)
         self.assertNotIn(VALID['invalidation'], rendered)
         for value, expected in (('M1', '1 minute'), ('5m', '5 minutes'),
                                 ('S30', '30 seconds'), ('1 hour', '1 hour'),
@@ -659,7 +659,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         trial.consume.assert_awaited_once_with(None, 'trial-token')
         text = self.render.await_args.args[3]
         self.assertIn('BUY', text)
-        self.assertIn('(tentative)', text)
+        self.assertNotIn('(tentative)', text)
         self.assertNotIn('WAIT', text)
 
     async def test_demo_result_gates_new_analysis_and_expired_reservation_cannot_send(self):
@@ -779,7 +779,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         api.analyse.side_effect = api.AnalysisError('response', 'max_output_tokens')
         await flow.receive(message(), self.bot, self.state, self.render)
         self.assertEqual(self.render.await_args.args[3], flow.MESSAGES['service'])
-        self.assertEqual([b[1] for row in self.render.await_args.args[4] for b in row], ['cb:chart:upload', 'cb:home:back'])
+        self.assertEqual([b[1] for row in self.render.await_args.args[4] for b in row], ['cb:strategy:upload', 'cb:home:back'])
         trial.consume.assert_not_awaited()
         trial.release.assert_awaited_once_with(None, 'trial-token')
         self.assertNotIn('clearer', self.render.await_args.args[3])

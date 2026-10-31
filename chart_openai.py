@@ -4,24 +4,27 @@ import chart_analysis as api
 
 def request_body(gemini_body, model):
     parts = gemini_body['contents'][0]['parts']
-    picture = parts[1]['inlineData']
+    content = []
+    for part in parts:
+        if 'text' in part:
+            content.append({'type': 'input_text', 'text': part['text']})
+        else:
+            picture = part['inlineData']
+            content.append({'type': 'input_image', 'detail': 'high',
+                            'image_url': 'data:' + picture['mimeType'] + ';base64,' + picture['data']})
     return {
         'model': model,
         'store': False,
         'instructions': gemini_body['systemInstruction']['parts'][0]['text'],
-        'input': [{'role': 'user', 'content': [
-            {'type': 'input_text', 'text': parts[0]['text']},
-            {'type': 'input_image', 'detail': 'high',
-             'image_url': 'data:' + picture['mimeType'] + ';base64,' + picture['data']},
-        ]}],
+        'input': [{'role': 'user', 'content': content}],
         'reasoning': {'effort': 'low'},
         'max_output_tokens': api.MAX_OUTPUT_TOKENS,
         'text': {'format': {'type': 'json_schema', 'name': 'chart_analysis',
-                            'strict': True, 'schema': api.RESULT_SCHEMA}},
+                            'strict': True, 'schema': gemini_body['generationConfig']['responseJsonSchema']}},
     }
 
 
-def parse_response(payload):
+def parse_response(payload, *, validator=None):
     detail = 'envelope'
     try:
         if not isinstance(payload, dict):
@@ -50,6 +53,6 @@ def parse_response(payload):
             raise ValueError()
         detail = 'json'
         result = api._result_json(part['text'])
-        return api.validate_result(result)
+        return (validator or api.validate_result)(result)
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise api.AnalysisError('response', detail) from exc

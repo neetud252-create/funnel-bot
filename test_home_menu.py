@@ -12,18 +12,23 @@ async def main():
     bot_mod = H._load_bot()
     import home_menu
     import config
+    import start_here
 
     rows = bot_mod.build_kb(home_menu.keyboard()).inline_keyboard
-    assert [len(row) for row in rows] == [1, 1, 2, 2, 1, 1]
+    assert [len(row) for row in rows] == [1, 1, 1, 2, 2, 1, 1]
     assert [b.callback_data for row in rows for b in row] == [
-        'home:test', 'home:access', 'flow:how', 'flow:community',
+        'home:test', 'home:access', 'strategy:open', 'flow:how', 'flow:community',
         'flow:reviews', 'flow:support', 'flow:tools', 'home:language']
     assert [b.style for row in rows for b in row] == [
-        'success', 'primary', 'primary', 'primary', 'danger', 'danger', 'primary', 'danger']
+        'success', 'primary', 'primary', 'primary', 'primary', 'danger', 'danger', 'primary', 'danger']
     assert [[b.text for b in row] for row in rows] == [
-        ['🎯 Try Demo'], ['🚀 Set Up My Account'],
+        ['🎯 Try Demo'], ['🚀 Set Up My Account'], ['📺 Make Strategy'],
         ['📖 How It Works', '📢 Community'], ['⭐ Reviews', '💬 Support'],
         ['🧰 Tools & FAQ'], ['🌐 Language']]
+    pinned_rows = bot_mod.build_kb(start_here.keyboard()).inline_keyboard
+    assert [len(row) for row in pinned_rows[:3]] == [1, 1, 1]
+    assert [row[0].callback_data for row in pinned_rows[:3]] == [
+        'home:test', 'home:access', 'strategy:open']
     for progress in ({'uid': '123456789'}, {'setup_stage': 'requirements'}):
         assert home_menu.keyboard(progress)[1][0][0] == '🚀 Continue Setup'
     assert home_menu.keyboard({'verified': True})[:2] == [

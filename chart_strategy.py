@@ -23,7 +23,6 @@ SETUPS = {
 }
 CHECKS = ('chart_readable', 'closed_candle', 'level_established',
           'level_reaction', 'follow_through', 'conflicting_evidence')
-TENTATIVE_NOTE = 'Tentative bias — confirmation is incomplete or the evidence is mixed.'
 
 INSTRUCTIONS = """You analyse uploaded financial price charts for Pocket IQ using
 the owner's LEVEL REACTION strategy, version level-reaction-v3-chart-types.
@@ -166,7 +165,9 @@ describe actual observations, not whether you remembered to do this checklist.
 reason: at most 55 words naming the directional evidence and any missing
 confirmation. invalidation: one short visible condition negating the bias;
 null only for invalid input.
-Return plain text in prose fields, no HTML, links or markdown. Never claim
+Return plain text in prose fields, no HTML, links or markdown. Do not add a
+'Tentative bias' line or '(tentative)' label. Describe specific missing
+confirmation directly, without these boilerplate labels. Never claim
 'sure shot', guaranteed wins, accuracy/confidence percentages, profit targets,
 stake size, leverage, expiry, recovery trades or multiple trades after a loss.
 No fixed candle-size multiplier, wick ratio or backtested win rate was provided;

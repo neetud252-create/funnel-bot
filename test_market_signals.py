@@ -77,16 +77,35 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.render.await_args.kwargs['raise_on_error'])
         self.assertFalse(flow.chart_signals._inflight)
 
-    async def test_incomplete_setup_retains_strategy_direction_with_tentative_label(self):
+    async def test_incomplete_setup_retains_direction_without_bias_boilerplate(self):
         for direction, setup in (('BUY', 'directional_buy'), ('SELL', 'directional_sell')):
             flow.api.analyse.return_value = dict(VALID, direction=direction, setup=setup,
                                                 checks=dict(VALID['checks'], follow_through=False))
             await self.analyse()
             self.assertNotIn('WAIT', self.render.await_args.args[3])
             self.assertIn(direction, self.render.await_args.args[3])
-            self.assertIn('Tentative bias', self.render.await_args.args[3])
+            self.assertNotIn('Tentative bias', self.render.await_args.args[3])
             self.assertEqual(self.render.await_args.kwargs['companion_key'],
                              'signal_buy' if direction=='BUY' else 'signal_sell')
+
+    async def test_live_asset_analysis_applies_saved_user_strategy(self):
+        from test_youtube_strategy import SAVED, SIGNAL
+        self.db._users[11] = dict(self.db._fresh_row(), chart_strategy=SAVED)
+        flow.api.analyse.return_value = dict(SIGNAL, strategy_name=SAVED['rules']['name'])
+        await self.analyse()
+        self.assertEqual(flow.api.analyse.await_args.kwargs['strategy'], SAVED)
+        self.assertIn(SAVED['rules']['name'], self.render.await_args.args[3])
+        flow.trial.consume.assert_awaited_once_with(None, 'slot')
+
+    async def test_unmet_custom_strategy_does_not_charge_or_fall_back(self):
+        from test_youtube_strategy import SAVED
+        self.db._users[11] = dict(self.db._fresh_row(), chart_strategy=SAVED)
+        flow.api.analyse.side_effect = flow.api.AnalysisError('strategy_match')
+        await self.analyse()
+        flow.api.analyse.assert_awaited_once()
+        flow.trial.consume.assert_not_awaited()
+        flow.trial.release.assert_awaited_once_with(None, 'slot', delivery_rejected=False)
+        self.assertEqual(self.render.await_args.args[3], flow.chart_signals.MESSAGES['strategy_match'])
 
     async def test_demo_result_requires_full_access_and_old_button_cannot_repeat(self):
         flow.trial.status.return_value = (False, 1)

@@ -19,6 +19,7 @@ import localization
 import market_chart
 import market_data as data
 import market_catalog as catalog
+import youtube_strategy
 
 PAGE_SIZE = 6
 EXPIRIES = tuple(range(1, 11))
@@ -237,19 +238,23 @@ async def open_picker(bot, tg_id, state, render):
                   [('« Back', 'cb:home:back', 'danger')]], screen_key='market_type')
 
 
-def result_text(snapshot, result, expiry=1, language='en', *, expiry_unit='m'):
-    # The strategy's validated direction is retained even for a tentative bias.
-    # Invalid/unreadable input still fails; never manufacture a direction.
-    confirmed = chart_strategy.confirmed_setup(result)
+def result_text(snapshot, result, expiry=1, language='en', *, expiry_unit='m', strategy=None):
+    # Keep the validated direction and concrete reason without generic bias labels.
+    # Custom strategies must still meet their own complete entry checklist.
     direction = result.get('direction')
-    if not chart_strategy.supports_signal(result) or not valid_expiry(expiry, expiry_unit):
+    if strategy is not None:
+        youtube_strategy.validate_signal({key: result[key] for key in youtube_strategy.signal_schema(strategy)['required']
+                                          if key in result}, strategy)
+    elif not chart_strategy.supports_signal(result):
+        raise api.AnalysisError('response')
+    if not valid_expiry(expiry, expiry_unit):
         raise api.AnalysisError('response')
     tr = lambda text: localization.translate_parts(text, language)
-    qualification = '' if confirmed else '\n<i>' + tr(chart_strategy.TENTATIVE_NOTE) + '</i>'
+    qualification = ('\n' + tr('Strategy: {name}').format(name=html.escape(strategy['rules']['name']))) if strategy else ''
     reason = result.get('reason')
     if not isinstance(reason, str) or not reason.strip():
         raise api.AnalysisError('response')
-    reason = ' '.join(reason.split())
+    reason = ' '.join(chart_signals.reason_text(result).split())
     if len(reason) > 240:
         reason = reason[:237].rsplit(' ', 1)[0].rstrip('.,;:') + '…'
     entry = catalog.find(catalog.entries((snapshot.asset,)), snapshot.asset.key)
@@ -310,6 +315,9 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, 
             await progress.reconnecting()
 
     try:
+        saved_strategy = await youtube_strategy.get_active(tg_id)
+        if not await active():
+            return
         entry = catalog.find(catalog.entries(await data.feed().assets()), asset_key)
         if not await active():
             return
@@ -348,13 +356,14 @@ async def _analyse(cb, bot, state, render, asset_key, *, period=None, expiry=1, 
                        f'not proof that an entry is confirmed or an optimal expiry. '
                        f'All candles shown are completed OHLC bars, sourced from {snapshot.source}. '
                        f'Latest close: {snapshot.candles[-1].close:.8g}; UTC close time: {snapshot.closed_at}.')
-            result = await api.analyse(png, language, context, before_retry=retry)
+            options = {'strategy': saved_strategy} if saved_strategy is not None else {}
+            result = await api.analyse(png, language, context, before_retry=retry, **options)
         finally:
             await progress.stop()
         if not await active():
             return
         snapshot.require_fresh()
-        caption = result_text(snapshot, result, expiry, language, expiry_unit=expiry_unit)
+        caption = result_text(snapshot, result, expiry, language, expiry_unit=expiry_unit, strategy=saved_strategy)
         if not await trial.consume(db.pool, token):
             if not await allowed(tg_id, bot, render):
                 return

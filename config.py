@@ -762,7 +762,8 @@ SCREENS = {
                [("My level", "cb:menu:level", "primary", E_MENU_LEVEL)],
                [("Support", "url:" + SUPPORT_URL, "primary", E_MENU_SUPPORT)],
                [("Telegram channel", "url:" + CHANNEL_URL, "primary", E_MENU_CHANNEL)],
-               [("YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)]],
+               [("YouTube channel", "url:" + YOUTUBE_URL, "primary", E_YOUTUBE)],
+               [("Make Strategy", "cb:strategy:open", "primary", E_YOUTUBE)]],
     },
     # Trading-mode picker, opened from "Get a signal" on the menu. Both modes are
     # still placeholders - see mode_action in bot.py.

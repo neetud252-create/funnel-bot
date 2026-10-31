@@ -15,6 +15,7 @@ import chart_trial as trial
 import chart_progress
 import config
 import localization
+import youtube_strategy
 
 INTRO = ('📸 <b>Try Pocket IQ chart analysis</b>\n\n'
          'Demo signals remaining: <b>{left} of 1</b>. No deposit is needed to try.\n\n'
@@ -39,14 +40,15 @@ MESSAGES = {
     'cooldown': 'Please wait 30 seconds between chart requests.',
     'private': 'Open Test Signals in a private chat with the bot.',
     'working': '⏳ Analysing your chart…',
+    'strategy_match': 'This chart does not meet your strategy rules. Send another chart with the required indicators and confirmation.',
 }
 RESULT = ('🔲 AI Trading Signal Result\n\n'
           '💗 <b>Market Analysis:</b>\n'
           '- 📈 <b>Trend:</b> {trend}\n- 🪙 <b>Momentum:</b> {momentum}\n\n'
           '🎯 <b>Recommendation:</b>\n'
           '- <b>Prediction:</b> {direction}\n'
-          '- <b>Timer:</b> {timer}')
-EXTRA = ('Not visible', '(tentative)', '{count} minute', '{count} minutes',
+          '- <b>Timer:</b> {timer}\n\n<b>Reason:</b> {reason}')
+EXTRA = ('Not visible', '{count} minute', '{count} minutes',
          '{count} second', '{count} seconds', '{count} hour', '{count} hours',
          '{count} day', '{count} days')
 DAILY_STATUS = ('\n\n⚡ <b>Signals</b>\n'
@@ -58,7 +60,8 @@ BACK = [[('🔙 Back', 'cb:home:back', 'success')]]
 VERIFIED_BACK = [[('🔙 Back', 'cb:home:access', 'success')]]
 HELP = [[('📖 Screenshot Guide', 'cb:flow:screenshot'), ('💬 Support', 'cb:flow:support')]]
 UPLOAD = [[('📸 Upload Chart', 'cb:chart:upload', 'primary')], *HELP, *BACK]
-NEW_ANALYSIS = [[('🔄 New Analysis', 'cb:chart:upload', 'primary')], *BACK]
+NEW_ANALYSIS = [[('🔄 New Analysis', 'cb:strategy:upload', 'primary')], *BACK]
+STRATEGY_BUTTON = [('📺 Make Strategy', 'cb:strategy:open', 'primary')]
 ACCESS = [[('🚀 Get Full Access', 'cb:home:access', 'success')], *HELP, *BACK]
 _inflight = set()
 
@@ -104,9 +107,20 @@ async def open_screen(cb, bot, state, render, *, upload=False):
     if not api.configured():
         await render(bot, cb.from_user.id, None, MESSAGES['configuration'], back, screen_key='chart_unavailable')
         return
+    import strategy_flow
+    try:
+        saved = await youtube_strategy.get_active(cb.from_user.id)
+    except api.AnalysisError:
+        await render(bot, cb.from_user.id, None, strategy_flow.MESSAGES['strategy_saved'],
+                     strategy_flow.keyboard(), screen_key='chart_unavailable')
+        return
     await state.set_state(Chart.waiting_image.state)
-    await state.update_data(chart_session=secrets.token_hex(12), chart_verified=verified)
-    await render(bot, cb.from_user.id, None, PROMPT + usage, HELP + back, screen_key='chart_upload')
+    await state.update_data(chart_session=secrets.token_hex(12), chart_verified=verified, chart_strategy=saved)
+    language = await localization.language_for(cb.from_user.id)
+    label = ('\n\n' + localization.translate_parts('Strategy: {name}', language).format(
+        name=html.escape(saved['rules']['name']))) if saved else ''
+    await render(bot, cb.from_user.id, None, localization.translate_parts(PROMPT, language) + label + usage,
+                 [STRATEGY_BUTTON] + HELP + back, screen_key='chart_upload')
 
 
 def timer_text(timeframe, language):
@@ -129,18 +143,32 @@ def timer_text(timeframe, language):
     return localization.translate_parts(template, language).format(count=number)
 
 
+def reason_text(result):
+    """Remove retired labels while retaining the specific supporting evidence."""
+    reason = result['reason']
+    boilerplate = 'Tentative bias — confirmation is incomplete or the evidence is mixed.'
+    for code in localization.CODES:
+        reason = reason.replace(localization.translate_parts(boilerplate, code), '').replace(
+            localization.translate_parts('(tentative)', code), '')
+    reason = re.sub(r'(?im)^\s*tentative bias\s*[:—–-]?\s*', '', reason).strip()
+    if not reason:
+        reason = ' '.join(result['evidence'])
+    return reason
+
+
 def result_text(result, language):
-    # Translate labels BEFORE interpolation, so the model's explanation cannot
-    # accidentally match/alter a built-in phrase. Escape every dynamic field.
+    # Translate labels before interpolation and escape every dynamic field.
     translate = lambda s: localization.translate_parts(s, language)
     direction = result['direction']
     if direction not in ('BUY', 'SELL'):
         raise api.AnalysisError('response')
-    if not chart_strategy.confirmed_setup(result):
-        direction += ' ' + translate('(tentative)')
-    return translate(RESULT).format(direction=direction,
+    reason = reason_text(result)
+    text = translate(RESULT).format(direction=direction,
         trend=html.escape(result['trend']), momentum=html.escape(result['momentum']),
-        timer=timer_text(result['timeframe'], language))
+        timer=timer_text(result['timeframe'], language), reason=html.escape(reason))
+    if result.get('strategy_name'):
+        text += '\n' + translate('Strategy: {name}').format(name=html.escape(result['strategy_name']))
+    return text
 
 
 async def receive(m, bot, state, render):
@@ -217,7 +245,9 @@ async def receive(m, bot, state, render):
         progress = chart_progress.Progress(bot, tg_id, loading, language, active)
         progress.start()
         try:
-            result = await api.analyse(data, language, m.caption or '', before_retry=before_retry)
+            saved = (await state.get_data()).get('chart_strategy')
+            options = {'strategy': saved} if saved is not None else {}
+            result = await api.analyse(data, language, m.caption or '', before_retry=before_retry, **options)
         finally:
             # Await cancellation before any result/error render, so an old edit
             # cannot overwrite a finished result or a replacement upload session.
@@ -280,6 +310,8 @@ async def receive(m, bot, state, render):
 
 
 def install(dp, render):
+    import strategy_flow
+    strategy_flow.install(dp, render)
     async def handle(m, bot, state):
         await receive(m, bot, state, render)
     dp.message.register(handle, Chart.waiting_image)

@@ -177,7 +177,7 @@ def _result_json(text):
     return json.loads(text, object_pairs_hook=unique)
 
 
-def parse_response(payload):
+def parse_response(payload, *, validator=None):
     detail = 'envelope'
     try:
         if not isinstance(payload, dict):
@@ -218,7 +218,7 @@ def parse_response(payload):
             raise ValueError()
         detail = 'json'
         result = _result_json(''.join(text_parts))
-        return validate_result(result)
+        return (validator or validate_result)(result)
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise AnalysisError('response', detail) from exc
 
@@ -303,14 +303,15 @@ def retry_delay(attempt, response=None):
     return delay
 
 
-async def request_response(data, language, context='', *, transport=None, before_retry=None):
+async def request_response(data, language, context='', *, transport=None, before_retry=None, body=None):
     """Retry transient failures within one deadline and the durable request budget."""
     selected = provider()
     key_name = {'gemini': 'GEMINI_API_KEY', 'openai': 'OPENAI_API_KEY'}.get(selected)
     key = os.getenv(key_name, '').strip() if key_name else ''
     if not key:
         raise AnalysisError('configuration')
-    body = request_body(data, language, context)
+    if body is None:
+        body = request_body(data, language, context)
     url = API_URL
     headers = {'x-goog-api-key': key}
     if selected == 'openai':
@@ -382,7 +383,12 @@ def usage_counts(payload, selected):
     return [value if type(value) is int else None for value in values]
 
 
-async def analyse(data, language, context='', *, transport=None, before_retry=None):
+async def analyse(data, language, context='', *, transport=None, before_retry=None, strategy=None):
+    if strategy is not None:
+        import youtube_strategy
+        body = youtube_strategy.chart_request(data, language, context, strategy)
+        return await structured_request(body, lambda result: youtube_strategy.validate_signal(result, strategy),
+                                        transport=transport, before_retry=before_retry)
     payload = await request_response(data, language, context, transport=transport, before_retry=before_retry)
     try:
         if provider() == 'openai':
@@ -394,6 +400,15 @@ async def analyse(data, language, context='', *, transport=None, before_retry=No
         logging.warning('Chart response rejected: provider=%s code=%s detail=%s output_tokens=%s thinking_tokens=%s',
                         provider(), str(exc), exc.detail, *usage_counts(payload, provider()))
         raise
+
+
+async def structured_request(body, validator, *, transport=None, before_retry=None):
+    """Use the configured provider and the same timeout, retries and error handling."""
+    payload = await request_response(None, 'en', body=body, transport=transport, before_retry=before_retry)
+    if provider() == 'openai':
+        import chart_openai
+        return chart_openai.parse_response(payload, validator=validator)
+    return parse_response(payload, validator=validator)
 
 
 # Durable request budgets survive deploys. Row 0 is the global daily budget;

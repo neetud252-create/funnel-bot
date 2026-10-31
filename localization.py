@@ -89,6 +89,7 @@ def message_sources():
     import config
     import home_menu
     import chart_signals
+    import strategy_flow
     import journey
     import start_here
     import market_signals
@@ -97,6 +98,7 @@ def message_sources():
     result = list(EXTRA_MESSAGES) + [home_menu.TEXT, home_menu.SHEET_CAPTION,
                                        home_menu.SHEET_UNAVAILABLE] + list(home_menu.PENDING.values())
     result.extend(chart_signals.SOURCES)
+    result.extend(strategy_flow.SOURCES)
     result.extend(journey.SOURCES)
     result.extend(elena_copy.SOURCES)
     result.extend((start_here.TEXT, verification_reminders.TEXT, *market_signals.SOURCES))

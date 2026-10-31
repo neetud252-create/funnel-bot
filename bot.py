@@ -1157,7 +1157,7 @@ async def home_action(cb: CallbackQuery, bot: Bot, state: FSMContext):
         return
     if action == 'language':
         await cb.answer()
-        if await state.get_state() in (chart_signals.Chart.waiting_image.state, market_signals.Market.browsing.state):
+        if (await state.get_state() or '').startswith(('Chart:', 'Market:', 'Strategy:')):
             await state.clear()
         language = await localization.language_for(cb.from_user.id)
         await render(bot, cb.from_user.id, None, localization.SELECTOR_TEXT,
@@ -1445,6 +1445,8 @@ async def _open_registration(bot, tg_id, state):
 
 # Must precede the retired trading callbacks below. Existing messages migrate
 # into the catalogue and cannot invoke screenshot uploads or random signals.
+import strategy_flow
+strategy_flow.install(dp, render)
 market_signals.install(dp, render)
 
 

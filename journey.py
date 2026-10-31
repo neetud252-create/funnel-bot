@@ -45,6 +45,7 @@ def back(target='home'):
 def dashboard_keyboard():
     return [
         [button('📊 Get Signals', 'cb:menu:signal', 'success')],
+        [button('📺 Make Strategy', 'cb:strategy:open', 'primary')],
         [cb('👤 My Access & Usage', 'usage'), cb('📖 Guide', 'how')],
         [cb('🧰 Trading Tools', 'tools'), cb('💬 Support', 'support')],
         [cb('📢 Community', 'community'), cb('⚙️ Settings', 'settings')],
